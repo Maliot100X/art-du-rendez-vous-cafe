@@ -1,0 +1,595 @@
+{
+  "currency": "EUR",
+  "source": "Owner's printed menu card (photo, Nov 2026); transcribed + zoom-checked. Items with uncertain:true need owner confirmation.",
+  "sizeLabels": {
+    "verre": {
+      "fr": "Verre",
+      "en": "Glass"
+    },
+    "bouteille": {
+      "fr": "Bouteille",
+      "en": "Bottle"
+    }
+  },
+  "categories": [
+    {
+      "id": "chaudes",
+      "title": {
+        "fr": "Boissons chaudes",
+        "en": "Hot drinks"
+      },
+      "items": [
+        {
+          "id": "cafe",
+          "name": {
+            "fr": "Café",
+            "en": "Coffee"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "expresso",
+          "name": {
+            "fr": "Expresso",
+            "en": "Espresso"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "the",
+          "name": {
+            "fr": "Thé",
+            "en": "Tea"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "deca",
+          "name": {
+            "fr": "Déca",
+            "en": "Decaf"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "cappuccino-chantilly",
+          "name": {
+            "fr": "Cappuccino Chantilly",
+            "en": "Cappuccino with whipped cream"
+          },
+          "price": 3.5
+        },
+        {
+          "id": "chocolat-chaud",
+          "name": {
+            "fr": "Chocolat chaud",
+            "en": "Hot chocolate"
+          },
+          "price": 3.5
+        },
+        {
+          "id": "cafe-latte",
+          "name": {
+            "fr": "Café latte",
+            "en": "Caffè latte"
+          },
+          "price": 4.5
+        },
+        {
+          "id": "double-expresso",
+          "name": {
+            "fr": "Double expresso",
+            "en": "Double espresso"
+          },
+          "price": 4.5
+        },
+        {
+          "id": "irish-coffee",
+          "name": {
+            "fr": "Irish coffee",
+            "en": "Irish coffee"
+          },
+          "price": 10.0
+        },
+        {
+          "id": "supe-pule",
+          "name": {
+            "fr": "Supe Pule",
+            "en": "Supë pule (chicken soup?)"
+          },
+          "price": 4.0,
+          "uncertain": true,
+          "note": "Printed 'SUPE PULE'; zoomed photo reads 4.00 €. Likely Albanian 'supë pule' = chicken soup; confirm with owner."
+        },
+        {
+          "id": "supe-doma",
+          "name": {
+            "fr": "Supe Doma",
+            "en": "Supë domate (tomato soup?)"
+          },
+          "price": 4.0,
+          "uncertain": true,
+          "note": "Printed 'SUPE DOMA'; zoomed photo reads 4.00 €. Likely Albanian 'supë domate' = tomato soup; confirm with owner."
+        }
+      ]
+    },
+    {
+      "id": "froides",
+      "title": {
+        "fr": "Boissons froides",
+        "en": "Cold drinks"
+      },
+      "items": [
+        {
+          "id": "eau-plate",
+          "name": {
+            "fr": "Eau plate",
+            "en": "Still water"
+          },
+          "price": 2.5
+        },
+        {
+          "id": "eau-petillante",
+          "name": {
+            "fr": "Eau pétillante",
+            "en": "Sparkling water"
+          },
+          "price": 2.5
+        },
+        {
+          "id": "looza",
+          "name": {
+            "fr": "Looza (pêche, fraise…)",
+            "en": "Looza juice (peach, strawberry…)"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "val-tonic",
+          "name": {
+            "fr": "Val Tonic",
+            "en": "Val Tonic"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "val-agrumes",
+          "name": {
+            "fr": "Val Agrumes",
+            "en": "Val Citrus"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "val-orange",
+          "name": {
+            "fr": "Val Orange",
+            "en": "Val Orange"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "pepsi",
+          "name": {
+            "fr": "Pepsi",
+            "en": "Pepsi"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "pepsi-max",
+          "name": {
+            "fr": "Pepsi Max 0",
+            "en": "Pepsi Max zero"
+          },
+          "price": 3.0
+        },
+        {
+          "id": "red-bull",
+          "name": {
+            "fr": "Red Bull",
+            "en": "Red Bull"
+          },
+          "price": 4.0
+        }
+      ]
+    },
+    {
+      "id": "aperitifs",
+      "title": {
+        "fr": "Apéritifs",
+        "en": "Aperitifs"
+      },
+      "items": [
+        {
+          "id": "porto",
+          "name": {
+            "fr": "Porto (blanc/rouge)",
+            "en": "Port (white/red)"
+          },
+          "price": 5.0
+        },
+        {
+          "id": "martini",
+          "name": {
+            "fr": "Martini (blanc/rouge)",
+            "en": "Martini (white/red)"
+          },
+          "price": 5.5
+        },
+        {
+          "id": "gancia",
+          "name": {
+            "fr": "Gancia",
+            "en": "Gancia"
+          },
+          "price": 5.5
+        },
+        {
+          "id": "pineau",
+          "name": {
+            "fr": "Pineau des Charentes",
+            "en": "Pineau des Charentes"
+          },
+          "price": 5.5
+        },
+        {
+          "id": "kir",
+          "name": {
+            "fr": "Kir",
+            "en": "Kir"
+          },
+          "price": 5.5
+        },
+        {
+          "id": "kir-royal",
+          "name": {
+            "fr": "Kir Royal",
+            "en": "Kir Royal"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "campari",
+          "name": {
+            "fr": "Campari",
+            "en": "Campari"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "aperol-spritz",
+          "name": {
+            "fr": "Aperol Spritz",
+            "en": "Aperol Spritz"
+          },
+          "price": 9.0
+        }
+      ]
+    },
+    {
+      "id": "bieres",
+      "title": {
+        "fr": "Bières",
+        "en": "Beers"
+      },
+      "items": [
+        {
+          "id": "primus-25",
+          "name": {
+            "fr": "Primus Pils 25 cl",
+            "en": "Primus Pils 25 cl"
+          },
+          "price": 3.5
+        },
+        {
+          "id": "primus-33",
+          "name": {
+            "fr": "Primus Pils 33 cl",
+            "en": "Primus Pils 33 cl"
+          },
+          "price": 4.3,
+          "uncertain": true,
+          "note": "Glare on photo; read as 4.30 €."
+        },
+        {
+          "id": "primus-50",
+          "name": {
+            "fr": "Primus Pils 50 cl",
+            "en": "Primus Pils 50 cl"
+          },
+          "price": 5.3,
+          "uncertain": true,
+          "note": "Glare on photo; first digit unreadable (5.30 or 6.30?)."
+        },
+        {
+          "id": "tango",
+          "name": {
+            "fr": "Tango",
+            "en": "Tango"
+          },
+          "price": 5.5,
+          "uncertain": true,
+          "note": "Glare on photo; first digit unreadable."
+        },
+        {
+          "id": "carlsberg",
+          "name": {
+            "fr": "Carlsberg",
+            "en": "Carlsberg"
+          },
+          "price": 4.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "carlsberg-0",
+          "name": {
+            "fr": "Carlsberg 0%",
+            "en": "Carlsberg alcohol-free"
+          },
+          "price": 4.0,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "super-8-blanche",
+          "name": {
+            "fr": "Blanche Super 8",
+            "en": "Super 8 white beer"
+          },
+          "price": 3.9,
+          "uncertain": true,
+          "note": "Printed 'BLANCHE SUPER B'; 3.90 € on zoom; confirm."
+        },
+        {
+          "id": "tongerlo",
+          "name": {
+            "fr": "Tongerlo (blonde/brune)",
+            "en": "Tongerlo (blond/brown)"
+          },
+          "price": 4.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "mystic-kriek",
+          "name": {
+            "fr": "Mystic Kriek",
+            "en": "Mystic Kriek"
+          },
+          "price": 4.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "chimay-trio",
+          "name": {
+            "fr": "Chimay (blonde/blanche/brune)",
+            "en": "Chimay (blond/white/brown)"
+          },
+          "price": 4.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "duvel",
+          "name": {
+            "fr": "Duvel",
+            "en": "Duvel"
+          },
+          "price": 4.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "chimay",
+          "name": {
+            "fr": "Chimay",
+            "en": "Chimay"
+          },
+          "price": 5.5,
+          "uncertain": true,
+          "note": "Second Chimay line on the card (probably Chimay Bleue/Grande Réserve); confirm."
+        },
+        {
+          "id": "westmalle",
+          "name": {
+            "fr": "Westmalle",
+            "en": "Westmalle"
+          },
+          "price": 5.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "corona",
+          "name": {
+            "fr": "Corona",
+            "en": "Corona"
+          },
+          "price": 6.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        },
+        {
+          "id": "orval",
+          "name": {
+            "fr": "Orval",
+            "en": "Orval"
+          },
+          "price": 6.5,
+          "uncertain": true,
+          "note": "Readable on zoom; confirm."
+        }
+      ]
+    },
+    {
+      "id": "vins",
+      "title": {
+        "fr": "Vins",
+        "en": "Wines"
+      },
+      "items": [
+        {
+          "id": "vin-rouge",
+          "name": {
+            "fr": "Vin rouge",
+            "en": "Red wine"
+          },
+          "price": null,
+          "prices": {
+            "verre": 4.0,
+            "bouteille": 20.0
+          }
+        },
+        {
+          "id": "vin-blanc",
+          "name": {
+            "fr": "Vin blanc",
+            "en": "White wine"
+          },
+          "price": null,
+          "prices": {
+            "verre": 4.0,
+            "bouteille": 20.0
+          }
+        },
+        {
+          "id": "vin-rose",
+          "name": {
+            "fr": "Vin rosé",
+            "en": "Rosé wine"
+          },
+          "price": null,
+          "prices": {
+            "verre": 4.0,
+            "bouteille": 20.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "liqueurs",
+      "title": {
+        "fr": "Liqueurs",
+        "en": "Liqueurs"
+      },
+      "items": [
+        {
+          "id": "ricard",
+          "name": {
+            "fr": "Ricard",
+            "en": "Ricard"
+          },
+          "price": 6.5
+        },
+        {
+          "id": "batida",
+          "name": {
+            "fr": "Batida",
+            "en": "Batida"
+          },
+          "price": 6.5
+        },
+        {
+          "id": "amaretto",
+          "name": {
+            "fr": "Amaretto",
+            "en": "Amaretto"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "pisang",
+          "name": {
+            "fr": "Pisang",
+            "en": "Pisang"
+          },
+          "price": 6.5
+        },
+        {
+          "id": "baileys",
+          "name": {
+            "fr": "Baileys",
+            "en": "Baileys"
+          },
+          "price": 6.5
+        },
+        {
+          "id": "bacardi",
+          "name": {
+            "fr": "Bacardi",
+            "en": "Bacardi"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "cointreau",
+          "name": {
+            "fr": "Cointreau",
+            "en": "Cointreau"
+          },
+          "price": 7.5
+        }
+      ]
+    },
+    {
+      "id": "alcools",
+      "title": {
+        "fr": "Alcools",
+        "en": "Spirits"
+      },
+      "items": [
+        {
+          "id": "vodka",
+          "name": {
+            "fr": "Vodka",
+            "en": "Vodka"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "gin",
+          "name": {
+            "fr": "Gin",
+            "en": "Gin"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "rhum",
+          "name": {
+            "fr": "Rhum",
+            "en": "Rum"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "tequila",
+          "name": {
+            "fr": "Tequila",
+            "en": "Tequila"
+          },
+          "price": 7.0
+        },
+        {
+          "id": "whisky",
+          "name": {
+            "fr": "Whisky",
+            "en": "Whisky"
+          },
+          "price": 8.0
+        },
+        {
+          "id": "jack-daniels",
+          "name": {
+            "fr": "Jack Daniel's",
+            "en": "Jack Daniel's"
+          },
+          "price": 8.5
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "brand": "Art du Rendez-Vous Café",
+  "googleListingName": "Cafe Artistes",
+  "address": {
+    "street": "Rue des Artistes 1A",
+    "postcode": "1020",
+    "district": "Laeken",
+    "city": "Bruxelles",
+    "country": "BE"
+  },
+  "geo": {
+    "lat": 50.880406,
+    "lng": 4.349165
+  },
+  "mapsUrl": "https://maps.app.goo.gl/ZcxGx3xmSZzen3Zu7",
+  "placeId": "0x47c3c3b06be7cd0b:0xb81670521711715b",
+  "phone": "+32486879831",
+  "phoneDisplay": "+32 486 87 98 31",
+  "facebook": "https://facebook.com/938534326207917",
+  "rating": {
+    "value": 4.8,
+    "count": 43,
+    "source": "Google (via aggregator, Nov 2026)"
+  },
+  "hours": [
+    {
+      "days": [
+        "mo",
+        "tu",
+        "we"
+      ],
+      "open": "08:00",
+      "close": "02:00"
+    },
+    {
+      "days": [
+        "th"
+      ],
+      "open": "08:00",
+      "close": "00:00"
+    },
+    {
+      "days": [
+        "fr",
+        "sa",
+        "su"
+      ],
+      "open": "00:00",
+      "close": "24:00",
+      "note": "24h"
+    }
+  ],
+  "transit": [
+    "Gare de Bockstael (train S3/S4/S10, ~1 min walk)",
+    "Metro 6 Bockstael (~2 min)",
+    "Bus 53, 88 · arrêt Artistes"
+  ],
+  "tags": [
+    "dogs-allowed"
+  ],
+  "verify": "Hours/phone/rating come from a third-party listing mirror of Google Maps; confirm with the owner before launch.",
+  "nameConfirmed": true,
+  "alternateName": "Cafe Artistes"
+}
