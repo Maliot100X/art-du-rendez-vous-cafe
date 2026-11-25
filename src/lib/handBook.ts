@@ -249,6 +249,17 @@ function buildSpreads(category: MenuCategory): HandBookSpread[] {
 
 export interface HandBookRig {
   group: THREE.Group
+  /**
+   * The CLOSED book she carries at her side when idle — one page wide
+   * (13 cm), green cover out, gold spine. The open spread is 26 cm
+   * wide even with its cover shut (the cover only covers the right
+   * page, the left page stays bare paper), so showing the spread at
+   * rest reads as a flat half-green billboard hanging below her hand.
+   * The render loop shows the carry prop while blend < 0.5 and the
+   * open spread while blend >= 0.5, both at the same hand-relative
+   * centre, so the swap is a shape change in place, not a jump.
+   */
+  carry: THREE.Group
   coverPivot: THREE.Group
   flipPivot: THREE.Group
   spreadCount: number
@@ -366,6 +377,32 @@ export function createHandBook(): HandBookRig {
   flipBack.frustumCulled = false
   flipPivot.add(flipBack)
 
+  // Closed carry book (see the `carry` field above): back cover +
+  // paper block + front cover + gold spine and fore-edge, origin at
+  // its centre — the same convention as the open spread, so the loop
+  // can drive both props from one hand-relative centre.
+  const carry = new THREE.Group()
+  const carryBack = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.0025), coverMat)
+  carryBack.position.set(0, 0, -T / 2 + 0.0012)
+  carryBack.frustumCulled = false
+  carry.add(carryBack)
+  const carryBlock = new THREE.Mesh(new THREE.BoxGeometry(W - 0.006, H - 0.006, T - 0.005), pageMat)
+  carryBlock.position.set(0.001, 0, 0)
+  carryBlock.frustumCulled = false
+  carry.add(carryBlock)
+  const carryFront = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.0025), coverMat)
+  carryFront.position.set(0, 0, T / 2 - 0.0012)
+  carryFront.frustumCulled = false
+  carry.add(carryFront)
+  const carrySpine = new THREE.Mesh(new THREE.BoxGeometry(0.006, H + 0.001, T + 0.001), goldMat)
+  carrySpine.position.set(-W / 2 + 0.003, 0, 0)
+  carrySpine.frustumCulled = false
+  carry.add(carrySpine)
+  const carryEdge = new THREE.Mesh(new THREE.BoxGeometry(0.0015, H - 0.006, T - 0.005), goldMat)
+  carryEdge.position.set(W / 2 - 0.002, 0, 0)
+  carryEdge.frustumCulled = false
+  carry.add(carryEdge)
+
   let spreads: { left: THREE.CanvasTexture; right: THREE.CanvasTexture }[] = []
   let current = 0
 
@@ -385,6 +422,7 @@ export function createHandBook(): HandBookRig {
 
   const rig: HandBookRig = {
     group,
+    carry,
     coverPivot,
     flipPivot,
     spreadCount: 0,
@@ -438,6 +476,15 @@ export function createHandBook(): HandBookRig {
           }
           if (Array.isArray(mat)) mat.forEach(disposeMat)
           else if (mat) disposeMat(mat)
+        }
+      })
+      carry.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (mesh.isMesh) {
+          mesh.geometry?.dispose()
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
+          else mat?.dispose()
         }
       })
     },

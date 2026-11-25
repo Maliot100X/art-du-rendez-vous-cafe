@@ -8,6 +8,8 @@ import Visit from './components/Visit'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { scrollToTop, startScroll, useReducedMotion } from './lib/scroll'
+import { onBookCategory } from './lib/bookEvents'
+import { runWhenIdle, shouldDeferHeavyPreload } from './lib/perf'
 import { useReveal } from './lib/useReveal'
 import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
 import { TAB_THEMES } from './lib/tabThemes'
@@ -24,6 +26,7 @@ const MenuBook = lazyWithRetry(() => import('./components/MenuBook'))
 const Gallery = lazyWithRetry(() => import('./components/Gallery'))
 const Agent = lazyWithRetry(() => import('./components/Agent'))
 const FluidBackground = lazyWithRetry(() => import('./components/FluidBackground'))
+const VrmModel = lazyWithRetry(() => import('./components/VrmModel'))
 
 /** Visible loading state for a tab panel — never a blank dark area. */
 function PanelLoading({ label }: { label: string }) {
@@ -70,10 +73,18 @@ function PanelError({ label, onRetry }: { label: string; onRetry: () => void }) 
  *
  * Mount-on-activate: only the active tab's panel is mounted, so only
  * one WebGL context is alive at a time (the VRM, the book, the fluid,
- * the Live2D and the hero dust never run together). Heavy scenes are
- * React.lazy chunks that load only when their tab opens. The fluid
- * background lives on the Home tab only; every other tab gets the
- * static CSS gradient (cheap, same palette).
+ * the Live2D and the hero dust never run together) — except the Livre
+ * tab, where Vita's stage and the big book each hold one context (two
+ * in that tab, each freed on unmount; the VRM itself is shared from
+ * the module-level cache, so no re-download). Heavy scenes are
+ * React.lazy chunks that load only when their tab opens. The VRM
+ * itself is the exception to "load on open": it is cached at module
+ * level (src/lib/vrmCache.ts) and prewarmed on idle after first paint,
+ * so the parsed 14 MB model survives tab switches — returning to Menu
+ * reuses it instead of re-downloading/re-parsing it. Each mount still
+ * builds its own renderer and frees its own GL context on unmount.
+ * The fluid background lives on the Home tab only; every other tab
+ * gets the static CSS gradient (cheap, same palette).
  *
  * The Atmosphere pinned scroll cinema (420svh) keeps working inside
  * the Ambiance tab: the panel is plain flow (no overflow-hidden
@@ -83,6 +94,32 @@ function PanelError({ label, onRetry }: { label: string; onRetry: () => void }) 
 /** Static gradient base layer — under everything, on every tab. */
 function FluidFallbackDiv() {
   return <div className="fluid-fallback pointer-events-none fixed inset-0 z-0" aria-hidden="true" />
+}
+
+/**
+ * Heavy-model prewarm (fix pass 3, defects 4 + 6). Dynamic imports on
+ * purpose: statically importing vrmCache / Live2DModel here would drag
+ * three-vrm + pixi into the first-paint bundle (the 564 KB initial JS
+ * win from the perf pass). Each prewarm is idempotent — the modules
+ * share one in-flight promise — so hover + idle + tab open can all
+ * call them safely.
+ */
+function prewarmVrm(): void {
+  void import('./lib/vrmCache')
+    .then((m) => m.preloadVrm())
+    .catch(() => undefined)
+}
+function prewarmLive2d(): void {
+  void import('./components/Live2DModel')
+    .then((m) => m.preloadLive2d())
+    .catch(() => undefined)
+}
+function prewarmForTab(id: TabId): void {
+  if (id === 'menu' || id === 'book') prewarmVrm()
+  else if (id === 'agent') {
+    prewarmVrm()
+    prewarmLive2d()
+  }
 }
 
 /**
@@ -128,6 +165,7 @@ function MobileTabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabI
               role="tab"
               aria-selected={isActive}
               onClick={() => onSelect(tab.id)}
+              onFocus={() => prewarmForTab(tab.id)}
               className={`flex min-h-[60px] flex-col items-center justify-center gap-1 px-1 py-2 ${
                 isActive ? 'text-amber' : 'text-bone/70'
               }`}
@@ -166,6 +204,8 @@ function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => 
             role="tab"
             aria-selected={active === tab.id}
             onClick={() => onSelect(tab.id)}
+            onMouseEnter={() => prewarmForTab(tab.id)}
+            onFocus={() => prewarmForTab(tab.id)}
             className={`min-h-11 shrink-0 whitespace-nowrap rounded-full px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
               active === tab.id ? 'bg-bone text-ink' : 'text-bone/85 hover:text-bone'
             }`}
@@ -273,6 +313,86 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
   )
 }
 
+/**
+ * Livre tab: Vita WITH the big book — Minir's order, fix pass 3.
+ * The avatar used to live only in the Menu tab while the Livre tab
+ * showed the book alone; now she stands beside it and reads it.
+ *
+ * Desktop (lg+): Vita in a sticky side column, the book beside her.
+ * Phone: her compact stage above the book. Only the active tab
+ * mounts, so this VrmModel never coexists with the Menu tab's — but
+ * it DOES coexist with MenuBook's own renderer inside this tab (two
+ * WebGL contexts; the VRM itself is the shared module-level cache
+ * from vrmCache.ts, so no re-download on tab switches).
+ *
+ * She reads the category the big book lands on: the initial target
+ * (menu Vita's "Feuilleter le livre") starts a reading at once, and
+ * every later flip landing fires onBookCategory and restarts it. She
+ * reads silently here (no speech — the Menu tab already speaks the
+ * category); the hand book opens and its pages turn as she reads.
+ * No walk: she stands beside the book.
+ */
+function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: number } | null }) {
+  const [reading, setReading] = useState<{ categoryId: string; nonce: number } | null>(() =>
+    goToCategory ? { categoryId: goToCategory.catId, nonce: goToCategory.nonce } : null,
+  )
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
+  )
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // Follow the big book: every flip landing on a category restarts her
+  // reading on it (the scroll-open to the first category included).
+  useEffect(
+    () => onBookCategory((catId) => setReading({ categoryId: catId, nonce: Date.now() })),
+    [],
+  )
+
+  const vita = (
+    <Suspense
+      fallback={
+        <div className="flex h-[260px] items-center justify-center rounded-[1.75rem] border border-line bg-ink-2 sm:h-[300px] lg:h-[480px]">
+          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">Vita se prépare…</p>
+        </div>
+      }
+    >
+      <VrmModel
+        compact
+        withBook
+        readingTick={reading?.nonce ?? 0}
+        readingCategory={reading?.categoryId}
+        readingSeconds={12}
+      />
+    </Suspense>
+  )
+
+  if (isDesktop) {
+    return (
+      <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[380px_1fr]">
+        <aside className="min-w-0 pb-16 pl-4 pt-16 sm:pl-6 sm:pt-24 md:pt-36">
+          <div className="sticky top-[132px]">{vita}</div>
+        </aside>
+        <div className="min-w-0">
+          <MenuBook goToCategory={goToCategory} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-[1400px]">
+      <div className="px-4 pt-10 sm:px-6">{vita}</div>
+      <MenuBook goToCategory={goToCategory} />
+    </div>
+  )
+}
+
 export default function App() {
   const [order, setOrder] = useState<OrderLine[]>([])
   const [activeTab, setActiveTab] = useState<TabId>(currentTab())
@@ -286,6 +406,23 @@ export default function App() {
   // entirely when the visitor prefers reduced motion.
   useEffect(() => startScroll(reducedMotion), [reducedMotion])
   useReveal()
+
+  // Heavy-model prewarm (fix pass 3, defects 4 + 6): after first paint,
+  // on idle, start the 14 MB VRM + the Nekomi Live2D bytes + their JS
+  // chunks, so opening Menu / Agent later is a cache hit instead of a
+  // 20–35 s wait. Skipped on save-data / 2G — hovering the tab still
+  // warms on demand (see prewarmForTab on the tab buttons).
+  useEffect(() => {
+    if (shouldDeferHeavyPreload()) return
+    runWhenIdle(() => {
+      prewarmVrm()
+      prewarmLive2d()
+      // Warm the component chunks too (VrmModel + Live2DModel are
+      // React.lazy — otherwise the first tab open pays the JS fetch).
+      void import('./components/VrmModel').catch(() => undefined)
+      void import('./components/Live2DModel').catch(() => undefined)
+    })
+  }, [])
 
   // Tab changes (tap, deep link, back/forward) re-render the panel,
   // then scroll to its top — after mount, so the new panel's height is
@@ -340,7 +477,7 @@ export default function App() {
               fallback={<PanelError label="Le livre" onRetry={() => setPanelNonce((n) => n + 1)} />}
             >
               <Suspense fallback={<PanelLoading label="Le livre s'ouvre…" />}>
-                <MenuBook goToCategory={bookTarget} />
+                <BookTab goToCategory={bookTarget} />
               </Suspense>
             </ErrorBoundary>
           </TabSurface>

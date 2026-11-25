@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
+import type { VRM } from '@pixiv/three-vrm'
 import useDimensions from 'react-cool-dimensions'
 import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
 import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
+import { loadVrm } from '../lib/vrmCache'
 
 /**
  * Vita — VRM 0.x full-body model (CC0, VRoid sample), rendered with
@@ -33,14 +33,29 @@ import { useReducedMotion } from '../lib/scroll'
  * head dips when speaking starts.
  *
  * Hand book (menu tab, `withBook`): a small 3D book prop parented to
- * her leftHand bone (src/lib/handBook.ts), visible at all times in the
- * menu stage — closed in her hand at her side when idle. On a reading
- * trigger (`readingTick` + `readingCategory`) the left arm raises it to
- * chest height, the head dips toward it, the cover opens and the pages
- * turn (~every 4 s) while she speaks; when she finishes, the arm eases
- * back and the book closes. The book's world transform is re-aimed
- * every frame from the hand's world position, so its pages stay
- * camera-readable whatever the arm bones do.
+ * her leftHand bone (src/lib/handBook.ts). At rest she carries the
+ * CLOSED book at her side (one page wide, cover facing front-left —
+ * the open spread is 26 cm wide even shut, so it used to read as a
+ * flat half-green billboard hanging below her hand). On a reading
+ * trigger (`readingTick` + `readingCategory`) the left arm raises it
+ * to chest height — hand 1.13 m, book centre 1.18 m (chest bone
+ * 1.15 m), book top 1.27 m, 13 cm clear of her chin — the cover opens
+ * and the pages turn (~every 4 s) while she speaks; when she finishes,
+ * the arm eases back and the book closes. The pose is composed
+ * ABSOLUTELY every frame (upper arm from its stored rest base, elbow
+ * as a world-axis bend from its stored rest quaternion): the old code
+ * added `rotation.x +=` every frame, which accumulated — the forearm
+ * spun from the first frame and, once the 2.2 s walk stopped
+ * re-setting the upper arm, the whole arm orbited the shoulder and
+ * the book swept across her face. The book's world transform is
+ * re-aimed every frame from the hand's world position, so its pages
+ * stay camera-readable whatever the arm bones do — and the hand
+ * supports the open book from below (book centre 5 cm above the
+ * hand), so it is visibly IN her hand, not floating under it.
+ *
+ * The same stage (withBook + reading) also mounts in the Livre tab,
+ * beside the big book — see BookTab in App.tsx. Only one tab mounts
+ * at a time, so the two mounts never fight over the cached VRM.
  *
  * If anything fails (no WebGL on this device, model unreachable), the
  * stage falls back to a large clear portrait and reports it via
@@ -53,27 +68,6 @@ import { useReducedMotion } from '../lib/scroll'
  * framing, applied here too.
  */
 
-/**
- * Rotate a bone by a WORLD-space axis/angle. THREE's
- * Object3D.rotateOnWorldAxis assumes no rotated parent — the VRM's bone
- * chain (and the group's faceFront rotation) breaks that assumption and
- * the arms rotated UP instead of down. Doing the parent-space conversion
- * explicitly is correct regardless of the hierarchy:
- * q' = P^-1 * Q * P * q.
- */
-function rotateBoneWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
-  const parentQ = new THREE.Quaternion()
-  bone.parent?.getWorldQuaternion(parentQ)
-  const qWorld = new THREE.Quaternion().setFromAxisAngle(axis, angle)
-  const delta = parentQ
-    .clone()
-    .invert()
-    .multiply(qWorld)
-    .multiply(parentQ)
-  bone.quaternion.premultiply(delta)
-}
-
-const MODEL_URL = '/vrm/vita.vrm'
 const FOV = 30
 /** One walk: three steps, ~0.7 s per step, and a real lateral traverse —
     she walks from one side of the stage to the other and STAYS there
@@ -113,7 +107,7 @@ interface VrmDebug {
   /** Projected full-body height in stage pixels. */
   bodyHeightPx: number
   /** Hand-book prop, when attached: world position + reading state. */
-  book: { world: [number, number, number]; reading: boolean; blend: number } | null
+  book: { world: [number, number, number]; reading: boolean; blend: number; prop: 'open' | 'carry' } | null
 }
 
 declare global {
@@ -122,12 +116,43 @@ declare global {
   }
 }
 
-/** Bones the reading pose drives, with their rest-pose rotation.x. */
+/**
+ * Bones the reading pose drives. Everything is stored ABSOLUTELY —
+ * the pose is recomputed from these rest values every frame, never
+ * accumulated with `rotation.x +=` (see the reading block: the old
+ * `+=` spun the arm once the walk stopped re-setting it).
+ * - `upperBaseX`: the upper arm's rest-pose rotation.x.
+ * - `lowerRestQuat`: the lower arm's rest-pose local quaternion.
+ * - `hingeLocal`: the elbow hinge axis, fixed in the UPPER arm's
+ *   local frame (measured at load: cross(upper-arm dir, face dir),
+ *   pulled into the upper arm's frame — ≈ (0, 1, 0) on this rig).
+ *   The elbow bend is a WORLD-axis rotation about that axis, composed
+ *   with parent-space quaternions (the f6f7dae discipline): q' =
+ *   P^-1 * Q * P * qRest. A plain `rotation.x +=` on the lower arm is
+ *   NOT a bend — the normalized lower arm's local X runs nearly along
+ *   the forearm, so it only twists the hand (measured: fingers point
+ *   at the floor) while the forearm stays pointing down.
+ */
 interface ReadRig {
   leftUpperArm: THREE.Object3D
   leftLowerArm: THREE.Object3D
-  baseX: Map<THREE.Object3D, number>
+  upperBaseX: number
+  lowerRestQuat: THREE.Quaternion
+  hingeLocal: THREE.Vector3
 }
+
+/**
+ * Reading pose, measured from the real VRM file (Node sim over the
+ * normalized rig — /tmp/sim-hand-book*.mjs), not guessed:
+ * upper arm forward -0.60 + elbow bend 0.60 (world-axis) puts the
+ * hand at 1.13 m with a level forearm pointing forward, fingers
+ * forward, and the book centre at 1.18 m — chest height (chest bone
+ * 1.15 m), book top 1.27 m, 13 cm clear of her chin (1.40 m) at every
+ * blend and on both walked sides. The old -0.55 / -1.55 only lifted
+ * the hand to 1.00 m (waist height) with a twisted forearm.
+ */
+const READ_UPPER = -0.6
+const READ_ELBOW = 0.6
 
 interface ThreeStage {
   renderer: THREE.WebGLRenderer
@@ -174,8 +199,8 @@ export default function VrmModel({
    */
   walkTick?: number
   /**
-   * Hand book (menu tab only): attach the small book prop to her left
-   * hand. The agent tab leaves this off — Vita holds no book there.
+   * Hand book (menu + livre tabs): attach the small book prop to her
+   * left hand. The agent tab leaves this off — Vita holds no book there.
    */
   withBook?: boolean
   /**
@@ -310,10 +335,10 @@ export default function VrmModel({
     } else if (framingRef.current === 'half') {
       // Head to knees: the face stays ~2x larger than full-body on a
       // phone, and the legs (and the walk) stay in frame. Window is
-      // 0.98 m tall, centred 0.31 m below the eyes — the extra 3 cm
-      // down keeps the hand-held book (hand at 0.93 m, book centre
-      // 0.85 m, measured — scripts/measure-hand-book.mjs) inside the
-      // frame at rest instead of clipping its bottom edge.
+      // 0.98 m tall, centred 0.31 m below the eyes (y 0.73–1.71) — it
+      // holds the carried book at rest (0.76–0.95 m) and the open
+      // book while reading (centre 1.18 m, top 1.27 m, measured —
+      // the reading pose in the loop), so neither clips an edge.
       targetY = eyePos.y - 0.31
       framedH = 0.98
       framedW = 0.6
@@ -414,146 +439,45 @@ export default function VrmModel({
       rim.position.set(-2, 2, -3)
       scene.add(rim)
 
-      let gltf
+      // The VRM itself is cached at module level (src/lib/vrmCache.ts):
+      // the 14 MB download, the GLTF parse, the rest pose and the posed
+      // bounds happen once per page lifetime. A mount that arrives after
+      // the first load (returning to Menu, or the Agent tab's Vita
+      // stage) gets the same parsed VRM back immediately and only
+      // builds its own renderer/scene/camera around it.
+      let cached
       try {
-        const loader = new GLTFLoader()
-        loader.register((parser) => new VRMLoaderPlugin(parser))
-        gltf = await loader.loadAsync(MODEL_URL, (e) => {
-          if (!cancelled && e.total) setProgress(Math.round((e.loaded / e.total) * 100))
+        cached = await loadVrm((p) => {
+          if (!cancelled) setProgress(p)
         })
       } catch {
         fail()
         return
       }
       if (cancelled) return
-      const vrm = gltf.userData.vrm as VRM | undefined
-      if (!vrm) {
-        fail()
-        return
-      }
-
-      // YuriOS VrmLoader passes, in order.
-      VRMUtils.removeUnnecessaryVertices(vrm.scene)
-      VRMUtils.combineSkeletons(vrm.scene)
-      vrm.scene.traverse((o) => {
-        o.frustumCulled = false
-      })
+      const {
+        vrm,
+        box,
+        size,
+        centre,
+        eyePos,
+        faceFrontQuat,
+        chestBaseRotationX,
+        headBaseRotationX,
+      } = cached
 
       const group = new THREE.Group()
+      group.quaternion.copy(faceFrontQuat)
+      // Re-parents vrm.scene into this mount's group (it was detached
+      // from the previous mount's group on unmount — see cleanup).
       group.add(vrm.scene)
       scene.add(group)
-
-      // Face the camera (+Z): rotate faceFront onto +Z.
-      try {
-        const faceFront = vrm.lookAt?.faceFront
-        if (faceFront) {
-          const q = new THREE.Quaternion().setFromUnitVectors(
-            faceFront.clone().normalize(),
-            new THREE.Vector3(0, 0, 1),
-          )
-          group.quaternion.premultiply(q)
-        }
-      } catch {
-        // No lookAt on this rig — VRoid VRM 0.x faces +Z by default.
-      }
-      vrm.springBoneManager?.reset()
       group.updateMatrixWorld(true)
 
-      // Rest pose: arms down. Measured from the bones, not assumed: the
-      // shoulder->elbow direction is rotated toward mostly-down with a
-      // slight outward angle; the elbow bends a touch forward.
-      try {
-        const humanoid = vrm.humanoid
-        const faceDir = new THREE.Vector3(0, 0, 1)
-        for (const side of ['left', 'right'] as const) {
-          const upper = humanoid.getNormalizedBoneNode(`${side}UpperArm`)
-          const lower = humanoid.getNormalizedBoneNode(`${side}LowerArm`)
-          if (!upper || !lower) continue
-          group.updateMatrixWorld(true)
-          const shoulder = upper.getWorldPosition(new THREE.Vector3())
-          const elbow = lower.getWorldPosition(new THREE.Vector3())
-          const dir = elbow.clone().sub(shoulder).normalize()
-          const out = dir.clone()
-          out.y = 0
-          if (out.lengthSq() > 1e-6) out.normalize()
-          const target = new THREE.Vector3().addScaledVector(out, 0.22).add(new THREE.Vector3(0, -1, 0)).normalize()
-          const axis = new THREE.Vector3().crossVectors(dir, target)
-          if (axis.lengthSq() > 1e-6) {
-            axis.normalize()
-            const angle = Math.acos(THREE.MathUtils.clamp(dir.dot(target), -1, 1))
-            rotateBoneWorld(upper, axis, angle)
-          }
-          group.updateMatrixWorld(true)
-          const armDir = lower
-            .getWorldPosition(new THREE.Vector3())
-            .sub(upper.getWorldPosition(new THREE.Vector3()))
-            .normalize()
-          const bendAxis = new THREE.Vector3().crossVectors(armDir, faceDir)
-          if (bendAxis.lengthSq() > 1e-6) {
-            bendAxis.normalize()
-            rotateBoneWorld(lower, bendAxis, 0.22)
-          }
-        }
-      } catch {
-        // Arms stay in the file pose — framing still uses the measured box.
-      }
-      // Propagate the rig pose to the skinned bones: getNormalizedBoneNode
-      // returns three-vrm's NORMALIZED rig nodes, and only vrm.update()
-      // copies their rotations onto the original bones the skinning uses.
-      // Without this, the rendered arms stay in T-pose and the bounds
-      // below still measure the T-pose.
-      vrm.update(0)
-      group.updateMatrixWorld(true)
-
-      // POSED bounds: SkinnedMesh.computeBoundingBox applies the current
-      // bone transforms (the plain geometry box would still be T-pose).
-      const box = new THREE.Box3()
-      const childBox = new THREE.Box3()
-      vrm.scene.traverse((obj) => {
-        if (obj.name.startsWith('VRMC_springBone_collider')) return
-        const mesh = obj as THREE.SkinnedMesh
-        if (mesh.isSkinnedMesh) {
-          // boneMatrices go stale when bones are rotated directly — the
-          // renderer refreshes them every frame, but this one-off bounds
-          // computation must refresh them explicitly first.
-          mesh.skeleton?.update()
-          mesh.computeBoundingBox()
-          if (mesh.boundingBox) {
-            childBox.copy(mesh.boundingBox).applyMatrix4(obj.matrixWorld)
-            box.union(childBox)
-          }
-          return
-        }
-        const meshObj = obj as THREE.Mesh
-        if (meshObj.isMesh && meshObj.geometry) {
-          if (!meshObj.geometry.boundingBox) meshObj.geometry.computeBoundingBox()
-          if (meshObj.geometry.boundingBox) {
-            childBox.copy(meshObj.geometry.boundingBox).applyMatrix4(obj.matrixWorld)
-            box.union(childBox)
-          }
-        }
-      })
-      if (box.isEmpty()) {
-        fail()
-        return
-      }
-      const size = new THREE.Vector3()
-      const centre = new THREE.Vector3()
-      box.getSize(size)
-      box.getCenter(centre)
-
+      // Rest pose, bounds and eye position now come from the cache
+      // (src/lib/vrmCache.ts prepare()) — computed once, not per mount.
       const headNode = vrm.humanoid?.getNormalizedBoneNode('head')
-      const eyeNode =
-        vrm.humanoid?.getNormalizedBoneNode('leftEye') ?? vrm.humanoid?.getNormalizedBoneNode('rightEye')
-      const eyePos = eyeNode
-        ? eyeNode.getWorldPosition(new THREE.Vector3())
-        : headNode
-          ? headNode.getWorldPosition(new THREE.Vector3())
-          : centre.clone()
-
       const chestNode = vrm.humanoid?.getNormalizedBoneNode('chest')
-      const chestBaseRotationX = chestNode ? chestNode.rotation.x : 0
-      const headBaseRotationX = headNode ? headNode.rotation.x : 0
 
       // Walk rig: the six bones the procedural walk drives, with their
       // rest-pose rotation.x so the cycle can add swing on top and
@@ -578,14 +502,16 @@ export default function VrmModel({
         // No walk rig — the model still renders, it just never walks.
       }
 
-      // Hand book (menu tab only): the small book parented to her LEFT
-      // HAND bone, plus the two arm bones the reading pose drives.
+      // Hand book (menu + livre tabs): the small book parented to her
+      // LEFT HAND bone, plus the two arm bones the reading pose drives.
+      // Both props (open spread + closed carry) parent to the same
+      // hand; the render loop re-aims them in world space every frame,
+      // so the attach pose below is only the first frame's pose — the
+      // loop is what keeps the book camera-readable and in her hand.
       // Local transform measured from the file, not guessed —
       // scripts/measure-hand-book.mjs: hand at (-0.212, 0.929, 0.002)
       // in the posed VRM, book centre 8 cm below it and 3 cm forward,
-      // facing +Z (the camera). The render loop re-aims the book in
-      // world space every frame, so this is the attach pose, not the
-      // final facing — the loop is what keeps it camera-readable.
+      // facing +Z (the camera).
       let handBook: HandBookRig | null = null
       let readRig: ReadRig | null = null
       if (withBook) {
@@ -596,6 +522,10 @@ export default function VrmModel({
             handBook.group.position.set(-0.0744, -0.0336, 0.0321)
             handBook.group.quaternion.set(-0.0576, -0.0901, -0.6058, 0.7884)
             hand.add(handBook.group)
+            // The carry prop rides the same hand, same first-frame pose.
+            handBook.carry.position.copy(handBook.group.position)
+            handBook.carry.quaternion.copy(handBook.group.quaternion)
+            hand.add(handBook.carry)
           }
         } catch {
           handBook = null
@@ -604,10 +534,26 @@ export default function VrmModel({
           const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm')
           const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm')
           if (leftUpperArm && leftLowerArm) {
-            const baseX = new Map<THREE.Object3D, number>()
-            baseX.set(leftUpperArm, leftUpperArm.rotation.x)
-            baseX.set(leftLowerArm, leftLowerArm.rotation.x)
-            readRig = { leftUpperArm, leftLowerArm, baseX }
+            // Absolute-pose rest values (see ReadRig): the upper arm's
+            // rest rotation.x, the lower arm's rest local quaternion,
+            // and the elbow hinge axis in the upper arm's frame.
+            group.updateMatrixWorld(true)
+            const shoulder = leftUpperArm.getWorldPosition(new THREE.Vector3())
+            const elbow = leftLowerArm.getWorldPosition(new THREE.Vector3())
+            const armDir = elbow.sub(shoulder).normalize()
+            const hingeWorld = new THREE.Vector3()
+              .crossVectors(armDir, new THREE.Vector3(0, 0, 1))
+            if (hingeWorld.lengthSq() < 1e-6) hingeWorld.set(0, 1, 0)
+            hingeWorld.normalize()
+            const upperWorldQuat = leftUpperArm.getWorldQuaternion(new THREE.Quaternion())
+            const hingeLocal = hingeWorld.clone().applyQuaternion(upperWorldQuat.clone().invert())
+            readRig = {
+              leftUpperArm,
+              leftLowerArm,
+              upperBaseX: leftUpperArm.rotation.x,
+              lowerRestQuat: leftLowerArm.quaternion.clone(),
+              hingeLocal,
+            }
           }
         } catch {
           readRig = null
@@ -654,6 +600,14 @@ export default function VrmModel({
       const bookWant = new THREE.Quaternion()
       const bookWorld = new THREE.Vector3()
       const xAxis = new THREE.Vector3(1, 0, 0)
+      const yAxis = new THREE.Vector3(0, 1, 0)
+      // Reading-pose scratch: elbow world-axis bend + carry orientation.
+      const readParentQ = new THREE.Quaternion()
+      const readHingeWorld = new THREE.Vector3()
+      const readQWorld = new THREE.Quaternion()
+      const readTmpQ = new THREE.Quaternion()
+      const bookCarryIdle = new THREE.Quaternion()
+      const bookCarryWant = new THREE.Quaternion()
       const loop = () => {
         if (cancelled) return
         raf = requestAnimationFrame(loop)
@@ -686,11 +640,15 @@ export default function VrmModel({
             }
             // Forward swing is negative rotation.x (legs point down, the
             // model faces +Z): left leg forward while right arm forward.
+            // The LEFT arm is the reading arm: its swing fades out as
+            // the book rises (last frame's blend — the reading block
+            // below recomputes it), so the book stays steady at chest
+            // height while the legs still walk. The right arm swings on.
             setX(rig.leftUpperLeg, -0.62 * s)
             setX(rig.rightUpperLeg, 0.62 * s)
             setX(rig.leftLowerLeg, 0.34 * Math.max(0, Math.sin(phase + Math.PI / 2)))
             setX(rig.rightLowerLeg, 0.34 * Math.max(0, Math.sin(phase - Math.PI / 2)))
-            setX(rig.leftUpperArm, 0.45 * s)
+            setX(rig.leftUpperArm, 0.45 * s * (1 - readingBlendRef.current))
             setX(rig.rightUpperArm, -0.45 * s)
             three.group.position.y = 0.03 * Math.abs(s) * env
             const u = Math.min(1, wt / WALK_DURATION)
@@ -786,16 +744,38 @@ export default function VrmModel({
             : readingBlendRef.current + (target - readingBlendRef.current) * Math.min(1, dt * 3)
           const blend = readingBlendRef.current
 
-          // Arm + head, ADDITIVE on top of the walk's rotation.x (set
-          // above): the walk re-sets rotation.x from its base every
-          // frame, so this never accumulates. Upper arm forward -0.55
-          // and elbow -1.55 bring the hand from her side (0.93 m) up
-          // to chest/face height (~1.28 m, in front of her chest);
-          // the head dips 0.18 toward the book. Signs follow the
-          // walk's own convention (forward swing = negative x).
-          if (rr && blend > 0.001) {
-            rr.leftUpperArm.rotation.x += -0.55 * blend
-            rr.leftLowerArm.rotation.x += -1.55 * blend
+          // Arm + head — ABSOLUTE, recomputed from the stored rest
+          // values every frame, never `rotation.x +=`: the old `+=`
+          // accumulated (the walk only re-sets rotation.x during its
+          // 2.2 s window), so the forearm spun from the first reading
+          // frame and, once the walk ended, the whole arm orbited the
+          // shoulder and the book swept across her face (Node sim:
+          // hand y 0.94 → 1.76 m, z +0.41 → -0.39 over 5 s).
+          // Upper arm: while walking, the walk block just set
+          // rotation.x absolutely this frame, so add the reading
+          // delta onto it; once the walk is done, set it absolutely
+          // from the stored rest base. Elbow: the world-axis bend
+          // (see ReadRig) — q' = P^-1 * Q * P * qRest, P = upper arm
+          // world quat NOW — applied every frame, so at blend 0 it
+          // restores the rest quaternion exactly. The head dip is
+          // safe as `+=`: the nod code above sets head rotation.x
+          // absolutely every frame before this runs.
+          if (rr) {
+            if (walkRef.current.t < WALK_DURATION) {
+              rr.leftUpperArm.rotation.x += READ_UPPER * blend
+            } else {
+              rr.leftUpperArm.rotation.x = rr.upperBaseX + READ_UPPER * blend
+            }
+            rr.leftUpperArm.getWorldQuaternion(readParentQ)
+            readHingeWorld.copy(rr.hingeLocal).applyQuaternion(readParentQ)
+            readQWorld.setFromAxisAngle(readHingeWorld, READ_ELBOW * blend)
+            readTmpQ
+              .copy(readParentQ)
+              .invert()
+              .multiply(readQWorld)
+              .multiply(readParentQ)
+              .multiply(rr.lowerRestQuat)
+            rr.leftLowerArm.quaternion.copy(readTmpQ)
           }
           if (headNode && blend > 0.001) {
             headNode.rotation.x += 0.18 * blend
@@ -805,22 +785,46 @@ export default function VrmModel({
             const hand = hb.group.parent
             if (hand) {
               // Book world transform, glued to the hand in WORLD space:
-              // the offset from the hand blends from rest (at her side,
-              // below the hand, slightly forward) to reading (in front
-              // of her chest), and the facing stays camera-readable
-              // (group facing × a tilt back toward her face) whatever
-              // the arm bones do — parenting alone would roll the book
-              // with the hand and could hide the pages.
+              // ONE shared centre for both props — the offset blends
+              // from rest (at her side, 8 cm below the hand, slightly
+              // forward — the hand grips the closed book's top edge)
+              // to reading (5 cm ABOVE the hand, 4 cm forward — the
+              // hand supports the open book from below, palm under the
+              // bottom spine edge, so the book is visibly IN her hand,
+              // not floating under it), and the facing stays
+              // camera-readable (group facing × a tilt back toward her
+              // face) whatever the arm bones do — parenting alone
+              // would roll the book with the hand and could hide the
+              // pages. The open spread faces the camera; the carry
+              // book faces front-left (Ry -0.9) at rest and turns to
+              // face the camera as it rises, so at the blend-0.5 swap
+              // the two props already agree on facing and the swap is
+              // only a shape change in place.
               hand.getWorldPosition(bookHandPos)
               hand.getWorldQuaternion(bookHandQuat)
               bookOff.set(0.02, -0.08, 0.03)
-              bookOffRead.set(0.01, -0.03, 0.05)
+              bookOffRead.set(0, 0.05, 0.04)
               bookOff.lerp(bookOffRead, blend)
               bookInv.copy(bookHandQuat).invert()
               hb.group.position.copy(bookOff).applyQuaternion(bookInv)
+              hb.carry.position.copy(hb.group.position)
               bookTilt.setFromAxisAngle(xAxis, -0.35 * blend)
               bookWant.copy(three.group.quaternion).multiply(bookTilt)
               hb.group.quaternion.copy(bookInv).multiply(bookWant)
+              bookCarryIdle.copy(three.group.quaternion).multiply(
+                bookTilt.setFromAxisAngle(yAxis, -0.9),
+              )
+              bookCarryWant.slerpQuaternions(
+                bookCarryIdle,
+                bookWant,
+                THREE.MathUtils.clamp(blend * 2, 0, 1),
+              )
+              hb.carry.quaternion.copy(bookInv).multiply(bookCarryWant)
+              // One prop at a time: closed while she carries it, open
+              // while she reads. The swap happens mid-transit, when
+              // both props already share centre and facing.
+              hb.group.visible = blend >= 0.5
+              hb.carry.visible = blend < 0.5
             }
             // Cover opens once the arm is on its way up — swung BEHIND
             // the book (+2.6), so the open spread stays readable.
@@ -869,6 +873,7 @@ export default function VrmModel({
                 world: [bookWorld.x, bookWorld.y, bookWorld.z],
                 reading: read.active,
                 blend: Math.round(blend * 100) / 100,
+                prop: blend >= 0.5 ? 'open' : 'carry',
               }
             }
           }
@@ -888,8 +893,20 @@ export default function VrmModel({
       if (three) {
         // Hand-book textures (canvas textures are not freed by the
         // generic traverse below — it only disposes geometries and
-        // materials).
+        // materials). The book is this mount's own prop: unparent it
+        // (both props) from the shared VRM's left hand before
+        // disposing it.
+        three.handBook?.group.parent?.remove(three.handBook.group)
+        three.handBook?.carry.parent?.remove(three.handBook.carry)
         three.handBook?.dispose()
+        // Detach the SHARED cached VRM from this mount's group BEFORE
+        // the dispose traverse below: its geometries/materials belong
+        // to the module-level cache (src/lib/vrmCache.ts) and must
+        // survive this unmount, or the next mount would render a
+        // disposed model and the cache would be worthless. Only this
+        // mount's own renderer, lights and (already removed) hand book
+        // are freed here.
+        three.group.remove(three.vrm.scene)
         three.scene.traverse((o) => {
           const mesh = o as THREE.Mesh
           if (mesh.isMesh) {

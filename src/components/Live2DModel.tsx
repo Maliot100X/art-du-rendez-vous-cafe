@@ -73,6 +73,127 @@ const CORE_LOCAL = '/live2d/live2dcubismcore.min.js'
 const CORE_CDN = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
 const MODEL_URL = '/live2d/nekomi/Furry.model3.json'
 
+/**
+ * Live2D prewarm (fix pass 3, defect 6) — module-level, so App can
+ * start it on first paint and the Agent tab only has to mount.
+ *
+ * Warms, in order: the pixi.js + pixi-live2d-display JS chunks the
+ * stage dynamically imports on mount, the Cubism Core script, and
+ * every file the model references (moc3, both textures, physics,
+ * motions, expressions) via fetch — the browser HTTP cache then serves
+ * them to Live2DModel.from() instead of re-downloading them on mount.
+ * The .moc3 is still parsed fresh on mount (pixi-live2d-display takes
+ * a URL, not bytes), so this cuts the network wait, not the parse —
+ * the honest progress below is byte progress of the warm-up, and the
+ * stage shows it while it loads instead of a blank dark area.
+ */
+let live2dProgress = 0
+let live2dLabel = ''
+let live2dPreloadPromise: Promise<void> | null = null
+const live2dListeners = new Set<(p: number, label: string) => void>()
+
+function setLive2dProgress(p: number, label?: string): void {
+  // Monotonic: totals are learned file by file as responses arrive, so
+  // the raw ratio can dip when a new file's size is added — the bar
+  // never goes backwards.
+  const next = Math.max(live2dProgress, Math.min(100, Math.round(p)))
+  if (label) live2dLabel = label
+  if (next === live2dProgress && !label) return
+  live2dProgress = next
+  live2dListeners.forEach((cb) => {
+    try {
+      cb(live2dProgress, live2dLabel)
+    } catch {
+      // A progress listener must never break the load.
+    }
+  })
+}
+
+export function getLive2dProgress(): number {
+  return live2dProgress
+}
+
+export function subscribeLive2dProgress(cb: (p: number, label: string) => void): () => void {
+  live2dListeners.add(cb)
+  try {
+    cb(live2dProgress, live2dLabel)
+  } catch {
+    // Ignore a throwing listener.
+  }
+  return () => {
+    live2dListeners.delete(cb)
+  }
+}
+
+async function preloadLive2dOnce(): Promise<void> {
+  setLive2dProgress(0, 'Moteur d’affichage…')
+  await Promise.all([import('pixi.js'), import('pixi-live2d-display/cubism4')])
+  setLive2dProgress(8, 'Cœur Live2D…')
+  await ensureCore()
+  setLive2dProgress(12, 'Modèle Nekomi…')
+  const settingsRes = await fetch(MODEL_URL)
+  if (!settingsRes.ok) throw new Error(`Live2D settings fetch failed: ${settingsRes.status}`)
+  const settings = (await settingsRes.json()) as {
+    FileReferences?: {
+      Moc?: string
+      Textures?: string[]
+      Physics?: string
+      Motions?: Record<string, { File?: string }[]>
+      Expressions?: { File?: string }[]
+    }
+  }
+  const refs = settings.FileReferences ?? {}
+  const base = MODEL_URL.slice(0, MODEL_URL.lastIndexOf('/') + 1)
+  const urls: string[] = []
+  if (typeof refs.Moc === 'string') urls.push(base + refs.Moc)
+  for (const t of refs.Textures ?? []) urls.push(base + t)
+  if (typeof refs.Physics === 'string') urls.push(base + refs.Physics)
+  for (const group of Object.values(refs.Motions ?? {})) {
+    for (const m of group) if (m.File) urls.push(base + m.File)
+  }
+  for (const e of refs.Expressions ?? []) if (e.File) urls.push(base + e.File)
+
+  let loaded = 0
+  let knownTotal = 0
+  const track = async (url: string) => {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Live2D preload fetch failed: ${res.status} ${url}`)
+    if (!res.body) {
+      await res.arrayBuffer()
+      return
+    }
+    knownTotal += Number(res.headers.get('content-length') || 0)
+    const reader = res.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) {
+        loaded += value.length
+        if (knownTotal > 0) setLive2dProgress(12 + (loaded / knownTotal) * 88, 'Modèle Nekomi…')
+      }
+    }
+  }
+  await Promise.all(urls.map(track))
+  setLive2dProgress(100, '')
+}
+
+/**
+ * Start the Live2D warm-up in the background. Safe to call repeatedly
+ * — concurrent callers share the one in-flight promise. A failure
+ * clears it so a later call retries; the stage itself still loads
+ * normally on mount if the prewarm never ran.
+ */
+export function preloadLive2d(): void {
+  if (!live2dPreloadPromise) {
+    live2dPreloadPromise = preloadLive2dOnce().catch((err: unknown) => {
+      live2dPreloadPromise = null
+      live2dProgress = 0
+      throw err
+    })
+  }
+  void live2dPreloadPromise.catch(() => undefined)
+}
+
 declare global {
   interface Window {
     Live2DCubismCore?: unknown
@@ -107,6 +228,16 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   const fitRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [form, setForm] = useState<Form>('human')
+  // Prewarm progress (fix pass 3): the idle preload's byte progress,
+  // shown honestly while the stage loads — never a blank dark area.
+  const [liveProgress, setLiveProgress] = useState(getLive2dProgress())
+  const [liveLabel, setLiveLabel] = useState('')
+
+  // Subscribe to the prewarm progress as soon as the stage mounts.
+  useEffect(() => subscribeLive2dProgress((p, label) => {
+    setLiveProgress(p)
+    setLiveLabel(label)
+  }), [])
   // react-cool-dimensions measures the stage's REAL rendered size
   // (ResizeObserver) — fit() runs from that measurement, never from an
   // assumed width. This is the fix for the failed "top 32%" framing:
@@ -377,7 +508,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             <p className="mt-5 font-display text-2xl italic text-bone">Nekomi</p>
             <p className="mt-2 max-w-xs text-sm leading-relaxed text-mist">
               {status === 'loading'
-                ? 'Le modèle Live2D se prépare — il apparaîtra ici et vous suivra des yeux.'
+                ? liveProgress > 0 && liveProgress < 100
+                  ? `Le modèle Live2D se prépare — ${liveProgress} %${liveLabel ? ` — ${liveLabel}` : ''}`
+                  : 'Le modèle Live2D se prépare — il apparaîtra ici et vous suivra des yeux.'
                 : 'Le modèle Live2D n’a pas pu se charger ici — le chat et la commande ci-contre fonctionnent normalement.'}
             </p>
             <span className="mt-4 inline-flex items-center gap-2 rounded-full border border-line bg-ink px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-bone/70">
