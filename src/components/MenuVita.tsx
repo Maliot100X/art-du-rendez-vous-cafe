@@ -165,8 +165,18 @@ export function useVitaGuide({
     setWalkTick((t) => t + 1)
     setLine(text)
     setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(text) })
-    // A manual category move cancels a waiting big-book open.
-    pendingOpenRef.current = null
+    // Fix pass 7: a manual category tap opens the big book on that
+    // category once the reading ends, exactly like "Demander à la
+    // barmaid" — the pass-6 check saw manual taps (VINS, ALCOOLS)
+    // walk and read but never switch, while the button did. The
+    // category line IS the reply (no brain call to wait for), so the
+    // pending open is armed at once and the reply flag is set. A
+    // later tap re-arms it for the new category; the old reading
+    // never reports an end (superseded), so it cannot fire twice.
+    // An item tap (+ on a row) still cancels it — the user is
+    // ordering, not reading.
+    pendingOpenRef.current = categoryId
+    replyArrivedRef.current = true
     if (isSpeechSupported()) speak(text)
   }, [categoryId])
 
@@ -322,7 +332,7 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
   useEffect(() => subscribeWalkStatus(setWalk), [])
   const walkX = `${walk.x >= 0 ? '+' : ''}${walk.x.toFixed(2)}`
   const walkLine = walk.walking
-    ? `Marche… pas ${walk.step}/${walk.steps} · x ${walkX}`
+    ? `Marche… pas ${walk.step}/${walk.steps} · x ${walkX} · genou ${Math.round(walk.kneeDeg)}°`
     : walk.tick > 0
       ? `Arrivée · x ${walkX}`
       : 'Vita est prête — choisissez une catégorie.'

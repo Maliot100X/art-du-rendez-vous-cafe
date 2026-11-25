@@ -27,9 +27,15 @@ export interface WalkStatus {
   x: number
   /** Walk trigger nonce (VrmModel walkTick); 0 before any walk. */
   tick: number
+  /** Stepping knee angle in degrees, read BACK live from the VRM's
+      normalized leg nodes (fix pass 7) — the cloud-browser check
+      reads it as DOM text, so the walk is provable without devtools:
+      ~57° at full bend, 0 at rest. If the gait writes were lost
+      anywhere, this reads 0 while walking. */
+  kneeDeg: number
 }
 
-let walkStatus: WalkStatus = { walking: false, step: 0, steps: 4, x: 0, tick: 0 }
+let walkStatus: WalkStatus = { walking: false, step: 0, steps: 4, x: 0, tick: 0, kneeDeg: 0 }
 const walkListeners = new Set<(s: WalkStatus) => void>()
 
 function sameWalkStatus(a: WalkStatus, b: WalkStatus): boolean {
@@ -38,7 +44,10 @@ function sameWalkStatus(a: WalkStatus, b: WalkStatus): boolean {
     a.step === b.step &&
     a.steps === b.steps &&
     Math.round(a.x * 100) === Math.round(b.x * 100) &&
-    a.tick === b.tick
+    a.tick === b.tick &&
+    // Knee angle quantised to 5°: the panel shows the live angle
+    // without re-rendering 60 times a second during the ramp.
+    Math.round(a.kneeDeg / 5) === Math.round(b.kneeDeg / 5)
   )
 }
 

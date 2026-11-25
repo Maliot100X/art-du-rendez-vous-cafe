@@ -81,7 +81,7 @@ import { setWalkStatus } from '../lib/walkStatus'
  */
 
 const FOV = 30
-/** One walk: four sidesteps of 0.8 s, and a real lateral traverse —
+/** One walk: four sidesteps of 1.0 s, and a real lateral traverse —
     she walks from one side of the stage to the other and STAYS there
     (alternating sides each trigger). The legs are solved from the
     planted feet (fbtpods gait — see the walk block), so the walk is
@@ -89,8 +89,16 @@ const FOV = 30
     Fix pass 6: 0.55 s steps were too fast to catch in a still frame
     (peak lift ~100 ms) and the peak foot lift was only 4.5 cm
     (measured — scripts/measure-leg-axes.mjs) — 0.8 s steps with a
-    held peak put the bent-knee pose on screen for ~1.3 s per walk. */
-const WALK_DURATION = 3.2
+    held peak put the bent-knee pose on screen for ~1.3 s per walk.
+    Fix pass 7: the pass-6 check still saw straight legs in every
+    captured frame (1.2 s and 2.0 s into the walk — both full-peak
+    moments), so the step is stretched to 1.0 s with a longer held
+    peak (~0.6 s at full bend per step, ~2.4 s per walk) and a bigger
+    bend — a still frame cannot miss it. The gait math and the
+    three-vrm sync were measured working on the real VRM
+    (scripts/runtime-walk-probe.mjs + the three-vrm runtime audit),
+    so the change is the pose itself, not the plumbing. */
+const WALK_DURATION = 4.0
 /**
  * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
  * old symmetric ±0.32 m walk pushed the hand book out of the 0.72 m
@@ -127,7 +135,7 @@ const WALK_RIGHT = 0.14
  */
 const HIP_HALF = 0.089
 const LEG_LEN = 0.841
-const STEP_DURATION = 0.8
+const STEP_DURATION = 1.0
 const STEP_COUNT = 4
 /**
  * Fix pass 6, measured — scripts/measure-leg-axes.mjs, combined
@@ -143,9 +151,16 @@ const STEP_COUNT = 4
  * leg bones is a genuine hinge bend (NOT the elbow's twist error —
  * the leg nodes keep identity rest quats, local X 91.4 deg from the
  * shin, hinge local ≈ -X), so the knee stays on rotation.x.
+ * Fix pass 7: lift 0.45, knee 1.00, step 1.0 s, hold 20–80% —
+ * re-measured on the real VRM by scripts/runtime-walk-probe.mjs:
+ * peak foot lift 0.102 m (was 0.068 m at pass-6 constants), knee
+ * +0.156 m toward the camera, knee 1.00 rad / thigh −0.45 rad at
+ * full bend, ~0.6 s at full bend per step (~2.4 s per walk). The
+ * bigger bend + longer hold is the pose change; the plumbing
+ * (three-vrm sync) was already proven working.
  */
-const KNEE_SWING = 0.8
-const THIGH_LIFT = 0.35
+const KNEE_SWING = 1.0
+const THIGH_LIFT = 0.45
 /** Extra sideways swing of the STEPPING thigh at peak lift, in the
     travel direction (rotation.z moves both feet toward +X, measured
     test F — so the sign is the travel dir). The stance foot is never
@@ -157,19 +172,19 @@ const HIP_SWAY = 0.05
 const WALK_TURN = 0.3
 
 /**
- * Step-lift envelope with a HELD peak (fix pass 6): the bent-knee
- * mid-step pose must be the DOMINANT pose of the walk, not a 100 ms
- * flash. Rises over the first 30% of the step, holds at full lift
- * until 70%, eases down — at 0.8 s/step that is ~0.32 s at full bend
- * per step, ~1.3 s per walk.
+ * Step-lift envelope with a HELD peak (fix pass 6, stretched in fix
+ * pass 7): the bent-knee mid-step pose must be the DOMINANT pose of
+ * the walk, not a 100 ms flash. Rises over the first 20% of the
+ * step, holds at full lift until 80%, eases down — at 1.0 s/step
+ * that is ~0.6 s at full bend per step, ~2.4 s per walk.
  */
 function stepLift(u: number): number {
-  if (u < 0.3) {
-    const s = u / 0.3
+  if (u < 0.2) {
+    const s = u / 0.2
     return s * s * (3 - 2 * s)
   }
-  if (u <= 0.7) return 1
-  const s = (u - 0.7) / 0.3
+  if (u <= 0.8) return 1
+  const s = (u - 0.8) / 0.2
   return 1 - s * s * (3 - 2 * s)
 }
 
@@ -212,7 +227,19 @@ interface VrmDebug {
   /** Hand-book prop, when attached: world position + reading state. */
   book: { world: [number, number, number]; reading: boolean; blend: number; prop: 'open' | 'none' } | null
   /** Walk state, for the cloud-browser check (see layout() + the walk effect). */
-  walk: { tick: number; t: number; x: number; rig: boolean; reducedMotion: boolean; hidden: boolean }
+  walk: {
+    tick: number
+    t: number
+    x: number
+    rig: boolean
+    reducedMotion: boolean
+    hidden: boolean
+    /** Fix pass 7: live leg angles (radians) read back from the VRM's normalized nodes. */
+    kneeL: number
+    thighL: number
+    kneeR: number
+    thighR: number
+  }
 }
 
 declare global {
@@ -510,6 +537,10 @@ export default function VrmModel({
         rig: !!threeRef.current?.walkRig,
         reducedMotion,
         hidden: document.hidden,
+        kneeL: 0,
+        thighL: 0,
+        kneeR: 0,
+        thighR: 0,
       },
     }
   }, [])
@@ -544,7 +575,7 @@ export default function VrmModel({
       layout()
       // Walk readout (MenuVita panel): report the trigger at once, so
       // the panel reacts even before the render loop's first frame.
-      setWalkStatus({ walking: true, step: 1, steps: STEP_COUNT, x: w.fromX, tick: walkTick })
+      setWalkStatus({ walking: true, step: 1, steps: STEP_COUNT, x: w.fromX, tick: walkTick, kneeDeg: 0 })
       // Walk debug hook: record the trigger so the cloud-browser
       // check reads state instead of guessing. layout()'s snapshot
       // is mount-time only (its walkTick is the mount value), so the
@@ -559,6 +590,10 @@ export default function VrmModel({
           rig: !!threeRef.current?.walkRig,
           reducedMotion,
           hidden: document.hidden,
+          kneeL: 0,
+          thighL: 0,
+          kneeR: 0,
+          thighR: 0,
         }
       }
     }
@@ -600,6 +635,10 @@ export default function VrmModel({
           rig: !!threeRef.current?.walkRig,
           reducedMotion,
           hidden: document.hidden,
+          kneeL: 0,
+          thighL: 0,
+          kneeR: 0,
+          thighR: 0,
         },
       }
       setStatus('failed')
@@ -862,6 +901,14 @@ export default function VrmModel({
         const rig = three.walkRig
         let walkTurn = 0
         let walkStep = 0
+        // Fix pass 7 (reading-pose audit follow-up): the walk's
+        // left-arm counter-swing, captured here so the reading block
+        // can set the reading arm ABSOLUTELY (see below) instead of
+        // += — the += form only works because the walk block resets
+        // the arm first, and if the walk block ever skips a frame it
+        // accumulates 0.6·blend rad per frame, the one path that
+        // could put the hand genuinely at head height.
+        let walkArmSwing = 0
         if (rig) {
           const w = walkRef.current
           const wt = w.t
@@ -938,6 +985,10 @@ export default function VrmModel({
             const armPhase = (wt / (STEP_DURATION * 2)) * Math.PI * 2
             const armS = Math.sin(armPhase)
             setX(rig.leftUpperArm, 0.45 * armS * (1 - readingBlendRef.current))
+            // Capture the swing just applied (setX adds v*env to
+            // baseX) so the reading block can reproduce it absolutely
+            // below, without depending on this setX having run.
+            walkArmSwing = 0.45 * armS * (1 - readingBlendRef.current) * env
             setX(rig.rightUpperArm, -0.45 * armS)
             // Hip: dips at double support, rises mid-swing; pelvis rocks.
             three.group.position.y = -HIP_BOB * (1 - lift) * env
@@ -970,12 +1021,22 @@ export default function VrmModel({
         // so the walk is observable as plain DOM text in the panel.
         // The store only notifies on a displayed change, so the
         // 60 fps writes do not re-render the panel 60 times a second.
+        // Live knee angle (fix pass 7): read BACK from the VRM's
+        // normalized leg nodes — the stepping knee's rotation.x in
+        // degrees. This is the runtime value, not the commanded
+        // constant: if the gait writes were lost anywhere, this
+        // reads 0 while walking. The panel shows it as DOM text.
+        const walkRig = three.walkRig
+        const kneeDeg = walkRig
+          ? (Math.max(walkRig.leftLowerLeg.rotation.x, walkRig.rightLowerLeg.rotation.x) * 180) / Math.PI
+          : 0
         setWalkStatus({
           walking: walkRef.current.t < WALK_DURATION,
           step: walkStep,
           steps: STEP_COUNT,
           x: three.group.position.x,
           tick: walkTickRef.current,
+          kneeDeg,
         })
 
         const speaking = bridge.isSpeaking()
@@ -1061,10 +1122,18 @@ export default function VrmModel({
           // frame and, once the walk ended, the whole arm orbited the
           // shoulder and the book swept across her face (Node sim:
           // hand y 0.94 → 1.76 m, z +0.41 → -0.39 over 5 s).
-          // Upper arm: while walking, the walk block just set
-          // rotation.x absolutely this frame, so add the reading
-          // delta onto it; once the walk is done, set it absolutely
-          // from the stored rest base. Elbow: the world-axis bend
+          // Upper arm: ABSOLUTE in both branches (fix pass 7 —
+          // reading-pose audit follow-up). The old `+=` during the
+          // walk only worked because the walk block had just set
+          // rotation.x absolutely this frame; if the walk block ever
+          // skipped a frame it accumulated 0.6·blend rad per frame —
+          // the one path that could put the hand genuinely at head
+          // height. Now the walk counter-swing is folded in
+          // explicitly (walkArmSwing, captured above; 0 when the
+          // walk is not running), so the total is identical to
+          // before when the walk runs, and correct when it does not.
+          // Once the walk is done, set it absolutely from the
+          // stored rest base. Elbow: the world-axis bend
           // (see ReadRig) — q' = P^-1 * Q * P * qRest, P = upper arm
           // world quat NOW — applied every frame, so at blend 0 it
           // restores the rest quaternion exactly. The head dip is
@@ -1072,7 +1141,7 @@ export default function VrmModel({
           // absolutely every frame before this runs.
           if (rr) {
             if (walkRef.current.t < WALK_DURATION) {
-              rr.leftUpperArm.rotation.x += READ_UPPER * blend
+              rr.leftUpperArm.rotation.x = rr.upperBaseX + walkArmSwing + READ_UPPER * blend
             } else {
               rr.leftUpperArm.rotation.x = rr.upperBaseX + READ_UPPER * blend
             }
@@ -1158,7 +1227,17 @@ export default function VrmModel({
               // book), and the reading pose is the one that matters.
               // Hands empty at idle beats a slab. The carry prop stays
               // in the rig (built + oriented as before) but invisible.
-              hb.group.visible = blend >= 0.5
+              // Fix pass 7: the open spread stays visible for the
+              // WHOLE reading, not just while blend >= 0.5. The old
+              // threshold hid the book as soon as the reading ended
+              // and blend fell below 0.5 — while the arm was still
+              // half-raised — leaving an empty raised palm (pass-6
+              // check, ~20 s into the VINS reading). Now the spread
+              // shows whenever she is reading, and stays up while the
+              // arm is still visibly raised on the way down (blend >
+              // 0.1); it hides only once the arm is nearly down, so
+              // the idle hands-empty rule (pass 6) still holds.
+              hb.group.visible = read.active || blend > 0.1
               hb.carry.visible = false
             }
             // Cover opens once the arm is on its way up — swung BEHIND
@@ -1208,7 +1287,7 @@ export default function VrmModel({
                 world: [bookWorld.x, bookWorld.y, bookWorld.z],
                 reading: read.active,
                 blend: Math.round(blend * 100) / 100,
-                prop: blend >= 0.5 ? 'open' : 'none',
+                prop: read.active || blend > 0.1 ? 'open' : 'none',
               }
             }
           }
@@ -1221,15 +1300,35 @@ export default function VrmModel({
         // per-frame values refresh from the refs.
         const wdbg = window.__vrmDebug
         if (wdbg) {
+          const wr = three.walkRig
           wdbg.walk = {
             tick: wdbg.walk?.tick ?? 0,
             t: walkRef.current.t,
             x: three.group.position.x,
-            rig: !!three.walkRig,
+            rig: !!wr,
             reducedMotion,
             hidden: document.hidden,
+            // Fix pass 7: live leg angles read back from the VRM's
+            // normalized nodes (radians) — the runtime proof the
+            // gait writes reach the bones. 0 at rest; knee ≈ 1.0,
+            // thigh ≈ −0.45 at full bend.
+            kneeL: wr ? Math.round(wr.leftLowerLeg.rotation.x * 100) / 100 : 0,
+            thighL: wr ? Math.round(wr.leftUpperLeg.rotation.x * 100) / 100 : 0,
+            kneeR: wr ? Math.round(wr.rightLowerLeg.rotation.x * 100) / 100 : 0,
+            thighR: wr ? Math.round(wr.rightUpperLeg.rotation.x * 100) / 100 : 0,
           }
         }
+
+        // Fix pass 7: sync the CURRENT frame's normalized writes
+        // (walk + reading) onto the raw skinned bones BEFORE the
+        // render. The loop's vrm.update() at the top syncs the
+        // PREVIOUS frame's writes, so without this the rendered
+        // frame always lags one frame behind the pose — harmless at
+        // 60 fps, but the render should show the pose the loop just
+        // wrote. humanoid.update() only copies normalized → raw (no
+        // spring bones, no lookAt, no expressions), so it cannot
+        // disturb anything else.
+        three.vrm.humanoid?.update()
 
         three.renderer.render(three.scene, three.camera)
       }
@@ -1252,6 +1351,7 @@ export default function VrmModel({
         steps: STEP_COUNT,
         x: three?.group.position.x ?? walkRef.current.toX,
         tick: walkTickRef.current,
+        kneeDeg: 0,
       })
       threeRef.current = null
       if (three) {
