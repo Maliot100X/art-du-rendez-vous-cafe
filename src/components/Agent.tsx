@@ -20,7 +20,7 @@ import { setVoiceLive, useAgentStatus } from '../lib/agentStatus'
 import { avatarBridge } from '../lib/avatarBridge'
 import { getLastBookCategory, onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
-import { DeepgramVoiceAgent, type GrantFailureDetail, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
+import { DeepgramVoiceAgent, type GrantFailureDetail, type VoiceErrorReason, type VoiceStage, type VoiceStatus } from '../lib/voiceAgent'
 import type { OrderLine } from './MenuSection'
 import { EASE_SILK, ScrollTrigger } from '../lib/motion'
 import { lazyWithRetry } from '../lib/lazyRetry'
@@ -109,6 +109,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     status: VoiceStatus
     error?: VoiceErrorReason
     grantDetail?: GrantFailureDetail
+    stage?: VoiceStage
   }>({
     status: 'idle',
   })
@@ -298,11 +299,19 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   // ('grant-network' / 'grant-timeout' / 'grant-http' / 'grant-empty',
   // with attempt count and HTTP status) and the UI shows it below —
   // the plain 'no-token' survives only for the dev-only fallback.
+  // Fix pass 17: the client asks for the microphone FIRST (in the
+  // tap's gesture) and fetches the grant concurrently, and it reports
+  // the real connecting stage ('mic' | 'grant' | 'socket') plus a
+  // classified mic failure — 'mic-blocked' (mic blocked for this
+  // site: re-enable it in the browser's site settings),
+  // 'mic-dismissed' (prompt closed without an answer: just retry),
+  // 'mic-timeout' (prompt unanswered for 30 s) — instead of the old
+  // blanket "Micro non autorisé" for all three.
   const startVoice = () => {
     const agent = new DeepgramVoiceAgent(
       {
-        onStatus: (status, error, grantDetail) => {
-          setVoiceState({ status, error, grantDetail })
+        onStatus: (status, error, grantDetail, stage) => {
+          setVoiceState({ status, error, grantDetail, stage })
           // Fix pass 16, group 3: the voice-call state also lives in
           // the single shared store (src/lib/agentStatus.ts) — this
           // component is its only writer, and any surface that needs
@@ -390,6 +399,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const voiceStatusText = () => {
     switch (voiceState.status) {
       case 'connecting':
+        // Fix pass 17: the connecting line names the real step —
+        // mic permission, grant fetch, or agent socket — instead of
+        // the bare "Connexion…" for all three.
+        if (voiceState.stage === 'mic') return AGENT.voiceConnectingMic
+        if (voiceState.stage === 'grant') return AGENT.voiceConnectingGrant
         return AGENT.voiceConnecting
       case 'live':
         return agentSpeaking ? AGENT.voiceSpeaking : AGENT.voiceListening
@@ -404,10 +418,18 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
             return grantStatusText(voiceState.error, voiceState.grantDetail)
           case 'mic-denied':
             return AGENT.voiceDenied
+          case 'mic-blocked':
+            return AGENT.voiceMicBlocked
+          case 'mic-dismissed':
+            return AGENT.voiceMicDismissed
           case 'mic-missing':
             return AGENT.voiceMicMissing
+          case 'mic-timeout':
+            return AGENT.voiceMicTimeout
           case 'worklet-unsupported':
             return AGENT.voiceWorklet
+          case 'socket-timeout':
+            return AGENT.voiceSocketTimeout
           case 'settings-rejected':
             return AGENT.voiceSettingsError
           default:

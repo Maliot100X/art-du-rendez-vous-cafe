@@ -15,6 +15,37 @@
  * shared avatar bridge (src/lib/avatarBridge.ts). Barge-in:
  * UserStartedSpeaking stops playback immediately and drops the queue.
  *
+ * FIX PASS 17, GROUP 3 — MIC FIRST (root cause of the 00:03–00:08 CET
+ * cloud-check failure): start() used to await the grant fetch FIRST
+ * (1–2 s healthy, up to ~33 s with the fix-16 retries) and only then
+ * call getUserMedia — so the mic prompt arrived seconds after the tap,
+ * detached from the user gesture (Safari suppresses a gesture-less
+ * mic request; Chrome is less reliable about it too), and in the
+ * headless browser the cloud check used, getUserMedia auto-denied
+ * with NotAllowedError and no prompt at all. The grant HAD succeeded
+ * (a grant failure reports grant-*, never mic-*), but the UI could
+ * only say "Micro non autorisé" — the code never recorded which step
+ * was actually attempted, and micErrorReason mapped every
+ * unclassified rejection to 'mic-denied'. So now: getUserMedia is
+ * fired synchronously in start() — the first statement after the
+ * 'connecting' status, still inside the tap's gesture — and the
+ * grant fetch runs CONCURRENTLY (its result is only awaited once
+ * the mic is in hand; a mic failure reports immediately and the
+ * grant result is ignored). The connecting status carries the real
+ * stage ('mic' | 'grant' | 'socket') so the UI says what is
+ * happening, mic failures are classified against the live
+ * permission state ('mic-blocked' when the browser has the mic
+ * blocked for this site, 'mic-dismissed' when the prompt was
+ * closed/auto-denied without a decision, 'mic-timeout' when the
+ * prompt sits unanswered for 30 s), and a socket that opens but
+ * never reaches SettingsApplied times out after 20 s
+ * ('socket-timeout') instead of sticking on "Connexion…" forever.
+ * A stop() mid-connect bumps the generation counter, so a late mic
+ * grant or grant token can never start a call after the user ended
+ * it (late mic tracks are stopped on arrival); ws.onmessage
+ * likewise ignores frames that arrive after stop(), so a late
+ * Welcome/SettingsApplied cannot flip an ended call to 'live'.
+ *
  * TOKEN — read this before touching this file:
  * The browser cannot set an Authorization header on a WebSocket, so
  * the client authenticates with a short-lived JWT minted by
@@ -192,10 +223,24 @@ export type VoiceErrorReason =
   | 'grant-http'
   | 'grant-empty'
   | 'mic-denied'
+  | 'mic-blocked'
+  | 'mic-dismissed'
   | 'mic-missing'
+  | 'mic-timeout'
   | 'worklet-unsupported'
   | 'socket-error'
+  | 'socket-timeout'
   | 'settings-rejected'
+
+/**
+ * Which step a voice call is on while 'connecting' — the UI shows
+ * the real step instead of the bare "Connexion…" (fix pass 17).
+ * 'mic' — waiting on the microphone permission / device;
+ * 'grant' — mic in hand, waiting on the same-origin grant fetch;
+ * 'socket' — token in hand, waiting on the agent WebSocket
+ * (Welcome → Settings → SettingsApplied).
+ */
+export type VoiceStage = 'mic' | 'grant' | 'socket'
 
 export interface VoiceOrderLine {
   name: string
@@ -203,7 +248,12 @@ export interface VoiceOrderLine {
 }
 
 export interface VoiceAgentCallbacks {
-  onStatus: (status: VoiceStatus, error?: VoiceErrorReason, grantDetail?: GrantFailureDetail) => void
+  onStatus: (
+    status: VoiceStatus,
+    error?: VoiceErrorReason,
+    grantDetail?: GrantFailureDetail,
+    stage?: VoiceStage,
+  ) => void
   onTranscript: (role: 'user' | 'assistant', text: string) => void
   onOrderAdded: (line: VoiceOrderLine) => void
 }
@@ -431,22 +481,70 @@ function findMenuItem(name: string): VoiceOrderLine | null {
 }
 
 /**
- * Map a getUserMedia failure to the honest reason. A refused permission
- * (NotAllowedError, SecurityError) is 'mic-denied'; no microphone on the
- * device — or one that cannot be read or satisfied (NotFoundError,
- * NotReadableError, OverconstrainedError) — is 'mic-missing'. Anything
- * unclassified keeps the old 'mic-denied' so no failure is ever silent.
- * getUserMedia rejects with a DOMException (not an Error subclass), so
- * the name is read off any object-like value.
+ * Fix pass 17: how long an unanswered mic prompt may keep the call
+ * on "Connexion…" (30 s — a real user needs time to find the prompt;
+ * headless auto-deny resolves in ms, so this only bites a prompt
+ * nobody answers), and how long the agent socket may stay open
+ * without reaching SettingsApplied (20 s — a healthy handshake is
+ * ~1 s; past that the socket is wedged, not slow).
  */
-function micErrorReason(err: unknown): VoiceErrorReason {
+const MIC_PROMPT_TIMEOUT_MS = 30_000
+const SOCKET_HANDSHAKE_TIMEOUT_MS = 20_000
+
+/**
+ * Live microphone permission state, for telling the failures apart
+ * (fix pass 17). Returns null when the Permissions API is absent or
+ * the query throws — the caller then falls back to the raw error
+ * name, never to a guess.
+ */
+async function micPermissionState(): Promise<'granted' | 'prompt' | 'denied' | null> {
+  try {
+    const perms = navigator.permissions
+    if (!perms?.query) return null
+    const result = await perms.query({ name: 'microphone' })
+    if (result.state === 'granted' || result.state === 'prompt' || result.state === 'denied') {
+      return result.state
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Map a getUserMedia failure to the honest reason (fix pass 17 —
+ * the old version mapped EVERYTHING unclassified to 'mic-denied',
+ * so "blocked in site settings", "prompt dismissed" and "headless
+ * auto-deny with no prompt shown" all rendered as the same
+ * "Micro non autorisé"). A refused permission (NotAllowedError,
+ * SecurityError) is classified against the live permission state:
+ * 'denied' means the browser has the mic blocked for this site
+ * ('mic-blocked' — the user must re-enable it in site settings,
+ * retrying alone will never help); 'prompt' means the prompt was
+ * closed or auto-denied without a decision ('mic-dismissed' — the
+ * user can simply retry and answer it). No microphone on the device
+ * — or one that cannot be read or satisfied (NotFoundError,
+ * NotReadableError, OverconstrainedError) — is 'mic-missing'.
+ * SecurityError (insecure context, or an iframe without
+ * allow="microphone") and anything unclassified keep the old
+ * 'mic-denied' so no failure is ever silent. getUserMedia rejects
+ * with a DOMException (not an Error subclass), so the name is read
+ * off any object-like value.
+ */
+async function classifyMicError(err: unknown): Promise<VoiceErrorReason> {
   const name =
     typeof err === 'object' && err !== null && 'name' in err
       ? String((err as { name: unknown }).name)
       : ''
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'mic-denied'
   if (name === 'NotFoundError' || name === 'NotReadableError' || name === 'OverconstrainedError')
     return 'mic-missing'
+  if (name === 'SecurityError') return 'mic-denied'
+  if (name === 'NotAllowedError') {
+    const state = await micPermissionState()
+    if (state === 'denied') return 'mic-blocked'
+    if (state === 'prompt') return 'mic-dismissed'
+    return 'mic-denied'
+  }
   return 'mic-denied'
 }
 
@@ -468,6 +566,12 @@ export class DeepgramVoiceAgent {
   private settingsApplied = false
   private running = false
   private stopped = false
+  // Fix pass 17: every start() takes a generation number; stop() and
+  // any terminal failure bump it, so a late mic grant, a late grant
+  // token or a late socket event from an abandoned start() can never
+  // resurrect a call the user already ended.
+  private generation = 0
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     callbacks: VoiceAgentCallbacks,
@@ -486,26 +590,84 @@ export class DeepgramVoiceAgent {
   async start(): Promise<void> {
     if (this.running) return
     this.stopped = false
-    this.callbacks.onStatus('connecting')
+    this.generation += 1
+    const gen = this.generation
+    const stale = () => gen !== this.generation
+    this.callbacks.onStatus('connecting', undefined, undefined, 'mic')
 
-    // 1. Short-lived JWT FIRST (see the token note at the top of this
+    // 1. Microphone FIRST, synchronously in the tap's gesture (fix
+    //    pass 17 — see the file header). The old order awaited the
+    //    grant fetch first, so the prompt arrived seconds after the
+    //    tap, detached from the gesture, and a headless browser
+    //    auto-denied with no prompt at all. Nothing is awaited
+    //    before this call. A device with no mic API at all has no
+    //    microphone: 'mic-missing' without prompting and without
+    //    spending a grant fetch.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.callbacks.onStatus('ended', 'mic-missing')
+      return
+    }
+    const micPromise = navigator.mediaDevices.getUserMedia({ audio: true })
+
+    // 2. Grant fetch, CONCURRENTLY — its result is only awaited once
+    //    the mic is in hand (step 3). A mic failure reports
+    //    immediately and the grant result is ignored (the minted
+    //    token, if any, simply expires unused — no key is ever in
+    //    the browser). The same-origin fetch still retries transient
+    //    failures (fix pass 16, group 4).
+    const grantPromise = fetchGrantToken()
+
+    // The mic prompt may sit unanswered: race it against a timeout
+    // so the call never sticks on "Connexion…" forever. A late mic
+    // grant (user answers after we gave up, or after stop()) must
+    // never start a call — its tracks are stopped on arrival.
+    const micResult = await Promise.race([
+      micPromise.then(
+        (stream) => ({ ok: true as const, stream }),
+        async (err) => ({ ok: false as const, reason: await classifyMicError(err) }),
+      ),
+      sleep(MIC_PROMPT_TIMEOUT_MS).then(
+        () => ({ ok: false as const, reason: 'mic-timeout' as const }),
+      ),
+    ])
+    if (!micResult.ok) {
+      void micPromise.then(
+        (stream) => stream.getTracks().forEach((track) => track.stop()),
+        () => undefined,
+      )
+      void grantPromise.catch(() => undefined)
+      // stop() may have run while the prompt was open — it already
+      // reported 'idle', so do not overwrite it with 'ended'.
+      if (!stale()) this.callbacks.onStatus('ended', micResult.reason)
+      return
+    }
+    if (stale()) {
+      // stop() ran while the prompt was open — do not keep the mic.
+      micResult.stream.getTracks().forEach((track) => track.stop())
+      void grantPromise.catch(() => undefined)
+      return
+    }
+    const stream = micResult.stream
+    this.micStream = stream
+
+    // 3. Short-lived JWT (see the token note at the top of this
     //    file). The same-origin grant fetch retries transient failures
     //    (fix pass 16, group 4), so a single tunnel/proxy flake no
     //    longer kills the call. If it still fails, the GrantError
     //    carries the real reason (network/timeout/HTTP status/empty)
     //    and the attempt count, and that — not the generic 'no-token'
     //    — is what the UI shows. A plain Error('no-token') still
-    //    means the dev-only fallback had no key configured. This must
-    //    fail BEFORE the microphone is touched, so a mic-less or
-    //    denying browser never reports a mic error for what is really
-    //    a missing token. No mic stream exists yet at this point, so
-    //    there is nothing half-open to clean up; the cleanupMic() call
-    //    stays as a guard.
+    //    means the dev-only fallback had no key configured. The mic
+    //    stream is already open at this point, so a grant failure
+    //    stops its tracks (cleanupMic) — never leave a live mic
+    //    behind on a failed call.
+    this.callbacks.onStatus('connecting', undefined, undefined, 'grant')
     let token: string
     try {
-      token = await fetchGrantToken()
+      token = await grantPromise
     } catch (err) {
       this.cleanupMic()
+      if (stale()) return
       if (err instanceof GrantError) {
         this.callbacks.onStatus('ended', grantReasonFor(err.kind), err.toDetail())
       } else {
@@ -513,24 +675,12 @@ export class DeepgramVoiceAgent {
       }
       return
     }
-
-    // 2. Microphone — only once a token exists. A device with no mic
-    //    API at all has no microphone: 'mic-missing' without prompting.
-    //    Failures are told apart by error name (see micErrorReason).
-    if (!navigator.mediaDevices?.getUserMedia) {
-      this.callbacks.onStatus('ended', 'mic-missing')
+    if (stale()) {
+      this.cleanupMic()
       return
     }
-    let stream: MediaStream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch (err) {
-      this.callbacks.onStatus('ended', micErrorReason(err))
-      return
-    }
-    this.micStream = stream
 
-    // 3. Playback chain: sources -> AnalyserNode tap -> gain -> speakers.
+    // 4. Playback chain: sources -> AnalyserNode tap -> gain -> speakers.
     const ctx = new AudioContext()
     this.ctx = ctx
     const analyser = ctx.createAnalyser()
@@ -542,8 +692,12 @@ export class DeepgramVoiceAgent {
     this.analyser = analyser
     this.analyserBuf = new Float32Array(analyser.fftSize)
     await ctx.resume().catch(() => undefined)
+    if (stale()) {
+      this.cleanupAll()
+      return
+    }
 
-    // 4. Mic capture worklet (16 kHz mono PCM16). No worklet, no call.
+    // 5. Mic capture worklet (16 kHz mono PCM16). No worklet, no call.
     try {
       if (!ctx.audioWorklet) throw new Error('no-worklet')
       await ctx.audioWorklet.addModule('/worklets/pcm16-capture.js')
@@ -561,23 +715,46 @@ export class DeepgramVoiceAgent {
       this.worklet = node
     } catch {
       this.cleanupAll()
-      this.callbacks.onStatus('ended', 'worklet-unsupported')
+      if (!stale()) this.callbacks.onStatus('ended', 'worklet-unsupported')
+      return
+    }
+    if (stale()) {
+      this.cleanupAll()
       return
     }
 
-    // 5. Agent socket. Browsers cannot set headers on a WebSocket, so
+    // 6. Agent socket. Browsers cannot set headers on a WebSocket, so
     //    the JWT travels as the Sec-WebSocket-Protocol value.
+    this.callbacks.onStatus('connecting', undefined, undefined, 'socket')
     const ws = new WebSocket(AGENT_SOCKET_URL, ['bearer', token])
     ws.binaryType = 'arraybuffer'
     this.ws = ws
     this.running = true
     this.lastSampleAt = performance.now()
     this.startVisemeLoop()
+    // Handshake timeout (fix pass 17): a socket that opens but never
+    // reaches SettingsApplied used to stick on "Connexion…" forever.
+    // A healthy handshake is ~1 s; past 20 s the socket is wedged.
+    this.clearHandshakeTimer()
+    this.handshakeTimer = setTimeout(() => {
+      this.handshakeTimer = null
+      if (!this.stopped && this.running && !this.settingsApplied && gen === this.generation) {
+        this.cleanupAll()
+        this.callbacks.onStatus('ended', 'socket-timeout')
+      }
+    }, SOCKET_HANDSHAKE_TIMEOUT_MS)
 
     ws.onopen = () => {
       // Nothing is sent before Welcome.
     }
     ws.onmessage = (event: MessageEvent) => {
+      // Fix pass 17: a frame already in flight when stop() runs can
+      // still be delivered after cleanup (the socket close is async)
+      // — a late Welcome/SettingsApplied must not resurrect the call
+      // to 'live' after the user ended it. ws.onerror/onclose already
+      // check this.stopped; onmessage did not, and the probe caught
+      // a late SettingsApplied flipping an ended call to 'live'.
+      if (this.stopped) return
       if (typeof event.data === 'string') {
         this.handleServerMessage(event.data)
       } else if (event.data instanceof ArrayBuffer) {
@@ -600,8 +777,19 @@ export class DeepgramVoiceAgent {
 
   stop() {
     this.stopped = true
+    // Invalidate any start() still awaiting the mic prompt, the grant
+    // fetch or the socket handshake (fix pass 17) — its late
+    // continuations check the generation and stand down.
+    this.generation += 1
     this.cleanupAll()
     this.callbacks.onStatus('idle')
+  }
+
+  private clearHandshakeTimer() {
+    if (this.handshakeTimer !== null) {
+      clearTimeout(this.handshakeTimer)
+      this.handshakeTimer = null
+    }
   }
 
   private handleServerMessage(raw: string) {
@@ -617,6 +805,7 @@ export class DeepgramVoiceAgent {
         break
       case 'SettingsApplied':
         this.settingsApplied = true
+        this.clearHandshakeTimer()
         this.callbacks.onStatus('live')
         break
       case 'UserStartedSpeaking':
@@ -775,6 +964,7 @@ export class DeepgramVoiceAgent {
   private cleanupAll() {
     this.running = false
     this.settingsApplied = false
+    this.clearHandshakeTimer()
     cancelAnimationFrame(this.rafId)
     this.stopPlayback()
     try {
