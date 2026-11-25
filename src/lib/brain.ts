@@ -1,5 +1,6 @@
 import { CAFE, CHARACTER, MENU } from '../content'
 import { botReply, expressionForReply, type BotReply } from './agentBrain'
+import { getAgentStatus, markBrainLive } from './agentStatus'
 
 /**
  * LLM-brain adapter for the café live agent (text chat).
@@ -89,13 +90,19 @@ export function isBrainConfigured(): boolean {
   return Boolean(brainConfig().key)
 }
 
-// Set to true only by a successful LLM call (see askBrain). Module-level
-// so both chat surfaces (Agent tab + menu mini-chat) share the truth.
-let brainLive = false
+// Fix pass 16, group 3: the live flag lives in the single shared
+// agent-status store (src/lib/agentStatus.ts), NOT here. The old
+// module-level `brainLive` in this file was the truth no component
+// ever read — Agent and MenuGuide each kept their own useState copy,
+// which is how the pill and the banner disagreed and how the pill
+// reverted on tab navigation. askBrain() below calls markBrainLive()
+// on a successful LLM call, so EVERY caller (Agent chat, menu
+// mini-chat, App's "Demander à la barmaid") flips the one shared
+// truth, and every surface reads it through useAgentStatus().
 
 /** True only after at least one LLM call has succeeded in this session. */
 export function brainWasLive(): boolean {
-  return brainLive
+  return getAgentStatus().brainLive
 }
 
 function menuSummary(): string {
@@ -267,7 +274,11 @@ export async function askBrain(
   const offline = botReply(clean)
   try {
     const text = await callLlm(clean, history, opts?.persona ?? 'nekomi')
-    brainLive = true
+    // Fix pass 16, group 3: flip the ONE shared truth — every status
+    // surface (Agent pill, LA CARTE banner, chat hint) reads it from
+    // the agent-status store, so no caller has to remember to set its
+    // own local copy (and none may: there is no local copy any more).
+    markBrainLive()
     return {
       reply: {
         text,

@@ -16,6 +16,7 @@ import {
 import { AGENT, CHARACTER, MENU } from '../content'
 import { expressionForReply, orderTotal, type BotAction } from '../lib/agentBrain'
 import { askBrain } from '../lib/brain'
+import { setVoiceLive, useAgentStatus } from '../lib/agentStatus'
 import { avatarBridge } from '../lib/avatarBridge'
 import { getLastBookCategory, onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
@@ -92,10 +93,15 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     () => lastChatMessages ?? [{ role: 'bot', text: CHARACTER.greetings.agent }],
   )
   const [input, setInput] = useState('')
-  // True only after the LLM brain has actually answered once (see
-  // src/lib/brain.ts): a configured key alone never flips this — the
-  // status pill must not claim "connecté" while the brain is offline.
-  const [brainLive, setBrainLive] = useState(false)
+  // Fix pass 16, group 3: NO local brainLive any more. The status
+  // comes from the single shared store (src/lib/agentStatus.ts) —
+  // the old per-mount useState(false) reset on every tab switch
+  // (the tab shell unmounts this component), so the pill reverted to
+  // "chat disponible" after the brain had already answered live,
+  // while the LA CARTE banner kept its own separate copy. brain.ts
+  // flips the shared truth on a successful LLM call; this component
+  // only reads it.
+  const { brainLive } = useAgentStatus()
   const [answering, setAnswering] = useState(false)
   const [qr, setQr] = useState<string | null>(null)
   const [qrFailed, setQrFailed] = useState(false)
@@ -206,8 +212,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         }),
       )
     void askBrain(clean, history, { persona: 'nekomi' })
-      .then(({ reply, source }) => {
-        if (source === 'llm') setBrainLive(true)
+      .then(({ reply }) => {
+        // Fix pass 16, group 3: no setBrainLive here any more —
+        // askBrain() marks the shared store itself on an LLM reply,
+        // so the pill, the LA CARTE banner and the chat hint all flip
+        // together from the one truth.
         avatarBridge.setExpression(reply.expression ?? 'neutral')
         setMessages((prev) => [...prev, { role: 'bot', text: reply.text, actions: reply.actions }])
         // Fix pass 15: clear the thinking flag in the SAME batch as
@@ -289,6 +298,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
       {
         onStatus: (status, error) => {
           setVoiceState({ status, error })
+          // Fix pass 16, group 3: the voice-call state also lives in
+          // the single shared store (src/lib/agentStatus.ts) — this
+          // component is its only writer, and any surface that needs
+          // it reads the same value instead of a second copy.
+          setVoiceLive(status === 'live' || status === 'connecting')
           if (status === 'idle' || status === 'ended') {
             voiceAgentRef.current = null
             if (levelRef.current) levelRef.current.style.transform = 'scaleX(0.04)'
@@ -317,9 +331,20 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const stopVoice = () => {
     voiceAgentRef.current?.stop()
     voiceAgentRef.current = null
+    setVoiceLive(false)
   }
 
-  useEffect(() => () => voiceAgentRef.current?.stop(), [])
+  // Fix pass 16, group 3: leaving the tab unmounts this component
+  // and stops the voice client — the shared voiceLive clears with it
+  // (voice is NOT sticky the way brainLive is: a call that ended is
+  // over, while a brain that answered stays live for the session).
+  useEffect(
+    () => () => {
+      voiceAgentRef.current?.stop()
+      setVoiceLive(false)
+    },
+    [],
+  )
 
   // The agent's speaking state drives the voice status line.
   useEffect(() => avatarBridge.subscribe((state) => setAgentSpeaking(state.speaking)), [])
@@ -396,7 +421,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           }`}
         >
           <span className={`live-dot inline-block h-1.5 w-1.5 rounded-full ${brainLive ? 'bg-amber' : 'bg-ember'}`} />
-          {brainLive ? 'Agent en direct — cerveau connecté' : AGENT.statusOffline}
+          {brainLive ? AGENT.statusOnline : AGENT.statusOffline}
         </p>
       </div>
 

@@ -359,6 +359,10 @@ export const AGENT = {
   title: 'Parlez à Nekomi.',
   lede: "Notre agent connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle la note ici, prête à montrer au bar.",
   statusOffline: 'Agent — chat disponible · voix et cerveau bientôt en ligne',
+  // Fix pass 16, group 3: the connected pill says exactly this —
+  // the old wording (with the live-broadcast phrase) is gone from
+  // the whole site.
+  statusOnline: 'Cerveau connecté',
   statusHint:
     'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
   chatPlaceholder: 'Écrivez ici… ex. « un café et un Aperol Spritz »',
@@ -378,9 +382,9 @@ export const AGENT = {
   // stored Deepgram key is still rejected (401), so the voice call cannot
   // connect until a working key is re-entered — the UI says so plainly.
   voiceNoToken:
-    'La voix en direct n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
+    'La voix n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
   voiceWorklet:
-    'Votre navigateur ne permet pas la capture audio en direct — le chat texte reste disponible.',
+    'Votre navigateur ne permet pas la capture audio — le chat texte reste disponible.',
   voiceSocketError:
     'La connexion vocale a été interrompue. Réessayez, ou utilisez le chat texte.',
   voiceSettingsError:
