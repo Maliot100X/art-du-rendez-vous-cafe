@@ -84,7 +84,7 @@ const newDir = mkdtempSync(path.join(tmpdir(), 'fix14-new-'))
 transpile(path.join(root, 'src', 'lib', 'speech.ts'), newDir)
 const oldDir = mkdtempSync(path.join(tmpdir(), 'fix14-old-'))
 const oldSpeechSrc = path.join(oldDir, 'speech.ts')
-writeFileSync(oldSpeechSrc, execFileSync('git', ['show', 'HEAD:src/lib/speech.ts'], { cwd: root, encoding: 'utf8' }))
+writeFileSync(oldSpeechSrc, execFileSync('git', ['show', 'ce85faf:src/lib/speech.ts'], { cwd: root, encoding: 'utf8' }))
 // The old speech.ts lives in the tmp dir, so its relative imports must
 // resolve there too — copy the (unchanged) sibling libs alongside it.
 for (const f of ['avatarBridge.ts', 'speechViseme.ts']) {
