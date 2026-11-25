@@ -4,6 +4,18 @@ import { Plus } from 'lucide-react'
 import { MENU } from '../content'
 import { EASE_SILK, gsap, GSAP_EASE_SILK } from '../lib/motion'
 
+/**
+ * Fix pass 5: the active category survives unmount. The tab shell
+ * mounts only the active tab, so component-local state dies on every
+ * tab switch and the menu reset to MENU[0] ('chaudes'). The preserved
+ * value must live where MenuSection reads it as its INITIAL state —
+ * lifting it to App alone does not work, because the mount effect
+ * below reports outward on every mount and would overwrite the lifted
+ * value with a fresh 'chaudes'. Same module-level pattern as
+ * MenuBook's lastFlipped.
+ */
+let lastMenuCategory = MENU[0].id
+
 export interface OrderLine {
   name: string
   price: string
@@ -34,7 +46,7 @@ export default function MenuSection({
    */
   betweenBarAndList?: ReactNode
 }) {
-  const [active, setActive] = useState(MENU[0].id)
+  const [active, setActive] = useState(() => lastMenuCategory)
   const [added, setAdded] = useState<string | null>(null)
   const category = MENU.find((c) => c.id === active) ?? MENU[0]
   const reducedMotion = useReducedMotion()
@@ -147,7 +159,10 @@ export default function MenuSection({
               type="button"
               role="tab"
               aria-selected={active === cat.id}
-              onClick={() => setActive(cat.id)}
+              onClick={() => {
+                lastMenuCategory = cat.id
+                setActive(cat.id)
+              }}
               className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                 active === cat.id
                   ? 'border-bone bg-bone text-ink'
