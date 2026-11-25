@@ -34,24 +34,36 @@ import { loadVrm } from '../lib/vrmCache'
  *
  * Hand book (menu tab, `withBook`): a small 3D book prop parented to
  * her leftHand bone (src/lib/handBook.ts). At rest she carries the
- * CLOSED book at her side (one page wide, cover facing front-left —
- * the open spread is 26 cm wide even shut, so it used to read as a
- * flat half-green billboard hanging below her hand). On a reading
- * trigger (`readingTick` + `readingCategory`) the left arm raises it
- * to chest height — hand 1.13 m, book centre 1.18 m (chest bone
- * 1.15 m), book top 1.27 m, 13 cm clear of her chin — the cover opens
- * and the pages turn (~every 4 s) while she speaks; when she finishes,
- * the arm eases back and the book closes. The pose is composed
- * ABSOLUTELY every frame (upper arm from its stored rest base, elbow
- * as a world-axis bend from its stored rest quaternion): the old code
- * added `rotation.x +=` every frame, which accumulated — the forearm
- * spun from the first frame and, once the 2.2 s walk stopped
- * re-setting the upper arm, the whole arm orbited the shoulder and
- * the book swept across her face. The book's world transform is
- * re-aimed every frame from the hand's world position, so its pages
- * stay camera-readable whatever the arm bones do — and the hand
- * supports the open book from below (book centre 5 cm above the
- * hand), so it is visibly IN her hand, not floating under it.
+ * CLOSED book at her side — its centre 6 cm below the hand and 1 cm
+ * BEHIND it, so the hand renders in front of the cover's top edge and
+ * the book reads as gripped, not floating (the old +3 cm forward put
+ * the cover in front of the hand and hid it). On a reading trigger
+ * (`readingTick` + `readingCategory`) the left arm raises it to chest
+ * height AND toward the midline (adduction +0.5) — hand (-0.01, 1.10,
+ * 0.32), book centre 1.19 m, book top 1.28 m, 12 cm clear of her chin
+ * (1.40 m) — the cover opens and the pages turn (~every 4 s) while
+ * she speaks; when she finishes, the arm eases back and the book
+ * closes. The pose is composed ABSOLUTELY every frame (upper arm
+ * from its stored rest base, elbow as a world-axis bend from its
+ * stored rest quaternion): the old code added `rotation.x +=` every
+ * frame, which accumulated — the forearm spun from the first frame
+ * and, once the 2.2 s walk stopped re-setting the upper arm, the
+ * whole arm orbited the shoulder and the book swept across her face.
+ * The book's world transform is re-aimed every frame from the hand's
+ * world position, so its pages stay camera-readable whatever the arm
+ * does — and the hand supports the open book from below (book centre
+ * 8.5 cm above the hand, palm on its bottom edge), so it is visibly
+ * IN her hand, not floating under it.
+ *
+ * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
+ * old ±0.32 m walk pushed the book out of the 0.72 m-wide frame on
+ * the left (open spread x[-232..-56] px, carry x[-94..-60] px at
+ * -0.32) and left the carry book's bottom corner flush with the
+ * stage's bottom edge. The walk now alternates between -0.08 and
+ * +0.14 m (0.22 m of travel — her whole body visibly shifts side to
+ * side across category switches) and every state (carry/open, both
+ * ends, desktop 356×480 + phone 358×260) projects fully inside the
+ * frame with ≥15 px margins.
  *
  * The same stage (withBook + reading) also mounts in the Livre tab,
  * beside the big book — see BookTab in App.tsx. Only one tab mounts
@@ -76,7 +88,16 @@ const FOV = 30
     screenshot taken after the window showed the identical pose and the
     walk was invisible. */
 const WALK_DURATION = 2.2
-const WALK_SIDE = 0.32
+/**
+ * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
+ * old symmetric ±0.32 m walk pushed the hand book out of the 0.72 m
+ * frame on the left side (the book hangs on her left hand). The ends
+ * are asymmetric on purpose — -0.08 / +0.14 m — so both props stay
+ * inside the frame at both ends, and the 0.22 m of travel still reads
+ * as a real traverse across category switches.
+ */
+const WALK_LEFT = -0.08
+const WALK_RIGHT = 0.14
 
 type Framing = 'full' | 'half' | 'face'
 
@@ -137,22 +158,30 @@ interface ReadRig {
   leftUpperArm: THREE.Object3D
   leftLowerArm: THREE.Object3D
   upperBaseX: number
+  /** Rest-pose rotation.z of the upper arm — the adduction below is
+      composed absolutely from this, like rotation.x. */
+  upperBaseZ: number
   lowerRestQuat: THREE.Quaternion
   hingeLocal: THREE.Vector3
 }
 
 /**
  * Reading pose, measured from the real VRM file (Node sim over the
- * normalized rig — /tmp/sim-hand-book*.mjs), not guessed:
- * upper arm forward -0.60 + elbow bend 0.60 (world-axis) puts the
- * hand at 1.13 m with a level forearm pointing forward, fingers
- * forward, and the book centre at 1.18 m — chest height (chest bone
- * 1.15 m), book top 1.27 m, 13 cm clear of her chin (1.40 m) at every
- * blend and on both walked sides. The old -0.55 / -1.55 only lifted
- * the hand to 1.00 m (waist height) with a twisted forearm.
+ * normalized rig — scripts/sim-fix4-book.mjs), not guessed:
+ * upper arm forward -0.60 + elbow bend 0.60 (world-axis) + adduction
+ * +0.50 toward the midline puts the hand at (-0.01, 1.10, 0.32) with
+ * a level forearm pointing forward, fingers forward, and the book
+ * centre at 1.19 m — chest height (chest bone 1.15 m), book top
+ * 1.28 m, 12 cm clear of her chin (1.40 m) at every blend and on
+ * both walked sides. The adduction is what keeps the 26 cm open
+ * spread inside the 0.72 m frame: without it the spread sticks 32 px
+ * out of the left edge even with no walk, and fully out after a
+ * leftward walk. The old -0.55 / -1.55 only lifted the hand to
+ * 1.00 m (waist height) with a twisted forearm.
  */
 const READ_UPPER = -0.6
 const READ_ELBOW = 0.6
+const READ_ADDUCT = 0.5
 
 interface ThreeStage {
   renderer: THREE.WebGLRenderer
@@ -242,7 +271,8 @@ export default function VrmModel({
     if (walkTick > 0 && !reducedMotion) {
       const w = walkRef.current
       w.fromX = w.toX
-      w.toX = w.toX >= 0 ? -WALK_SIDE : WALK_SIDE
+      // Alternate ends: at/near the right end go left, otherwise right.
+      w.toX = w.toX >= (WALK_LEFT + WALK_RIGHT) / 2 ? WALK_LEFT : WALK_RIGHT
       w.t = 0
     }
   }, [walkTick, reducedMotion])
@@ -336,9 +366,9 @@ export default function VrmModel({
       // Head to knees: the face stays ~2x larger than full-body on a
       // phone, and the legs (and the walk) stay in frame. Window is
       // 0.98 m tall, centred 0.31 m below the eyes (y 0.73–1.71) — it
-      // holds the carried book at rest (0.76–0.95 m) and the open
-      // book while reading (centre 1.18 m, top 1.27 m, measured —
-      // the reading pose in the loop), so neither clips an edge.
+      // holds the carried book at rest (0.77–0.96 m) and the open
+      // book while reading (centre 1.19 m, top 1.28 m, measured —
+      // scripts/sim-fix4-book.mjs), so neither clips an edge.
       targetY = eyePos.y - 0.31
       framedH = 0.98
       framedW = 0.6
@@ -510,8 +540,9 @@ export default function VrmModel({
       // loop is what keeps the book camera-readable and in her hand.
       // Local transform measured from the file, not guessed —
       // scripts/measure-hand-book.mjs: hand at (-0.212, 0.929, 0.002)
-      // in the posed VRM, book centre 8 cm below it and 3 cm forward,
-      // facing +Z (the camera).
+      // in the posed VRM. The loop re-aims the props in world space
+      // every frame, so this is only the first frame's pose (fix pass
+      // 4: rest centre 6 cm below the hand, 1 cm behind it).
       let handBook: HandBookRig | null = null
       let readRig: ReadRig | null = null
       if (withBook) {
@@ -551,6 +582,7 @@ export default function VrmModel({
               leftUpperArm,
               leftLowerArm,
               upperBaseX: leftUpperArm.rotation.x,
+              upperBaseZ: leftUpperArm.rotation.z,
               lowerRestQuat: leftLowerArm.quaternion.clone(),
               hingeLocal,
             }
@@ -766,6 +798,13 @@ export default function VrmModel({
             } else {
               rr.leftUpperArm.rotation.x = rr.upperBaseX + READ_UPPER * blend
             }
+            // Adduction toward the midline, absolute from the rest
+            // base: without it the 26 cm open spread sticks out of
+            // the left edge of the 0.72 m frame (measured — the sim
+            // puts the reading hand at x -0.01 with it, -0.20 without).
+            // The walk never writes rotation.z, so an absolute set is
+            // safe in both branches above.
+            rr.leftUpperArm.rotation.z = rr.upperBaseZ + READ_ADDUCT * blend
             rr.leftUpperArm.getWorldQuaternion(readParentQ)
             readHingeWorld.copy(rr.hingeLocal).applyQuaternion(readParentQ)
             readQWorld.setFromAxisAngle(readHingeWorld, READ_ELBOW * blend)
@@ -786,24 +825,34 @@ export default function VrmModel({
             if (hand) {
               // Book world transform, glued to the hand in WORLD space:
               // ONE shared centre for both props — the offset blends
-              // from rest (at her side, 8 cm below the hand, slightly
-              // forward — the hand grips the closed book's top edge)
-              // to reading (5 cm ABOVE the hand, 4 cm forward — the
-              // hand supports the open book from below, palm under the
-              // bottom spine edge, so the book is visibly IN her hand,
-              // not floating under it), and the facing stays
-              // camera-readable (group facing × a tilt back toward her
-              // face) whatever the arm bones do — parenting alone
-              // would roll the book with the hand and could hide the
-              // pages. The open spread faces the camera; the carry
-              // book faces front-left (Ry -0.9) at rest and turns to
-              // face the camera as it rises, so at the blend-0.5 swap
-              // the two props already agree on facing and the swap is
-              // only a shape change in place.
+              // from rest (at her side, 6 cm below the hand, 1 cm
+              // behind it — the hand renders in front of the cover's
+              // top edge, so the closed book reads as gripped)
+              // to reading (8.5 cm ABOVE the hand, 1 cm forward — the
+              // palm touches the open book's bottom edge, so the book
+              // is visibly IN her hand, not floating under it), and
+              // the facing stays camera-readable (group facing × a
+              // tilt back toward her face) whatever the arm bones do
+              // — parenting alone would roll the book with the hand
+              // and could hide the pages. The open spread faces the
+              // camera; the carry book faces front-left (Ry -0.9) at
+              // rest and turns to face the camera as it rises, so at
+              // the blend-0.5 swap the two props already agree on
+              // facing and the swap is only a shape change in place.
               hand.getWorldPosition(bookHandPos)
               hand.getWorldQuaternion(bookHandQuat)
-              bookOff.set(0.02, -0.08, 0.03)
-              bookOffRead.set(0, 0.05, 0.04)
+              // Fix pass 4 (measured — scripts/sim-fix4-book.mjs):
+              // rest (0.02, -0.06, -0.01) — the book's centre 6 cm
+              // below the hand and 1 cm BEHIND it, so the hand renders
+              // in front of the cover's top edge (gripped, not
+              // floating) and the bottom corner clears the stage's
+              // bottom edge by 15 px; reading (0, 0.085, 0.01) — the
+              // palm touches the open book's bottom edge. The old
+              // rest offset (+0.03 forward) hid the hand behind the
+              // cover, and the old reading offset (+0.05) left a
+              // 4.5 cm gap between palm and book.
+              bookOff.set(0.02, -0.06, -0.01)
+              bookOffRead.set(0, 0.085, 0.01)
               bookOff.lerp(bookOffRead, blend)
               bookInv.copy(bookHandQuat).invert()
               hb.group.position.copy(bookOff).applyQuaternion(bookInv)
