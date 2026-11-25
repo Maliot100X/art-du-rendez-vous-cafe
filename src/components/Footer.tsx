@@ -16,8 +16,29 @@ function useFitText(text: string) {
       if (!wrap || !probe) return
       const w = wrap.clientWidth
       const pw = probe.scrollWidth
-      if (pw === 0) return
-      probe.style.fontSize = `${(100 * w) / pw}px`
+      if (w === 0 || pw === 0) return
+      // FIX PASS 10 (footer shake): the old formula scaled from a
+      // hard-coded 100px baseline — `100 * w / pw` — which is only
+      // correct while the probe is actually at 100px. After the first
+      // fit the probe sits at the fitted size (~31px on a 390px
+      // phone), so the next fit measured pw ≈ w and computed 100px
+      // again. Each flip changes the wrap height (leading-none), so
+      // the ResizeObserver below fired again, and the wordmark
+      // flipped 31px ↔ 100px forever — the giant footer title and
+      // the legal line under it jumping ~69px at the very bottom of
+      // the page. Scale from the CURRENT size instead: when already
+      // fitted, pw ≈ w and the computed size equals the current one,
+      // so the 0.5px guard below skips the write, the height stops
+      // changing and the observer goes quiet. A font swap still
+      // re-fits once (the widths change, so the computed size moves),
+      // then settles. Verified by arithmetic simulation (see fix
+      // report): old formula oscillates 31.13 ↔ 100px indefinitely;
+      // this one writes once and stays.
+      const current = parseFloat(probe.style.fontSize) || 100
+      const next = (current * w) / pw
+      if (Math.abs(next - current) > 0.5) {
+        probe.style.fontSize = `${next}px`
+      }
     }
     fit()
     // The display font lands after first paint: measuring with the
