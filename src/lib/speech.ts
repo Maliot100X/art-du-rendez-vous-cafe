@@ -6,18 +6,27 @@
  * the honest live-speaking path until those come back: pick a French
  * (`fr-FR`) voice when the device has one, else the default voice.
  *
- * Honest lip-sync limit: speechSynthesis exposes NO audio stream, so
+ * Lip-sync (fix pass 10): speechSynthesis exposes NO audio stream, so
  * there is no real RMS to tap (unlike the YuriOS AnalyserNode path in
- * avatarBridge.ts, which needs an AudioContext source). While speaking,
- * the mouth is driven by a speech-timed syllabic envelope — amplitude
- * shaped through the same YuriOS constants (gain 5.0, amp^0.7 curve,
- * 0.04 gate, 0.7 cap, fast attack / slower release via shapeMouthOpen)
- * — so mouth and voice stay in sync in TIME, even though the amplitude
- * is synthesised, not measured. Both stages (VRM + Live2D) read the same
- * avatarBridge value, so they move together.
+ * avatarBridge.ts, which needs an AudioContext source). The mouth is
+ * driven by src/lib/speechViseme.ts — a word-timed vowel clock
+ * (layer2d A/I/U/E/O shapes) built from the spoken text itself.
+ * The old driver was a free-running pseudo-random envelope that only
+ * started from `utter.onstart`, and on Chrome Android the utterance
+ * events are the broken part: `onboundary` NEVER fires there (MDN:
+ * "The `boundary` event does not fire as expected", Chromium bugs
+ * 1122143 / 40715888) and `onstart`/`onend` are unreliable — so the
+ * voice played while the mouth never moved. The new driver therefore
+ * never trusts the events: the clock starts/stops by POLLING
+ * `speechSynthesis.speaking` every frame, and `onboundary` is only
+ * an opportunistic re-anchor when it does fire (desktop Chrome).
+ * A watchdog closes the mouth if speech never starts (voice missing
+ * or blocked), so it never flaps silently. Both stages (VRM + Live2D)
+ * read the same avatarBridge value, so they move together.
  */
 
-import { avatarBridge, shapeMouthOpen } from './avatarBridge'
+import { avatarBridge, smoothMouthOpen } from './avatarBridge'
+import { SpeechViseme } from './speechViseme'
 
 let muted = false
 let speaking = false
@@ -25,6 +34,18 @@ let raf = 0
 let prevMouth = 0
 let lastT = 0
 let cachedVoices: SpeechSynthesisVoice[] = []
+/** The utterance + viseme of the line currently being spoken. */
+let viseme: SpeechViseme | null = null
+let visemeStarted = false
+let speakQueuedAt = 0
+/** Fix pass 10: hold the utterance so Chrome cannot garbage-collect
+    it mid-speech (a known cause of dropped `onend`). */
+let utterRef: SpeechSynthesisUtterance | null = null
+
+/** The utterance currently held (GC root) — for debugging. */
+export function getActiveUtterance(): SpeechSynthesisUtterance | null {
+  return utterRef
+}
 
 function loadVoices(): SpeechSynthesisVoice[] {
   if (!('speechSynthesis' in window)) return []
@@ -45,39 +66,71 @@ function pickVoice(): SpeechSynthesisVoice | null {
   return fr ?? voices.find((v) => v.default) ?? voices[0] ?? null
 }
 
-/** Syllabic envelope: bursts of 3–5 syllables/second with short pauses. */
-function envelope(tSeconds: number): number {
-  // Pseudo-random gate from time — deterministic, no Math.random in the loop.
-  const syllable = Math.floor(tSeconds * 3.7)
-  const gate = (Math.sin(syllable * 12.9898) * 43758.5453) % 1
-  const paused = Math.abs(gate) < 0.16
-  const amp = paused ? 0.12 : 0.32 + 0.45 * Math.abs(Math.sin(tSeconds * 7.3)) * (0.6 + 0.4 * Math.sin(tSeconds * 2.7))
-  return amp
-}
-
-function tickSpeaking(startedAt: number) {
+/**
+ * Viseme tick — runs on requestAnimationFrame from the moment speak()
+ * queues the utterance. It never trusts utterance events: every frame
+ * it polls `speechSynthesis.speaking` (the real engine state, even
+ * when `onstart`/`onend` never fire on Android) to start the viseme
+ * clock, sample the mouth, and stop when the voice is really done.
+ */
+function tickSpeaking() {
   const now = performance.now()
   const dt = Math.min(Math.max((now - lastT) / 1000, 0), 0.1)
   lastT = now
-  const t = (now - startedAt) / 1000
-  // shapeMouthOpen expects raw RMS (it applies gain 5.0 itself).
-  prevMouth = shapeMouthOpen(envelope(t) / 5, prevMouth, dt)
-  avatarBridge.setMouthOpen(prevMouth)
-  raf = requestAnimationFrame(() => tickSpeaking(startedAt))
+  const synth = window.speechSynthesis
+  const engineSpeaking = synth ? synth.speaking : false
+
+  // Start the clock the moment the engine is really speaking —
+  // `onstart` may never fire (Android), so the poll is the trigger.
+  if (!visemeStarted && engineSpeaking && viseme) {
+    viseme.start(now)
+    visemeStarted = true
+    speaking = true
+    avatarBridge.setExpression('happy')
+    avatarBridge.setSpeaking(true)
+  }
+
+  if (visemeStarted && viseme) {
+    const frame = viseme.sample(now)
+    prevMouth = smoothMouthOpen(frame.mouth, prevMouth, dt)
+    avatarBridge.setMouthOpen(prevMouth)
+    avatarBridge.setMouthVowel(frame.vowel)
+    // End: the beats are done AND the engine is quiet. The poll —
+    // not `onend` — is what closes the mouth on Android.
+    if (frame.done && !engineSpeaking) {
+      endSpeaking()
+      return
+    }
+  } else if (!visemeStarted && now - speakQueuedAt > 2500) {
+    // Watchdog: the voice never started (no voice / blocked) — stop
+    // instead of flapping the mouth silently forever.
+    endSpeaking()
+    return
+  }
+
+  // Keep polling while an utterance is in flight — the loop must NOT
+  // stop on `speaking` (still false while the voice is queued, and
+  // the poll is exactly what notices it starting). endSpeaking()
+  // clears `viseme`, which is what stops the loop.
+  if (viseme !== null) raf = requestAnimationFrame(tickSpeaking)
 }
 
 function stopEnvelope() {
   cancelAnimationFrame(raf)
   prevMouth = 0
   avatarBridge.setMouthOpen(0)
+  avatarBridge.setMouthVowel(null)
 }
 
 function endSpeaking() {
-  if (!speaking) return
+  if (!speaking && !viseme) return
   speaking = false
   stopEnvelope()
   avatarBridge.setSpeaking(false)
   avatarBridge.setExpression('neutral')
+  viseme = null
+  visemeStarted = false
+  utterRef = null
 }
 
 /** Keep spoken lines short — long chat text is read in full on screen. */
@@ -105,13 +158,28 @@ export function speak(text: string): void {
   utter.lang = voice?.lang ?? 'fr-FR'
   utter.rate = 1
   utter.pitch = 1.05
+  // The viseme clock is built from the exact text being spoken.
+  viseme = new SpeechViseme(short, utter.rate)
+  visemeStarted = false
+  speakQueuedAt = performance.now()
+  utterRef = utter
   utter.onstart = () => {
-    speaking = true
-    lastT = performance.now()
-    prevMouth = 0
-    avatarBridge.setExpression('happy')
-    avatarBridge.setSpeaking(true)
-    raf = requestAnimationFrame(() => tickSpeaking(performance.now()))
+    // Opportunistic start — the poll in tickSpeaking() is the real
+    // trigger (Android often never fires this).
+    if (viseme && !visemeStarted) {
+      viseme.start(performance.now())
+      visemeStarted = true
+      speaking = true
+      lastT = performance.now()
+      prevMouth = 0
+      avatarBridge.setExpression('happy')
+      avatarBridge.setSpeaking(true)
+    }
+  }
+  utter.onboundary = (e) => {
+    // Desktop Chrome only — never fires on Android. When it does,
+    // it re-anchors the clock to the real word being spoken.
+    if (e.name === 'word') viseme?.noteBoundary(e.charIndex, performance.now())
   }
   utter.onend = endSpeaking
   utter.onerror = endSpeaking
@@ -119,7 +187,13 @@ export function speak(text: string): void {
     window.speechSynthesis.speak(utter)
   } catch {
     endSpeaking()
+    return
   }
+  // Start the poll tick at once — it, not `onstart`, notices the
+  // voice starting and drives the mouth from the first frame.
+  lastT = performance.now()
+  prevMouth = 0
+  raf = requestAnimationFrame(tickSpeaking)
 }
 
 export function stopSpeaking(): void {

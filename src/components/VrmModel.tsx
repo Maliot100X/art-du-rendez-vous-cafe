@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { VRM } from '@pixiv/three-vrm'
 import useDimensions from 'react-cool-dimensions'
-import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
+import { avatarBridge, type AvatarBridge, type MouthVowel } from '../lib/avatarBridge'
 import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
@@ -27,11 +27,17 @@ import { getWalkStatus, resetWalkStatus, setWalkStatus } from '../lib/walkStatus
  * the "Visage" toggle reframes to head + shoulders for a close-up.
  *
  * Lip-sync: speechSynthesis exposes no audio stream, so there is no real
- * RMS — src/lib/speech.ts drives avatarBridge with a speech-timed
- * syllabic envelope shaped by the YuriOS constants (gain 5.0, amp^0.7,
- * gate 0.04, cap 0.7), and this loop stages it into the VRM `aa`
- * expression. Idle motion: gentle breathing (chest) + sway. Nod: the
- * head dips when speaking starts.
+ * RMS — src/lib/speechViseme.ts drives avatarBridge with a word-timed
+ * vowel clock (layer2d A/I/U/E/O shapes, one mouth shape per vowel
+ * nucleus), started/stopped by polling speechSynthesis.speaking, with
+ * onboundary as an opportunistic re-anchor only (it never fires on
+ * Chrome Android — Chromium bugs 1122143 / 40715888). This loop stages
+ * it into the VRM vowel expressions (aa/ih/ou/ee/oh — the file has all
+ * five blendShape groups, morphs 29–33 at weight 100, so the rig can
+ * move the mouth; the old single-'aa' staging is kept as the fallback
+ * for the scalar-only Deepgram RMS path, which carries no vowel).
+ * Idle motion: gentle breathing (chest) + sway. Nod: the head dips
+ * when speaking starts.
  *
  * Hand book (menu tab, `withBook`): a small 3D book prop parented to
  * her leftHand bone (src/lib/handBook.ts). At rest she carries NOTHING
@@ -237,6 +243,20 @@ function stepLift(u: number): number {
 type Framing = 'full' | 'half' | 'face'
 
 /**
+ * VRM vowel expression per mouth shape (fix pass 10): three-vrm
+ * preset names for the VRM 0.x blendShape groups a/i/u/e/o — the
+ * file has all five (morphs 29–33, weight 100), so every shape here
+ * moves a real morph target.
+ */
+const VOWEL_EXPRESSION: Record<MouthVowel, string> = {
+  a: 'aa',
+  i: 'ih',
+  u: 'ou',
+  e: 'ee',
+  o: 'oh',
+}
+
+/**
  * Fix pass 9: the selected framing survives unmount. It used to live
  * only in the component's useState, and only the active tab mounts —
  * so every return to La Carte (or Livre) remounted VrmModel at the
@@ -310,6 +330,13 @@ interface VrmDebug {
         60–62° while the picture showed ~31–42°. */
     kneeBendDeg: number
   }
+  /** Fix pass 10: live lip-sync, for the cloud-browser check — the
+      mouth value + vowel staged into the VRM this frame, and whether
+      the bridge thinks she is speaking. 0 at rest; 0.3–0.7 while
+      reading, changing vowel (a/i/u/e/o) word by word. */
+  mouth: number
+  vowel: string | null
+  speaking: boolean
 }
 
 declare global {
@@ -719,6 +746,9 @@ export default function VrmModel({
         thighR: 0,
         kneeBendDeg: 0,
       },
+      mouth: bridge.getMouthOpen(),
+      vowel: bridge.getMouthVowel(),
+      speaking: bridge.isSpeaking(),
     }
   }, [])
 
@@ -727,7 +757,8 @@ export default function VrmModel({
      the walk whenever the browser/OS reported
      prefers-reduced-motion, with no log — and the walk IS the
      feature. Reduced motion is already honoured where it matters
-     (sway, reading-blend snap); the gate must not swallow the walk.
+     (softened sway, reading-blend snap — fix pass 10); the gate must
+     not swallow the walk.
      Lives below layout() — it calls layout() to pull the camera back
      to the walk window, and TS forbids the reference above layout's
      declaration. */
@@ -821,6 +852,9 @@ export default function VrmModel({
           thighR: 0,
           kneeBendDeg: 0,
         },
+        mouth: 0,
+        vowel: null,
+        speaking: false,
       }
       setStatus('failed')
       onFailed?.()
@@ -1074,6 +1108,8 @@ export default function VrmModel({
 
       // ---- Per-frame loop: VRM update, breathing, lip-sync, nod, blink.
       let happyWeight = 0
+      // Fix pass 10: eased per-vowel mouth weights (see the mouth block).
+      const mouthWeights: Record<MouthVowel, number> = { a: 0, i: 0, u: 0, e: 0, o: 0 }
       let wasSpeaking = false
       let nodT = 1
       let nextBlinkAt = 2.5
@@ -1331,11 +1367,32 @@ export default function VrmModel({
         if (speaking && !wasSpeaking) nodT = 0
         wasSpeaking = speaking
 
-        // Mouth: the bridge value (speech envelope, YuriOS-shaped).
-        try {
-          three.vrm.expressionManager?.setValue('aa', bridge.getMouthOpen())
-        } catch {
-          // Expression absent on this rig — ignore.
+        // Mouth (fix pass 10): the bridge value staged into the VRM
+        // VOWEL expressions (aa/ih/ou/ee/oh), one mouth shape per
+        // vowel nucleus — A wide, O round, E mid, U small-round, I
+        // narrow. Each weight eases toward its target (fast attack,
+        // slower release, YuriOS rates), so shapes cross-fade
+        // instead of snapping. When the bridge carries no vowel (the
+        // Deepgram RMS path, scalar only), the value stages into
+        // 'aa' exactly as before — the voice-agent path is unchanged.
+        {
+          const mouth = bridge.getMouthOpen()
+          const vowel = bridge.getMouthVowel()
+          try {
+            const em = three.vrm.expressionManager
+            if (em) {
+              ;(Object.keys(VOWEL_EXPRESSION) as MouthVowel[]).forEach((v) => {
+                const target = vowel === null ? (v === 'a' ? mouth : 0) : v === vowel ? mouth : 0
+                const w = mouthWeights[v]
+                const rate = target > w ? 40 : 25
+                const next = w + (target - w) * Math.min(1, dt * rate)
+                mouthWeights[v] = next < 0.001 ? 0 : next
+                em.setValue(VOWEL_EXPRESSION[v], mouthWeights[v])
+              })
+            }
+          } catch {
+            // Expression absent on this rig — ignore.
+          }
         }
         // Expression: ease toward happy while speaking.
         happyWeight += ((speaking ? 1 : 0) - happyWeight) * Math.min(1, dt * 6)
@@ -1355,12 +1412,28 @@ export default function VrmModel({
           // Ignore.
         }
 
-        // Idle breathing + sway (off for reduced motion), nod on speak.
-        const swayAmp = reducedMotion ? 0 : 1
+        // Idle breathing + sway, nod on speak.
+        // Fix pass 10: reduced motion NO LONGER zeroes the idle
+        // motion. Android's "Remove animations" accessibility
+        // setting maps to prefers-reduced-motion in Chrome, so on a
+        // phone with it on she stood perfectly still — a statue
+        // except for the blink — and Minir read that as "no realtime
+        // movement". Gentle breathing is not a vestibular trigger
+        // (no parallax, no slide); reduced motion now only softens
+        // it to 0.4x instead of killing it. The walk already ignores
+        // the gate (fix pass 5) and the reading blend still snaps
+        // (no eased arm travel) under reduced motion.
+        // Amplitudes raised so the motion reads on a 260 px phone
+        // stage: the old chest 0.02 / sway 0.03 rad moved the figure
+        // ~2 px — invisible. Head micro-sway, a pelvis rock over
+        // planted feet (fbtpods discipline: the feet never slide)
+        // and a small arm sway are added, all gated to NOT walking
+        // (the walk block owns hips/arms while it runs).
+        const swayAmp = reducedMotion ? 0.4 : 1
         if (chestNode) {
-          chestNode.rotation.x = three.chestBaseRotationX + 0.02 * Math.sin(t * 1.2) * swayAmp
+          chestNode.rotation.x = three.chestBaseRotationX + 0.032 * Math.sin(t * 1.2) * swayAmp
         }
-        three.group.rotation.y = walkTurn + 0.03 * Math.sin(t * 0.5) * swayAmp
+        three.group.rotation.y = walkTurn + 0.05 * Math.sin(t * 0.5) * swayAmp
         if (headNode) {
           nod = 0
           if (nodT < 0.6) {
@@ -1368,6 +1441,21 @@ export default function VrmModel({
             nod = 0.12 * Math.sin(Math.min(1, nodT / 0.6) * Math.PI)
           }
           headNode.rotation.x = three.headBaseRotationX + nod
+          // Micro-sway (rotation.y — the reading block only ever
+          // sets .x, so this never fights it).
+          headNode.rotation.y = 0.04 * Math.sin(t * 0.4 + 0.6) * swayAmp
+        }
+        if (rig && walkRef.current.t >= WALK_DURATION) {
+          if (rig.hips) {
+            rig.hips.rotation.z = (rig.baseZ.get(rig.hips) ?? 0) + 0.02 * Math.sin(t * 0.5) * swayAmp
+          }
+          rig.rightUpperArm.rotation.x =
+            (rig.baseX.get(rig.rightUpperArm) ?? 0) + 0.04 * Math.sin(t * 1.2 + 1.0) * swayAmp
+          // Left arm: the reading block below overwrites it when a
+          // book is attached, so this only shows when she is not
+          // reading; on the Agent tab (no book) it is the idle sway.
+          rig.leftUpperArm.rotation.x =
+            (rig.baseX.get(rig.leftUpperArm) ?? 0) + 0.04 * Math.sin(t * 1.2) * swayAmp
         }
 
         // ---- Reading: Vita holds the book, raises it, opens it, and
@@ -1637,6 +1725,12 @@ export default function VrmModel({
             thighR: wr ? Math.round(wr.rightUpperLeg.rotation.x * 100) / 100 : 0,
             kneeBendDeg: Math.round(kneeBendDeg * 10) / 10,
           }
+          // Fix pass 10: live lip-sync, same object — the
+          // cloud-browser check reads the mouth value + vowel every
+          // frame instead of guessing from pixels.
+          wdbg.mouth = Math.round(bridge.getMouthOpen() * 100) / 100
+          wdbg.vowel = bridge.getMouthVowel()
+          wdbg.speaking = bridge.isSpeaking()
         }
 
         // Fix pass 7: sync the CURRENT frame's normalized writes

@@ -78,6 +78,28 @@ export function shapeMouthOpen(rms: number, previous: number, dtSeconds: number)
   return next < 0.001 ? 0 : next
 }
 
+/**
+ * Mouth shape of the beat being spoken (layer2d A/I/U/E/O pattern,
+ * src/lib/speechViseme.ts). `null` = no vowel right now (between
+ * words, or the scalar-only RMS path, which stages into 'aa').
+ */
+export type MouthVowel = 'a' | 'i' | 'u' | 'e' | 'o'
+
+/**
+ * Ease an already-shaped mouth target (0..0.7, e.g. from the
+ * speech-viseme clock) with the same YuriOS attack/release rates —
+ * no gain/curve, so the vowel openness values arrive undistorted.
+ * Used by the speechSynthesis path; the Deepgram RMS path keeps
+ * shapeMouthOpen above.
+ */
+export function smoothMouthOpen(target: number, previous: number, dtSeconds: number): number {
+  const dt = Math.min(Math.max(dtSeconds, 0), 0.1)
+  const clamped = Math.max(0, Math.min(VISEME.WEIGHT_CAP, target))
+  const rate = clamped > previous ? VISEME.ATTACK_PER_SECOND : VISEME.RELEASE_PER_SECOND
+  const next = previous + (clamped - previous) * Math.min(1, rate * dt)
+  return next < 0.001 ? 0 : next
+}
+
 export interface AvatarBridgeState {
   expression: AvatarExpression
   speaking: boolean
@@ -93,6 +115,7 @@ type AvatarBridgeListener = (state: AvatarBridgeState) => void
  */
 export class AvatarBridge {
   private mouthOpen = 0
+  private mouthVowel: MouthVowel | null = null
   private micLevel = 0
   private expression: AvatarExpression = 'neutral'
   private speaking = false
@@ -116,6 +139,15 @@ export class AvatarBridge {
 
   getMouthOpen(): number {
     return this.mouthOpen
+  }
+
+  /** Current vowel shape for the mouth (fix pass 10 viseme). */
+  setMouthVowel(vowel: MouthVowel | null) {
+    this.mouthVowel = vowel
+  }
+
+  getMouthVowel(): MouthVowel | null {
+    return this.mouthVowel
   }
 
   setMicLevel(value: number) {
@@ -148,6 +180,7 @@ export class AvatarBridge {
 
   reset() {
     this.mouthOpen = 0
+    this.mouthVowel = null
     this.micLevel = 0
     this.setExpression('neutral')
     this.setSpeaking(false)

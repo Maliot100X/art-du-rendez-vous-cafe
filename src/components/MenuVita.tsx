@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEven
 import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide-react'
 import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
+import { avatarBridge } from '../lib/avatarBridge'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
 import { getWalkStatus, resetWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
 
@@ -384,6 +385,30 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
     : walk.tick > 0
       ? `Arrivée · pas ${walk.step}/${walk.steps} · x ${walkX}`
       : 'Vita est prête — choisissez une catégorie.'
+  // Live lip-sync readout (fix pass 10): the mouth value + vowel the
+  // VRM is staging this frame, polled 6×/s and quantised to 10% so
+  // the panel does not re-render 60 times a second. Shown only while
+  // she is speaking — plain DOM text, so the cloud-browser check (and
+  // Minir) can see the mouth move without devtools. Deliberately NOT
+  // aria-live: a value changing 6×/s would spam screen readers.
+  const [mouthInfo, setMouthInfo] = useState<{ speaking: boolean; mouth: number; vowel: string | null }>({
+    speaking: false,
+    mouth: 0,
+    vowel: null,
+  })
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const next = {
+        speaking: avatarBridge.isSpeaking(),
+        mouth: Math.round((avatarBridge.getMouthOpen() * 100) / 10) * 10,
+        vowel: avatarBridge.getMouthVowel(),
+      }
+      setMouthInfo((prev) =>
+        prev.speaking === next.speaking && prev.mouth === next.mouth && prev.vowel === next.vowel ? prev : next,
+      )
+    }, 150)
+    return () => window.clearInterval(id)
+  }, [])
   return (
     <div className="mt-3 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
@@ -438,6 +463,11 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
         <p aria-live="polite" className="mt-2 font-mono text-[11px] text-mist/80">
           {walkLine}
         </p>
+        {mouthInfo.speaking && (
+          <p className="mt-1 font-mono text-[11px] text-mist/80">
+            Bouche {mouthInfo.mouth}%{mouthInfo.vowel ? ` · ${mouthInfo.vowel.toUpperCase()}` : ''}
+          </p>
+        )}
         <form className="mt-3 flex items-center gap-2" onSubmit={guide.ask}>
           <label htmlFor="menu-vita-input" className="sr-only">
             Demander à Vita
