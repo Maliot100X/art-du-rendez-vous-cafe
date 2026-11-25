@@ -176,8 +176,9 @@ check(
   `opens=${JSON.stringify(opens)}`,
 )
 
-// T4 — finish before the brain reply holds the open: no book open,
-// pending kept for the re-timed reading.
+// T4 — finish before the brain reply: no book open, and (fix pass
+// 16) completion is TERMINAL — the pending open is dropped with the
+// reading instead of being held, and a late reply cannot re-time it.
 resetBetweenTests()
 const t4nonce = store.startReading('aperitifs', 0.05)
 store.setPendingOpen('aperitifs')
@@ -189,13 +190,13 @@ check(
   `opens=${JSON.stringify(opens)}`,
 )
 check(
-  'T4b pending open is held (not dropped) when the reply is late',
-  store.getPendingOpen() === 'aperitifs',
+  'T4b (fix 16) pending open is DROPPED on finish when the reply is late',
+  store.getPendingOpen() === null,
   `pending=${JSON.stringify(store.getPendingOpen())}`,
 )
 check(
-  'T4c late reply cannot resurrect the expired reading (nonce no longer live)',
-  store.getReading() === null || store.getReading()?.nonce !== t4nonce,
+  'T4c late reply cannot resurrect the expired reading (store refuses the re-time)',
+  store.retimeReading(t4nonce, 'aperitifs', 10) === false && store.getReading() === null,
   `liveNonce=${store.getReading()?.nonce} oldNonce=${t4nonce}`,
 )
 
@@ -297,8 +298,20 @@ if (askBtn !== null) {
     `line=${lineIdx} read=${readIdx} speak=${speakIdx} pending=${pendingIdx} brain=${brainIdx}`,
   )
   check(
-    'S4c late reply still nonce-guarded (no resurrection after stop)',
-    askBtn.includes('if (getReading()?.nonce !== nonce) return'),
+    'S4c (fix 16) late reply re-times only through the store guard (no resurrection after stop/finish)',
+    askBtn.includes('retimeReading(nonce, categoryId, estimateSeconds(shortenForSpeech(reply.text)))') &&
+      !askBtn.slice(askBtn.indexOf('void askBrain(request)')).includes('startReading('),
+  )
+}
+
+// S4d — the typed-ask reply handler uses the same store guard.
+const askBlock = sliceBetween(guide, 'const ask = (e: FormEvent) => {', '// "Demander à la barmaid" — the button, not a typed question:')
+check('S4d ask() block found', askBlock !== null)
+if (askBlock !== null) {
+  check(
+    'S4e (fix 16) ask() late reply re-times only through the store guard',
+    askBlock.includes('retimeReading(nonce, catId, estimateSeconds(shortenForSpeech(reply.text)))') &&
+      !askBlock.slice(askBlock.indexOf('void askBrain(clean)')).includes('startReading('),
   )
 }
 

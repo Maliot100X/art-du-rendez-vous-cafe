@@ -8,6 +8,7 @@ import {
   getReading,
   registerReadingFinishHandler,
   registerSpeechStopper,
+  retimeReading,
   setGuideLine,
   setPendingOpen,
   setReplyArrived,
@@ -266,12 +267,12 @@ export function useMenuGuide({
       void askBrain(clean).then(({ reply, source }) => {
         if (source === 'llm') setBrainLive(true)
         setGuideLine(reply.text)
-        // Only re-time (and speak) the reading THIS ask started — a
-        // late reply must not resurrect a reading the visitor stopped
-        // or a newer tap superseded (the nonce no longer matches).
-        if (catId && getPendingOpen() === catId && getReading()?.nonce === nonce) {
+        // Only re-time (and speak) the reading THIS ask started —
+        // the store refuses the re-time outright when the reading
+        // has finished, been stopped or been superseded (fix pass
+        // 16), so a late reply can never resurrect it.
+        if (catId && getPendingOpen() === catId && retimeReading(nonce, catId, estimateSeconds(shortenForSpeech(reply.text)))) {
           setReplyArrived(true)
-          startReading(catId, estimateSeconds(shortenForSpeech(reply.text)))
           if (isSpeechSupported()) speak(reply.text)
         }
       })
@@ -307,13 +308,13 @@ export function useMenuGuide({
     void askBrain(request).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
       if (getPendingOpen() !== categoryId) return
-      // Only re-time (and speak) the reading THIS press started — see
-      // ask(): a late reply must not resurrect a reading the visitor
-      // stopped or a newer tap superseded.
-      if (getReading()?.nonce !== nonce) return
+      // Only re-time (and speak) the reading THIS press started —
+      // the store refuses the re-time when the reading has
+      // finished, been stopped or been superseded (fix pass 16), so
+      // a late reply can never resurrect it.
+      if (!retimeReading(nonce, categoryId, estimateSeconds(shortenForSpeech(reply.text)))) return
       setReplyArrived(true)
       setGuideLine(reply.text)
-      startReading(categoryId, estimateSeconds(shortenForSpeech(reply.text)))
       if (isSpeechSupported()) speak(reply.text)
     })
   }
