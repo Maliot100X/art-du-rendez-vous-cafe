@@ -7,7 +7,7 @@ import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
 import { loadVrm, type ReadRest } from '../lib/vrmCache'
-import { resetWalkStatus, setWalkStatus } from '../lib/walkStatus'
+import { getWalkStatus, resetWalkStatus, setWalkStatus } from '../lib/walkStatus'
 
 /**
  * Vita — VRM 0.x full-body model (CC0, VRoid sample), rendered with
@@ -285,12 +285,15 @@ interface VrmDebug {
     thighL: number
     kneeR: number
     thighR: number
-    /** Fix pass 8: the TRUE knee bend (degrees, 0 = straight) read
-        BACK from the RAW leg bones after humanoid.update() — the
-        angle the render actually shows. kneeL/thighL above are the
-        COMMANDED normalized values, not the rendered bend: the pass-7
-        readout quoted them, so it said 57° while the pixels showed
-        straight legs. */
+    /** Fix pass 9: the FRONT-PROJECTED knee bend (degrees,
+        0 = straight) read BACK from the RAW leg bones after
+        humanoid.update() and projected through the current camera —
+        the bend the viewer actually sees (~31–44° at peak, ~0° at
+        rest). kneeL/thighL above are the COMMANDED normalized
+        values, not the rendered bend: the pass-7 readout quoted
+        them, so it said 57° while the pixels showed straight legs;
+        the pass-8 readout quoted the TRUE 3D bend, so it said
+        60–62° while the picture showed ~31–42°. */
     kneeBendDeg: number
   }
 }
@@ -443,6 +446,19 @@ export default function VrmModel({
   const threeRef = useRef<ThreeStage | null>(null)
   const framingRef = useRef<Framing>(compact ? 'half' : 'full')
   const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0, step: -1, footL: -HIP_HALF, footR: HIP_HALF })
+  /**
+   * Fix pass 9 — "Arrivée" latch. Set the frame the walk's traverse
+   * crosses WALK_DURATION (and again in the completion branch); the
+   * render loop then keeps writing the held arrival state
+   * {walking:false, step:STEP_COUNT, tick:walkTickRef.current} every
+   * frame until it is consumed — the loop clears it the first frame
+   * it sees the store's tick back at 0, which only resetWalkStatus()
+   * (reading end / unmount) writes. Without the latch the loop wrote
+   * tick 0 the moment the walk ended, so the panel's "Arrivée" branch
+   * (!walking && tick > 0) was unreachable. Cleared when a new walk
+   * is triggered below.
+   */
+  const arrivedRef = useRef(false)
   /** True while a walk is running — layout() pulls the camera back to
       the full-body walk window for its duration (see layout). */
   const walkActiveRef = useRef(false)
@@ -691,6 +707,8 @@ export default function VrmModel({
       // Alternate ends: at/near the right end go left, otherwise right.
       w.toX = w.toX >= (WALK_LEFT + WALK_RIGHT) / 2 ? WALK_LEFT : WALK_RIGHT
       w.t = 0
+      // A new walk replaces any held arrival from the previous one.
+      arrivedRef.current = false
       // Planted feet start under the hips (fbtpods body.py: hip joints
       // 0.052 * height apart) — the gait solves the legs from these.
       w.step = -1
@@ -1047,24 +1065,47 @@ export default function VrmModel({
       const readTmpQ = new THREE.Quaternion()
       const bookCarryIdle = new THREE.Quaternion()
       const bookCarryWant = new THREE.Quaternion()
-      // Walk-readout scratch (fix pass 8): raw-bone read-back, reused
+      // Walk-readout scratch (fix pass 9): projected read-back, reused
       // every frame — no allocation in the loop.
-      const rawHip = new THREE.Vector3()
-      const rawKnee = new THREE.Vector3()
-      const rawAnk = new THREE.Vector3()
-      const rawDirA = new THREE.Vector3()
-      const rawDirB = new THREE.Vector3()
-      /** True knee bend of one leg (degrees, 0 = straight) from the
-          RAW bones' world positions — the angle the render shows. */
-      const rawKneeBend = (hip: THREE.Object3D, knee: THREE.Object3D, ank: THREE.Object3D): number => {
-        hip.getWorldPosition(rawHip)
-        knee.getWorldPosition(rawKnee)
-        ank.getWorldPosition(rawAnk)
-        rawDirA.copy(rawHip).sub(rawKnee).normalize()
-        rawDirB.copy(rawAnk).sub(rawKnee).normalize()
+      const projHip = new THREE.Vector3()
+      const projKnee = new THREE.Vector3()
+      const projAnk = new THREE.Vector3()
+      /**
+       * FRONT-PROJECTED knee bend of one leg (degrees, 0 = straight)
+       * — the bend the CURRENT camera actually sees (fix pass 9).
+       * Projects the hip/knee/ankle world positions through `camera`
+       * into NDC and takes the 2D angle at the knee in screen space:
+       * NDC x spans the aspect ratio while NDC y spans 1, so the x
+       * differences are scaled by the camera aspect first — a raw-NDC
+       * angle is NOT the angle on screen (measured in the probe run
+       * G: raw NDC peaks at 56.7° where the pixel-space angle is
+       * 43.7°, i.e. 10–13° high on the portrait walk window). The old pass-8 version took the TRUE 3D angle
+       * (180 − angle hip→knee→ankle in world space), which reads
+       * 60–62° at peak while the front camera only ever shows a
+       * 31–42° break — the shin swings largely in depth, where the
+       * camera cannot see it. Degenerate (two joints projecting onto
+       * the same pixel) → 0, never NaN.
+       */
+      const projectedKneeBend = (
+        camera: THREE.Camera,
+        hip: THREE.Object3D,
+        knee: THREE.Object3D,
+        ank: THREE.Object3D,
+      ): number => {
+        hip.getWorldPosition(projHip).project(camera)
+        knee.getWorldPosition(projKnee).project(camera)
+        ank.getWorldPosition(projAnk).project(camera)
+        const aspect = (camera as THREE.PerspectiveCamera).aspect || 1
+        const ax = (projHip.x - projKnee.x) * aspect
+        const ay = projHip.y - projKnee.y
+        const bx = (projAnk.x - projKnee.x) * aspect
+        const by = projAnk.y - projKnee.y
+        const la = Math.hypot(ax, ay)
+        const lb = Math.hypot(bx, by)
+        if (la < 1e-6 || lb < 1e-6) return 0
         return (
           180 -
-          (Math.acos(THREE.MathUtils.clamp(rawDirA.dot(rawDirB), -1, 1)) * 180) / Math.PI
+          (Math.acos(THREE.MathUtils.clamp((ax * bx + ay * by) / (la * lb), -1, 1)) * 180) / Math.PI
         )
       }
       // Last frame's read-back bend (the debug block runs before the
@@ -1120,6 +1161,12 @@ export default function VrmModel({
           const wt = w.t
           if (wt < WALK_DURATION) {
             w.t = wt + dt
+            // Fix pass 9: the traverse crossed WALK_DURATION on this
+            // frame — latch the arrival NOW, so the status write below
+            // (same frame) already reports the held "Arrivée" state
+            // instead of one idle frame (walking false, tick 0) before
+            // the completion branch runs on the next frame.
+            if (w.t >= WALK_DURATION) arrivedRef.current = true
             const dir = w.toX >= w.fromX ? 1 : -1
             const stepLen = (w.toX - w.fromX) / 2
             const stepIdx = Math.min(STEP_COUNT - 1, Math.floor(wt / STEP_DURATION))
@@ -1224,6 +1271,10 @@ export default function VrmModel({
             // but KEEP the lateral position, so she is visibly standing
             // on the other side of the stage.
             w.t = Infinity
+            // Fix pass 9: latch the arrival (belt & braces with the
+            // crossing-frame latch above) — the loop now holds the
+            // "Arrivée" state until resetWalkStatus() consumes it.
+            arrivedRef.current = true
             rig.baseX.forEach((base, node) => {
               node.rotation.x = base
             })
@@ -1547,7 +1598,8 @@ export default function VrmModel({
             // normalized nodes (radians) — the COMMANDED pose, not
             // the rendered bend. 0 at rest; knee ≈ −1.0, thigh
             // ≈ +0.45 at full bend (signs flipped in fix pass 8).
-            // The rendered bend is kneeBendDeg (fix pass 8).
+            // The VISIBLE bend is kneeBendDeg (fix pass 9:
+            // front-projected through the current camera).
             kneeL: wr ? Math.round(wr.leftLowerLeg.rotation.x * 100) / 100 : 0,
             thighL: wr ? Math.round(wr.leftUpperLeg.rotation.x * 100) / 100 : 0,
             kneeR: wr ? Math.round(wr.rightLowerLeg.rotation.x * 100) / 100 : 0,
@@ -1568,51 +1620,103 @@ export default function VrmModel({
         three.vrm.humanoid?.update()
 
         // Walk readout (MenuVita panel, fix pass 6; read-back fixed
-        // in fix pass 8): live walk state every frame — the
-        // cloud-browser check cannot open devtools, so the walk is
-        // observable as plain DOM text in the panel. The store only
-        // notifies on a displayed change, so the 60 fps writes do
-        // not re-render the panel 60 times a second.
+        // in fix pass 8, projected in fix pass 9): live walk state
+        // every frame — the cloud-browser check cannot open devtools,
+        // so the walk is observable as plain DOM text in the panel.
+        // The store only notifies on a displayed change, so the 60
+        // fps writes do not re-render the panel 60 times a second.
         // Live knee angle — read BACK from the RAW leg bones AFTER
-        // the sync above (the true 3D bend, 0 = straight, ~62° at
-        // full bend with the pass-8 constants), never the normalized
-        // rotation.x the walk just wrote. The pass-7 readout read
-        // the normalized node right after writing it, so it reported
-        // the commanded 57° even when the sync was skipped entirely
-        // (measured — scripts/fix8-walk-probe.mjs run C) — and, with
-        // a drifted base, up to 115° for a bend that never existed.
-        // When there are no raw leg bones, fall back to the
-        // normalized nodes (still a live read, just pre-sync).
-        // The walk's tick is reported only while walking: once the
-        // walk ends the status resets to idle (tick 0), so the panel
-        // returns to "Vita est prête…" instead of going stale on a
-        // "Marche…" line — and the same idle write happens on
+        // the sync above and projected through the CURRENT camera
+        // (fix pass 9: the front-projected bend the camera sees,
+        // 0 = straight, ~31–44° at peak with the pass-8 constants),
+        // never the normalized rotation.x the walk just wrote and
+        // never the true 3D bend — the pass-8 number read 60–62°
+        // while the picture only ever showed ~31–42° (measured —
+        // scripts/fix8-walk-probe.mjs runs F/G). When there are no
+        // raw leg bones, the same projection runs on the normalized
+        // nodes' world positions (upperLeg = hip, lowerLeg = knee,
+        // foot = ankle) instead of the commanded rotation.x.
+        // Arrival (fix pass 9): when the walk ends the loop does NOT
+        // write idle — it HOLDS {walking:false, step:STEP_COUNT,
+        // tick} (the "Arrivée" state) until resetWalkStatus() is
+        // called on reading end, so the panel shows "Arrivée · pas
+        // 4/4 · x …" for the whole reading that follows the walk.
+        // The latch is consumed, not re-written: the first frame the
+        // loop sees the store's tick back at 0 — which only
+        // resetWalkStatus() writes — it drops arrivedRef and writes
+        // idle, so the reset is never undone by the next frame and
+        // the panel returns to "Vita est prête…" instead of going
+        // stale on a "Marche…" line. The same idle write happens on
         // unmount, so a reading that ends in a tab switch leaves no
         // stale line behind either.
         {
           const walkingNow = walkRef.current.t < WALK_DURATION
+          // Vector3.project() reads camera.matrixWorldInverse — the
+          // camera only moves in layout() (walk start/end), so it is
+          // current from the last render, but refresh it explicitly:
+          // a stale inverse would silently project through the
+          // pre-walk framing.
+          three.camera.updateMatrixWorld()
+          const cam = three.camera
           const raw = three.rawLegs
+          const rig = three.walkRig
           kneeBendDeg = raw
             ? Math.max(
-                rawKneeBend(raw.hipL, raw.kneeL, raw.ankL),
-                rawKneeBend(raw.hipR, raw.kneeR, raw.ankR),
+                projectedKneeBend(cam, raw.hipL, raw.kneeL, raw.ankL),
+                projectedKneeBend(cam, raw.hipR, raw.kneeR, raw.ankR),
               )
-            : three.walkRig
-              ? (Math.max(
-                  Math.abs(three.walkRig.leftLowerLeg.rotation.x),
-                  Math.abs(three.walkRig.rightLowerLeg.rotation.x),
-                ) *
-                  180) /
-                Math.PI
+            : rig && rig.leftFoot && rig.rightFoot
+              ? Math.max(
+                  projectedKneeBend(cam, rig.leftUpperLeg, rig.leftLowerLeg, rig.leftFoot),
+                  projectedKneeBend(cam, rig.rightUpperLeg, rig.rightLowerLeg, rig.rightFoot),
+                )
               : 0
-          setWalkStatus({
-            walking: walkingNow,
-            step: walkStep,
-            steps: STEP_COUNT,
-            x: three.group.position.x,
-            tick: walkingNow ? walkTickRef.current : 0,
-            kneeDeg: kneeBendDeg,
-          })
+          if (walkingNow) {
+            setWalkStatus({
+              walking: true,
+              step: walkStep,
+              steps: STEP_COUNT,
+              x: three.group.position.x,
+              tick: walkTickRef.current,
+              kneeDeg: kneeBendDeg,
+            })
+          } else if (arrivedRef.current) {
+            if (getWalkStatus().tick === 0) {
+              // Arrival consumed by resetWalkStatus() (reading ended)
+              // — drop the latch and write idle, so the panel returns
+              // to "Vita est prête…" and the latch never re-fires.
+              arrivedRef.current = false
+              setWalkStatus({
+                walking: false,
+                step: 0,
+                steps: STEP_COUNT,
+                x: three.group.position.x,
+                tick: 0,
+                kneeDeg: kneeBendDeg,
+              })
+            } else {
+              // Held arrival: step stays 4/4 and the tick stays live,
+              // so the panel keeps showing "Arrivée · pas 4/4 · x …"
+              // for the whole reading that follows the walk.
+              setWalkStatus({
+                walking: false,
+                step: STEP_COUNT,
+                steps: STEP_COUNT,
+                x: three.group.position.x,
+                tick: walkTickRef.current,
+                kneeDeg: kneeBendDeg,
+              })
+            }
+          } else {
+            setWalkStatus({
+              walking: false,
+              step: 0,
+              steps: STEP_COUNT,
+              x: three.group.position.x,
+              tick: 0,
+              kneeDeg: kneeBendDeg,
+            })
+          }
         }
 
         three.renderer.render(three.scene, three.camera)

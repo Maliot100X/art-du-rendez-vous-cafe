@@ -305,10 +305,11 @@ export function useVitaGuide({
 
   const onReadingEnd = useCallback(() => {
     const pending = pendingOpenRef.current
-    // Fix pass 8: the VRM's reading is over — the walk line returns to
-    // "Vita est prête…". (The walk itself already ended, so the loop
-    // has written idle; this covers the case where the status was
-    // still showing a walk line when the reading finished.) The React
+    // Fix pass 9: the VRM's reading is over — the HELD "Arrivée"
+    // line returns to "Vita est prête…". (The walk itself already
+    // ended, but the loop keeps writing the held arrival until this
+    // reset; the loop sees the tick back at 0 on its next frame and
+    // drops its latch, so the arrival never comes back.) The React
     // reading state is deliberately left alone here: a brain reply may
     // still be in flight for this reading, and clearing it would make
     // the reply's nonce guard drop the re-time + the spoken answer
@@ -370,16 +371,18 @@ export function MenuVitaStage({ guide }: { guide: VitaGuide }) {
 export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
   // Walk readout (fix pass 6): live walk state as plain DOM text —
   // the cloud-browser check cannot open devtools, so the walk is
-  // observable here ("Marche… pas 2/4 · x +0.14" while walking,
-  // "Arrivée · x +0.14" once she has arrived — the last state stays
-  // readable at rest, so the check can read it after the fact too).
+  // observable here ("Marche… pas 2/4 · x +0.14 · genou 35°" while
+  // walking, "Arrivée · pas 4/4 · x +0.14" once she has arrived —
+  // the arrival state is HELD by the loop until the reading ends
+  // (fix pass 9), so the check can read it after the fact too; the
+  // genou number is the front-projected bend the camera sees).
   const [walk, setWalk] = useState<WalkStatus>(getWalkStatus())
   useEffect(() => subscribeWalkStatus(setWalk), [])
   const walkX = `${walk.x >= 0 ? '+' : ''}${walk.x.toFixed(2)}`
   const walkLine = walk.walking
     ? `Marche… pas ${walk.step}/${walk.steps} · x ${walkX} · genou ${Math.round(walk.kneeDeg)}°`
     : walk.tick > 0
-      ? `Arrivée · x ${walkX}`
+      ? `Arrivée · pas ${walk.step}/${walk.steps} · x ${walkX}`
       : 'Vita est prête — choisissez une catégorie.'
   return (
     <div className="mt-3 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">

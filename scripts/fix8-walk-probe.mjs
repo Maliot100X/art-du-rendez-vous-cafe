@@ -473,3 +473,266 @@ console.log('\n########## BASE DRIFT: unmount at peak, remount, replay #########
   console.log(`next walk peak readout = base + 1.0 = ${peak.toFixed(3)} rad = ${deg(peak).toFixed(1)} deg  <-- explains 76/95/115 deg sightings`)
   console.log(`and the REST pose now holds a bent knee: rest readout = ${deg(rig2.baseX.get(rig2.leftLowerLeg)).toFixed(1)} deg instead of 0`)
 }
+
+// ---- FIX PASS 9 — RUN G: shipped walk, camera-projected readout + arrival latch ----
+// Replays the CURRENT VrmModel walk block verbatim (fix-8 constants,
+// fix-9 status write incl. the arrival latch) and measures, per peak
+// and per frame:
+//   (a) the NEW panel number: camera-projected bend (NDC through the
+//       walk-window camera, aspect-corrected = pixel-space angle),
+//   (b) the same projection WITHOUT the aspect correction (raw NDC),
+//   (c) the world-XY projected bend (fix-8's measure),
+//   (d) the TRUE 3D bend (the pass-8 panel number — must no longer
+//       be what the panel shows),
+//   (e) the status-write sequence: pas 4/4 while walking, the first
+//       held "Arrivee" frame, the hold across a simulated 1 s
+//       reading, and the return to ready on resetWalkStatus().
+// The store itself is exercised for real by scripts/fix9-status-harness.mjs;
+// here the sameWalkStatus dedupe + latch logic is replicated to show
+// the exact write sequence the loop produces.
+console.log('\n########## RUN G — FIX PASS 9: shipped walk + projected readout + arrival latch ##########')
+{
+  // Restore the TRUE rest bases — the drift test above left the nodes bent.
+  // NOTE: do NOT touch group.rotation here (no rotation.set(0,0,0)):
+  // the group's quaternion is faceFrontQuat (0,1,0,0) = 180° about Y,
+  // which three.js exposes as Euler (π, 0, π) — and the runtime loop
+  // only ever writes rotation.y, so the (π,·,π) orientation survives.
+  // A rotation.set(0,0,0) would face the model AWAY from the camera
+  // (knee z −0.145 instead of +0.148) and the projected bend would
+  // measure the back view — that exact mistake made the first RUN G
+  // read a 21.5° peak instead of the real 31–42°.
+  rig.baseX.forEach((base, node) => { node.rotation.x = base })
+  rig.baseZ.forEach((base, node) => { node.rotation.z = base })
+  group.position.set(0, 0, 0)
+  group.quaternion.copy(faceFrontQuat)
+  vrm.humanoid?.update()
+  refreshSkinning()
+
+  const _ph = new THREE.Vector3(); const _pk = new THREE.Vector3(); const _pa = new THREE.Vector3()
+  const _wp = new THREE.Vector3()
+  /** Runtime projectedKneeBend, verbatim (fix pass 9): NDC through the
+      current camera, x scaled by aspect so the angle is the screen angle. */
+  function bendCam(hip, knee, ank, aspectCorrect = true) {
+    hip.getWorldPosition(_ph).project(camera)
+    knee.getWorldPosition(_pk).project(camera)
+    ank.getWorldPosition(_pa).project(camera)
+    const sx = aspectCorrect ? (camera.aspect || 1) : 1
+    const ax = (_ph.x - _pk.x) * sx; const ay = _ph.y - _pk.y
+    const bx = (_pa.x - _pk.x) * sx; const by = _pa.y - _pk.y
+    const la = Math.hypot(ax, ay); const lb = Math.hypot(bx, by)
+    if (la < 1e-6 || lb < 1e-6) return 0
+    return 180 - deg(Math.acos(THREE.MathUtils.clamp((ax * bx + ay * by) / (la * lb), -1, 1)))
+  }
+  /** World-XY projected bend (fix-8's measure: camera looks down -Z). */
+  function bendXY(hip, knee, ank) {
+    _a.copy(hip.getWorldPosition(_wp)).sub(knee.getWorldPosition(_ph)); _a.z = 0
+    const hipKnee = _a.clone()
+    _b.copy(ank.getWorldPosition(_wp)).sub(knee.getWorldPosition(_ph)); _b.z = 0
+    hipKnee.normalize(); _b.normalize()
+    return 180 - deg(Math.acos(THREE.MathUtils.clamp(hipKnee.dot(_b), -1, 1)))
+  }
+  /** True 3D bend (pass-8 panel number). */
+  function bend3D(hip, knee, ank) {
+    _a.copy(hip.getWorldPosition(_wp)).sub(knee.getWorldPosition(_ph)).normalize()
+    _b.copy(ank.getWorldPosition(_wp)).sub(knee.getWorldPosition(_ph)).normalize()
+    return 180 - deg(Math.acos(THREE.MathUtils.clamp(_a.dot(_b), -1, 1)))
+  }
+  /** Pixel-space bend from stage-pixel positions — ground truth for
+      "what the eye sees". Must equal bendCam(..., true). */
+  function bendPx(hip, knee, ank) {
+    const hp = projectPx(hip.getWorldPosition(new THREE.Vector3()))
+    const kp = projectPx(knee.getWorldPosition(new THREE.Vector3()))
+    const ap = projectPx(ank.getWorldPosition(new THREE.Vector3()))
+    const ax = hp[0] - kp[0]; const ay = hp[1] - kp[1]
+    const bx = ap[0] - kp[0]; const by = ap[1] - kp[1]
+    const la = Math.hypot(ax, ay); const lb = Math.hypot(bx, by)
+    if (la < 1e-6 || lb < 1e-6) return 0
+    return 180 - deg(Math.acos(THREE.MathUtils.clamp((ax * bx + ay * by) / (la * lb), -1, 1)))
+  }
+  const bendAll = () => ({
+    cam: Math.max(bendCam(raw.hipL, raw.kneeL, raw.ankL), bendCam(raw.hipR, raw.kneeR, raw.ankR)),
+    camRawNdc: Math.max(bendCam(raw.hipL, raw.kneeL, raw.ankL, false), bendCam(raw.hipR, raw.kneeR, raw.ankR, false)),
+    px: Math.max(bendPx(raw.hipL, raw.kneeL, raw.ankL), bendPx(raw.hipR, raw.kneeR, raw.ankR)),
+    xy: Math.max(bendXY(raw.hipL, raw.kneeL, raw.ankL), bendXY(raw.hipR, raw.kneeR, raw.ankR)),
+    d3: Math.max(bend3D(raw.hipL, raw.kneeL, raw.ankL), bend3D(raw.hipR, raw.kneeR, raw.ankR)),
+    camL: bendCam(raw.hipL, raw.kneeL, raw.ankL),
+    camR: bendCam(raw.hipR, raw.kneeR, raw.ankR),
+  })
+  const fmtB = (b) => `panel(cam)=${b.cam.toFixed(1)} rawNDC=${b.camRawNdc.toFixed(1)} px=${b.px.toFixed(1)} XY=${b.xy.toFixed(1)} 3D=${b.d3.toFixed(1)} (L=${b.camL.toFixed(1)} R=${b.camR.toFixed(1)})`
+
+  // Rest, before the walk.
+  const restB = bendAll()
+  console.log(`REST before walk: ${fmtB(restB)}`)
+
+  // Store replica (sameWalkStatus + listener log, walkStatus.ts verbatim logic).
+  const sameStatus = (a, b) => a.walking === b.walking && a.step === b.step && a.steps === b.steps &&
+    Math.round(a.x * 100) === Math.round(b.x * 100) && a.tick === b.tick &&
+    Math.round(a.kneeDeg / 5) === Math.round(b.kneeDeg / 5)
+  let store = { walking: false, step: 0, steps: 4, x: 0, tick: 0, kneeDeg: 0 }
+  const notified = []
+  const setStatus = (next) => {
+    if (sameStatus(next, store)) return
+    store = { ...next }
+    notified.push({ ...store })
+  }
+  const resetStatus = () => {
+    const next = { ...store, walking: false, step: 0, tick: 0, kneeDeg: 0 }
+    if (sameStatus(next, store)) return
+    store = next
+    notified.push({ ...store })
+  }
+
+  // Shipped constants (VrmModel verbatim).
+  const KNEE_SWING = 1.0; const THIGH_LIFT = 0.45
+  const SWING_SPLAY = 0.2; const SHIN_SPLAY = 0.3
+  const HIP_BOB = 0.02; const HIP_SWAY = 0.05; const WALK_TURN = 0.3
+  const dt = 1 / 60
+  const TICK = 7
+  const w = { t: 0, fromX: 0, toX: WALK_RIGHT, step: -1, footL: -HIP_HALF, footR: HIP_HALF }
+  let arrived = false
+  let walkStep = 0
+  let kneeBendDeg = 0
+  const peaks = [0.5, 1.5, 2.5, 3.5]
+  let peakIdx = 0
+  let maxCam = -Infinity; let maxCamFrame = -1
+  let max3D = -Infinity
+  let maxRawNdc = -Infinity
+  let firstHeldFrame = -1; let firstHeldWt = -1
+  let sawStep4Walking = false
+  let heldFrames = 0
+  // 6 s: 4 s walk + 1 s held arrival (simulated reading) + reset + 1 s idle.
+  for (let frame = 0; frame <= 360; frame++) {
+    const wt = w.t
+    vrm.update(dt) // top of loop
+    if (wt < WALK_DURATION) {
+      w.t = wt + dt
+      if (w.t >= WALK_DURATION) arrived = true // fix-9 crossing-frame latch
+      const dir = w.toX >= w.fromX ? 1 : -1
+      const stepLen = (w.toX - w.fromX) / 2
+      const stepIdx = Math.min(STEP_COUNT - 1, Math.floor(wt / STEP_DURATION))
+      walkStep = stepIdx + 1
+      const u = Math.min(1, (wt - stepIdx * STEP_DURATION) / STEP_DURATION)
+      const leadLeft = dir < 0
+      const steppingLeft = (stepIdx % 2 === 0) === leadLeft
+      if (stepIdx !== w.step) {
+        if (steppingLeft) w.footL += stepLen; else w.footR += stepLen
+        w.step = stepIdx
+      }
+      const uw = Math.min(1, wt / WALK_DURATION)
+      const smooth = uw * uw * (3 - 2 * uw)
+      group.position.x = w.fromX + (w.toX - w.fromX) * smooth
+      const hipX = group.position.x
+      const env = Math.min(1, wt / 0.15) * Math.min(1, (WALK_DURATION - wt) / 0.25)
+      const lift = stepLift(u)
+      const setX = (node, v) => { node.rotation.x = (rig.baseX.get(node) ?? 0) + v * env }
+      const setZ = (node, v) => { node.rotation.z = (rig.baseZ.get(node) ?? 0) + v * env }
+      const clampA = (a) => Math.asin(THREE.MathUtils.clamp(a, -0.4, 0.4))
+      const restL = clampA(-HIP_HALF / LEG_LEN)
+      const restR = clampA(HIP_HALF / LEG_LEN)
+      const swingFrom = (steppingLeft ? w.footL : w.footR) - stepLen
+      const swingTo = steppingLeft ? w.footL : w.footR
+      const swingX = swingFrom + (swingTo - swingFrom) * (u * u * (3 - 2 * u))
+      const stanceFootX = steppingLeft ? w.footR : w.footL
+      const stanceRest = steppingLeft ? restR : restL
+      const swingRest = steppingLeft ? restL : restR
+      const stanceAngle = clampA((stanceFootX - hipX) / LEG_LEN) - stanceRest
+      const swingAngle = clampA((swingX - hipX) / LEG_LEN) - swingRest
+      if (steppingLeft) {
+        setZ(rig.leftUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
+        setZ(rig.rightUpperLeg, stanceAngle)
+        setX(rig.leftUpperLeg, THIGH_LIFT * lift)
+        setX(rig.leftLowerLeg, -KNEE_SWING * lift)
+        setZ(rig.leftLowerLeg, -SHIN_SPLAY * lift * dir)
+        setX(rig.rightLowerLeg, 0)
+        setZ(rig.rightLowerLeg, 0)
+        if (rig.leftFoot) rig.leftFoot.rotation.x = (rig.baseX.get(rig.leftFoot) ?? 0) - 0.35 * lift * env
+        if (rig.rightFoot) rig.rightFoot.rotation.x = rig.baseX.get(rig.rightFoot) ?? 0
+      } else {
+        setZ(rig.rightUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
+        setZ(rig.leftUpperLeg, stanceAngle)
+        setX(rig.rightUpperLeg, THIGH_LIFT * lift)
+        setX(rig.rightLowerLeg, -KNEE_SWING * lift)
+        setZ(rig.rightLowerLeg, -SHIN_SPLAY * lift * dir)
+        setX(rig.leftLowerLeg, 0)
+        setZ(rig.leftLowerLeg, 0)
+        if (rig.rightFoot) rig.rightFoot.rotation.x = (rig.baseX.get(rig.rightFoot) ?? 0) - 0.35 * lift * env
+        if (rig.leftFoot) rig.leftFoot.rotation.x = rig.baseX.get(rig.leftFoot) ?? 0
+      }
+      const armPhase = (wt / (STEP_DURATION * 2)) * Math.PI * 2
+      const armS = Math.sin(armPhase)
+      setX(rig.leftUpperArm, 0.45 * armS)
+      setX(rig.rightUpperArm, -0.45 * armS)
+      group.position.y = -HIP_BOB * (1 - lift) * env
+      if (rig.hips) setZ(rig.hips, HIP_SWAY * Math.sin((wt / STEP_DURATION) * Math.PI))
+      group.rotation.y = WALK_TURN * dir * Math.sin(Math.PI * uw)
+    } else if (w.t !== Infinity) {
+      w.t = Infinity
+      arrived = true // fix-9 completion-branch latch (belt & braces)
+      rig.baseX.forEach((base, node) => { node.rotation.x = base })
+      rig.baseZ.forEach((base, node) => { node.rotation.z = base })
+      group.position.y = 0
+      group.position.x = w.toX
+      group.rotation.y = 0
+    }
+    vrm.humanoid?.update() // pass-7 second sync
+    refreshSkinning()
+    // ---- fix-9 status write (VrmModel verbatim logic) ----
+    const walkingNow = w.t < WALK_DURATION
+    camera.updateMatrixWorld()
+    const b = bendAll()
+    kneeBendDeg = b.cam
+    if (walkingNow) {
+      if (walkStep === 4) sawStep4Walking = true
+      if (b.cam > maxCam) { maxCam = b.cam; maxCamFrame = frame }
+      max3D = Math.max(max3D, b.d3)
+      maxRawNdc = Math.max(maxRawNdc, b.camRawNdc)
+      setStatus({ walking: true, step: walkStep, steps: STEP_COUNT, x: group.position.x, tick: TICK, kneeDeg: kneeBendDeg })
+    } else if (arrived) {
+      if (store.tick === 0) {
+        arrived = false
+        setStatus({ walking: false, step: 0, steps: STEP_COUNT, x: group.position.x, tick: 0, kneeDeg: kneeBendDeg })
+      } else {
+        if (firstHeldFrame < 0) { firstHeldFrame = frame; firstHeldWt = wt }
+        heldFrames++
+        setStatus({ walking: false, step: STEP_COUNT, steps: STEP_COUNT, x: group.position.x, tick: TICK, kneeDeg: kneeBendDeg })
+      }
+    } else {
+      setStatus({ walking: false, step: 0, steps: STEP_COUNT, x: group.position.x, tick: 0, kneeDeg: kneeBendDeg })
+    }
+    if (peakIdx < peaks.length && wt >= peaks[peakIdx]) {
+      const hipL = raw.hipL.getWorldPosition(new THREE.Vector3())
+      const kneeL = raw.kneeL.getWorldPosition(new THREE.Vector3())
+      const ankL = raw.ankL.getWorldPosition(new THREE.Vector3())
+      const hipR = raw.hipR.getWorldPosition(new THREE.Vector3())
+      const kneeR = raw.kneeR.getWorldPosition(new THREE.Vector3())
+      const ankR = raw.ankR.getWorldPosition(new THREE.Vector3())
+      console.log(`PEAK t=${peaks[peakIdx].toFixed(1)}s (frame ${frame}, walking=${walkingNow} step=${walkStep}): ${fmtB(bendAll())}`)
+      console.log(`  NORM: kneeL=${deg(rig.leftLowerLeg.rotation.x).toFixed(1)} kneeR=${deg(rig.rightLowerLeg.rotation.x).toFixed(1)} thighLx=${deg(rig.leftUpperLeg.rotation.x).toFixed(1)} thighLz=${deg(rig.leftUpperLeg.rotation.z).toFixed(1)} thighRx=${deg(rig.rightUpperLeg.rotation.x).toFixed(1)} thighRz=${deg(rig.rightUpperLeg.rotation.z).toFixed(1)} shinLz=${deg(rig.leftLowerLeg.rotation.z).toFixed(1)} shinRz=${deg(rig.rightLowerLeg.rotation.z).toFixed(1)} groupX=${group.position.x.toFixed(3)} groupRotY=${deg(group.rotation.y).toFixed(1)}`)
+      console.log(`  RAW L: hip=(${hipL.x.toFixed(3)},${hipL.y.toFixed(3)},${hipL.z.toFixed(3)}) knee=(${kneeL.x.toFixed(3)},${kneeL.y.toFixed(3)},${kneeL.z.toFixed(3)}) ank=(${ankL.x.toFixed(3)},${ankL.y.toFixed(3)},${ankL.z.toFixed(3)})`)
+      console.log(`  RAW R: hip=(${hipR.x.toFixed(3)},${hipR.y.toFixed(3)},${hipR.z.toFixed(3)}) knee=(${kneeR.x.toFixed(3)},${kneeR.y.toFixed(3)},${kneeR.z.toFixed(3)}) ank=(${ankR.x.toFixed(3)},${ankR.y.toFixed(3)},${ankR.z.toFixed(3)})`)
+      peakIdx++
+    }
+    // Simulated reading end at t=5 s: resetWalkStatus().
+    if (frame === 300) {
+      console.log(`frame 300 (t=5.0s): reading ends -> resetWalkStatus() (store before: walking=${store.walking} step=${store.step} tick=${store.tick})`)
+      resetStatus()
+      console.log(`  store after reset: walking=${store.walking} step=${store.step} tick=${store.tick} kneeDeg=${store.kneeDeg.toFixed(1)}`)
+    }
+  }
+  const restAfterB = bendAll()
+  console.log(`REST after walk+reset: ${fmtB(restAfterB)}`)
+  console.log(`MAX over walking frames: panel(cam)=${maxCam.toFixed(1)} deg (frame ${maxCamFrame}) | rawNDC=${maxRawNdc.toFixed(1)} | true3D=${max3D.toFixed(1)}`)
+  console.log(`NOTIFIED status writes (${notified.length}):`)
+  for (const s of notified) {
+    console.log(`  walking=${s.walking} step=${s.step}/${s.steps} x=${s.x >= 0 ? '+' : ''}${s.x.toFixed(2)} tick=${s.tick} kneeDeg=${s.kneeDeg.toFixed(1)} -> ${s.walking ? 'Marche…' : s.tick > 0 ? 'Arrivée' : 'prête'}`)
+  }
+  console.log('CHECKS:')
+  console.log(`  pas 4/4 written while walking: ${sawStep4Walking ? 'YES' : 'NO — REGRESSION'}`)
+  console.log(`  first held Arrivee frame: ${firstHeldFrame} (wt=${firstHeldWt.toFixed(3)}s, x=${group.position.x.toFixed(2)}) — held for ${heldFrames} frames before reset`)
+  console.log(`  arrival survived the whole simulated reading (60 frames): ${heldFrames >= 59 ? 'YES' : `NO (${heldFrames} frames)`}`)
+  console.log(`  reset returns to ready and the loop never re-latches: ${!arrived && store.tick === 0 && store.walking === false ? 'YES' : 'NO — REGRESSION'}`)
+  console.log(`  peak projected bend ~31–44 deg (sampled peaks 31.4–42.5, per-frame max ${maxCam.toFixed(1)}): ${maxCam >= 31 && maxCam <= 45 ? 'YES' : `NO (${maxCam.toFixed(1)})`}`)
+  console.log(`  rest projected bend ~0 deg: ${restB.cam < 5 && restAfterB.cam < 5 ? 'YES' : `NO (before ${restB.cam.toFixed(1)}, after ${restAfterB.cam.toFixed(1)})`}`)
+  console.log(`  panel number is the projected bend, not true 3D (3D peak ${max3D.toFixed(1)} vs panel peak ${maxCam.toFixed(1)}): ${Math.abs(max3D - maxCam) > 10 ? 'YES' : 'NO'}`)
+  console.log(`  aspect-corrected NDC == pixel-space angle (max |cam - px| over peaks): see peak lines above — they must match to ~0.1 deg`)
+}
