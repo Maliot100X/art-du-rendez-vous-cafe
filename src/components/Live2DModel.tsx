@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Live2DModel as Live2DModelType } from 'pixi-live2d-display/cubism4'
+import useDimensions from 'react-cool-dimensions'
 import { AGENT } from '../content'
 import { avatarBridge, EXPRESSION_PRESETS, type AvatarBridge } from '../lib/avatarBridge'
 
@@ -22,6 +23,46 @@ import { avatarBridge, EXPRESSION_PRESETS, type AvatarBridge } from '../lib/avat
  */
 
 type Form = 'human' | 'furry'
+
+/**
+ * FACE BAND — measured from the real .moc3 with the Cubism Core
+ * (Node + live2dcubismcore.min.js, /tmp/measure-nekomi-parts.js), NOT
+ * guessed. pixi-live2d-display's getBounds() returns the WHOLE canvas
+ * rect (3000x3000, origin centre), so fractions below are fractions of
+ * that canvas, from the TOP:
+ *
+ *   cat ears (furry)  0.025   hair top (human) 0.096–0.130
+ *   EYES              0.341–0.482 (centre 0.410)
+ *   nose              0.448–0.516   mouth 0.489–0.559
+ *   head bottom       0.659         bow 0.627–0.778
+ *
+ * The old fit framed 0.00–0.32 — entirely ABOVE the eyes (0.341) — which
+ * is exactly why Minir's phone screenshot showed only the top of the
+ * purple hair. The new window 0.04–0.68 puts the eyes at ~59% of the
+ * stage height and the mouth at ~76%, with the hair top and (in furry
+ * form) the ear tips just inside the frame. Eyes and mouth sit at the
+ * SAME fractions in both forms (only the ears move), so one window
+ * frames both forms.
+ */
+const FACE_TOP = 0.04
+const FACE_BOTTOM = 0.68
+/** Head width is ~0.56 of the canvas width — the horizontal guard. */
+const HEAD_WIDTH_FRAC = 0.62
+
+declare global {
+  interface Window {
+    __nekomiDebug?: {
+      status: string
+      form: Form
+      stageW: number
+      stageH: number
+      bounds: { x: number; y: number; width: number; height: number }
+      scale: number
+      eyeScreenPx: [number, number]
+      mouthScreenPx: [number, number]
+    }
+  }
+}
 
 const CORE_LOCAL = '/live2d/live2dcubismcore.min.js'
 const CORE_CDN = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
@@ -58,13 +99,30 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   const containerRef = useRef<HTMLDivElement>(null)
   const modelRef = useRef<Live2DModelType | null>(null)
   const formRef = useRef<Form>('human')
+  const fitRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [form, setForm] = useState<Form>('human')
+  // react-cool-dimensions measures the stage's REAL rendered size
+  // (ResizeObserver) — fit() runs from that measurement, never from an
+  // assumed width. This is the fix for the failed "top 32%" framing:
+  // frame from measured bounds AND a measured stage.
+  const { observe, width: stageW, height: stageH } = useDimensions<HTMLDivElement>()
+  const setStageRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      containerRef.current = el
+      if (el) observe(el)
+    },
+    [observe],
+  )
+
+  // Re-fit whenever the measured stage size changes.
+  useEffect(() => {
+    if (stageW > 0 && stageH > 0) fitRef.current?.()
+  }, [stageW, stageH])
 
   useEffect(() => {
     let cancelled = false
     let app: import('pixi.js').Application | null = null
-    let ro: ResizeObserver | null = null
 
     const init = async () => {
       const container = containerRef.current
@@ -92,18 +150,15 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           autoDensity: true,
         })
 
-        const fit = (model: Live2DModelType) => {
+        const fit = () => {
           const w = container.clientWidth
           const h = container.clientHeight
           if (w === 0 || h === 0) return
           app?.renderer.resize(w, h)
-          // Frame head + shoulders from the TRUE drawn bounds, not
-          // model.height: this rig's drawn geometry extends far beyond
-          // its layout height, so scaling by model.height zooms into
-          // the chin (the close-up of mouth/nose with no face or eyes
-          // seen on a phone). Measure the real bounds at scale 1, then
-          // frame the top 32% of the model (head + shoulders) into the
-          // stage, face centred and fully in frame.
+          // Frame the FACE band (see FACE_TOP/FACE_BOTTOM above), not the
+          // top of the bounds: getBounds() is the whole canvas rect, so
+          // the window is placed by measured canvas fractions. A
+          // horizontal guard keeps the head inside narrow stages.
           model.scale.set(1)
           model.position.set(0, 0)
           const b = model.getBounds()
@@ -113,11 +168,26 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             model.position.set(w / 2, h * 0.55)
             return
           }
-          const FRAME = 0.32
-          const s = (h * 0.92) / (b.height * FRAME)
+          const windowH = FACE_BOTTOM - FACE_TOP
+          const s = Math.min((h * 0.98) / (b.height * windowH), (w * 0.96) / (b.width * HEAD_WIDTH_FRAC))
           model.scale.set(s)
-          model.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.04 - b.y * s)
+          model.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * FACE_TOP) * s)
+          // Debug projection (verifiable without a real browser): where
+          // the eyes and mouth land in stage pixels, from the measured
+          // fractions and the actual scale/position just applied.
+          const stageY = (fracFromTop: number) => h * 0.02 + (fracFromTop - FACE_TOP) * b.height * s
+          window.__nekomiDebug = {
+            status: 'ready',
+            form: formRef.current,
+            stageW: w,
+            stageH: h,
+            bounds: { x: b.x, y: b.y, width: b.width, height: b.height },
+            scale: s,
+            eyeScreenPx: [Math.round(w / 2), Math.round(stageY(0.41))],
+            mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
+          }
         }
+        fitRef.current = fit
 
         const model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
         if (cancelled) {
@@ -134,7 +204,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         if (formRef.current === 'furry') {
           void model.expression('Henshin').catch(() => undefined)
         }
-        fit(model)
+        fit()
         void model.motion('Idle').catch(() => undefined)
 
         // Voice + expression drive (Phase 4): per-frame ticker, in the
@@ -184,9 +254,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         }
         container.addEventListener('pointermove', onPointer)
 
-        ro = new ResizeObserver(() => fit(model))
-        ro.observe(container)
-
         setStatus('ready')
         return () => {
           detachTicker()
@@ -204,7 +271,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     return () => {
       cancelled = true
       detach?.()
-      ro?.disconnect()
+      fitRef.current = null
       modelRef.current?.destroy()
       modelRef.current = null
       app?.destroy(true, { children: true })
@@ -226,6 +293,14 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     } else {
       model.internalModel.motionManager.expressionManager?.resetExpression()
     }
+    // Re-fit after the form change: the Henshin expression fades over
+    // ~500 ms (expressionFadingDuration) and moves geometry (ears rise in
+    // furry form), so re-measure at the start, mid-fade and end of the
+    // transition. The face band itself is the same in both forms
+    // (measured), so this is a safety net, not the fix.
+    window.setTimeout(() => fitRef.current?.(), 250)
+    window.setTimeout(() => fitRef.current?.(), 600)
+    window.setTimeout(() => fitRef.current?.(), 1000)
   }
 
   const nod = () => {
@@ -233,10 +308,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   }
 
   return (
-    <div className="overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
+    <div className="min-w-0 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
       <div
-        ref={containerRef}
-        className="relative h-[300px] sm:h-[380px] lg:h-[480px]"
+        ref={setStageRef}
+        className="relative h-[340px] touch-pan-y sm:h-[380px] lg:h-[480px]"
         style={{ background: 'radial-gradient(70% 70% at 50% 30%, rgba(232,163,61,0.14), transparent 70%), #171210' }}
       >
         {status !== 'ready' && (
@@ -265,7 +340,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           <button
             type="button"
             onClick={nod}
-            className="absolute bottom-4 right-4 rounded-full border border-white/20 bg-black/40 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-white/90 backdrop-blur transition-colors duration-300 hover:border-amber hover:text-amber"
+            className="absolute bottom-4 right-4 min-h-11 rounded-full border border-white/20 bg-black/40 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-white/90 backdrop-blur transition-colors duration-300 hover:border-amber hover:text-amber"
           >
             ✦ Nodd
           </button>
@@ -286,7 +361,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
               type="button"
               onClick={() => setHenshin(opt.id)}
               aria-pressed={form === opt.id}
-              className={`rounded-full px-4 py-2 text-xs font-bold transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
+              className={`min-h-11 rounded-full px-4 py-2 text-xs font-bold transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                 form === opt.id ? 'bg-bone text-ink' : 'text-bone/60 hover:text-bone'
               }`}
             >
