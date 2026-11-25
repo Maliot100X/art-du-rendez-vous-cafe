@@ -11,12 +11,22 @@ import { botReply, expressionForReply, type BotReply } from './agentBrain'
  *
  * Env vars (see BRAIN-SETUP.md at the project root):
  *   VITE_LLM_API_KEY    — the LLM API key (primary)
- *   VITE_LLM_BASE_URL   — OpenAI-compatible base URL (default https://api.openai.com/v1)
- *   VITE_LLM_MODEL      — chat model (default gpt-4o-mini; "auto" for the freellm gateway)
+ *   VITE_LLM_BASE_URL   — OpenAI-compatible base URL (default https://api.inceptionlabs.ai/v1)
+ *   VITE_LLM_MODEL      — chat model (default mercury-3; "auto" for the freellm gateway)
  * Legacy aliases, honoured when the VITE_LLM_* vars are unset:
  *   VITE_FREELLM_API_KEY / VITE_FREELLM_BASE_URL (the freellm gateway is
  *   OpenAI-compatible, so it plugs in here unchanged; model then defaults
  *   to "auto").
+ *
+ * Request-body rule (mercury-3 is a reasoning model — proven 2026-11-25):
+ * the body uses `max_completion_tokens` (never the deprecated
+ * `max_tokens`) + `reasoning_effort: "instant"`. With default reasoning
+ * and a small max_tokens budget the model spends everything reasoning
+ * and returns content NULL with finish_reason "length". Temperature is
+ * omitted for mercury-3 (reasoning models reject non-default
+ * temperature); non-mercury models keep temperature 0.7.
+ * reasoning_effort is sent ONLY for mercury-3 (or an Inception base
+ * URL) — a non-reasoning model would reject it.
  *
  * When a key IS configured, askBrain() POSTs an OpenAI-compatible
  * chat-completions request whose system prompt is built from the site's
@@ -67,10 +77,10 @@ export function brainConfig(): BrainConfig {
   const baseUrl =
     envString('VITE_LLM_BASE_URL') ??
     envString('VITE_FREELLM_BASE_URL') ??
-    'https://api.openai.com/v1'
-  // The freellm gateway serves model "auto" (and "auto:fast"); plain
-  // OpenAI-compatible endpoints default to gpt-4o-mini.
-  const model = envString('VITE_LLM_MODEL') ?? (fromFreellm ? 'auto' : 'gpt-4o-mini')
+    'https://api.inceptionlabs.ai/v1'
+  // The freellm gateway serves model "auto" (and "auto:fast"); other
+  // OpenAI-compatible endpoints default to mercury-3 (Inception).
+  const model = envString('VITE_LLM_MODEL') ?? (fromFreellm ? 'auto' : 'mercury-3')
   return { key, baseUrl: baseUrl.replace(/\/+$/, ''), model }
 }
 
@@ -114,6 +124,47 @@ export function brainSystemPrompt(_persona: 'vita' | 'nekomi' = 'nekomi'): strin
   ].join('\n')
 }
 
+/** True for the Inception reasoning model (by name or by base URL). */
+export function isMercuryModel(model: string, baseUrl: string): boolean {
+  return model === 'mercury-3' || baseUrl.includes('inceptionlabs')
+}
+
+const MERCURY_MAX_COMPLETION_TOKENS = 512
+const DEFAULT_MAX_COMPLETION_TOKENS = 300
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+/**
+ * Build the chat-completions request body for a model + base URL.
+ * mercury-3 (reasoning model): max_completion_tokens 512 (the proven
+ * value) + reasoning_effort "instant", NO temperature, NO max_tokens.
+ * Any other model: temperature 0.7 + max_completion_tokens 300, and
+ * never reasoning_effort (a non-reasoning model would reject it).
+ */
+export function buildChatBody(
+  model: string,
+  baseUrl: string,
+  messages: ChatMessage[],
+): Record<string, unknown> {
+  if (isMercuryModel(model, baseUrl)) {
+    return {
+      model,
+      reasoning_effort: 'instant',
+      max_completion_tokens: MERCURY_MAX_COMPLETION_TOKENS,
+      messages,
+    }
+  }
+  return {
+    model,
+    temperature: 0.7,
+    max_completion_tokens: DEFAULT_MAX_COMPLETION_TOKENS,
+    messages,
+  }
+}
+
 interface ChatCompletionsResponse {
   choices?: { message?: { content?: unknown } }[]
 }
@@ -137,16 +188,13 @@ async function callLlm(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        max_tokens: 300,
-        messages: [
+      body: JSON.stringify(
+        buildChatBody(model, baseUrl, [
           { role: 'system', content: brainSystemPrompt(persona) },
           ...history.slice(-6).map((t) => ({ role: t.role, content: t.text })),
           { role: 'user', content: message },
-        ],
-      }),
+        ]),
+      ),
       signal: controller.signal,
     })
     if (!res.ok) throw new Error(`llm-${res.status}`)
