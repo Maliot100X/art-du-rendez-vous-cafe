@@ -4,7 +4,7 @@ import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
 import { avatarBridge } from '../lib/avatarBridge'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
-import { getWalkStatus, resetWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
+import { resetWalkStatus } from '../lib/walkStatus'
 
 const VrmModel = lazy(() => import('./VrmModel'))
 
@@ -370,21 +370,13 @@ export function MenuVitaStage({ guide }: { guide: VitaGuide }) {
 
 /** What she says + controls — in flow on phones, under the stage on desktop. */
 export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
-  // Walk readout (fix pass 6): live walk state as plain DOM text —
-  // the cloud-browser check cannot open devtools, so the walk is
-  // observable here ("Marche… pas 2/4 · x +0.14 · genou 35°" while
-  // walking, "Arrivée · pas 4/4 · x +0.14" once she has arrived —
-  // the arrival state is HELD by the loop until the reading ends
-  // (fix pass 9), so the check can read it after the fact too; the
-  // genou number is the front-projected bend the camera sees).
-  const [walk, setWalk] = useState<WalkStatus>(getWalkStatus())
-  useEffect(() => subscribeWalkStatus(setWalk), [])
-  const walkX = `${walk.x >= 0 ? '+' : ''}${walk.x.toFixed(2)}`
-  const walkLine = walk.walking
-    ? `Marche… pas ${walk.step}/${walk.steps} · x ${walkX} · genou ${Math.round(walk.kneeDeg)}°`
-    : walk.tick > 0
-      ? `Arrivée · pas ${walk.step}/${walk.steps} · x ${walkX}`
-      : 'Vita est prête — choisissez une catégorie.'
+  // Fix pass 11: NO visible walk readout. The pass-6 walk line
+  // ("Marche… pas 2/4 · x +0.14 · genou 35°") was plain DOM text in
+  // this panel — customers saw debug telemetry. The walk state
+  // still lives in window.__vrmDebug.walk (VrmModel writes it every
+  // frame), so the cloud-browser check reads it from there instead.
+  // The "Bouche NN%" line below stays: it is the lip-sync proof,
+  // shown only while she is speaking.
   // Live lip-sync readout (fix pass 10): the mouth value + vowel the
   // VRM is staging this frame, polled 6×/s and quantised to 10% so
   // the panel does not re-render 60 times a second. Shown only while
@@ -460,9 +452,6 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
             <BookOpen size={15} /> Feuilleter le livre
           </button>
         </div>
-        <p aria-live="polite" className="mt-2 font-mono text-[11px] text-mist/80">
-          {walkLine}
-        </p>
         {mouthInfo.speaking && (
           <p className="mt-1 font-mono text-[11px] text-mist/80">
             Bouche {mouthInfo.mouth}%{mouthInfo.vowel ? ` · ${mouthInfo.vowel.toUpperCase()}` : ''}

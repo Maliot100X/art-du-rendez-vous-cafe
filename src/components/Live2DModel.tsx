@@ -44,8 +44,19 @@ type Form = 'human' | 'furry'
  * form) the ear tips just inside the frame. Eyes and mouth sit at the
  * SAME fractions in both forms (only the ears move), so one window
  * frames both forms.
+ *
+ * Fix pass 11: that last claim was wrong in the one place that
+ * matters — the ears do NOT stay at 0.025. While the Henshin fade
+ * runs, and at full furry rest, the ear tips rise above the human
+ * hair top toward the canvas top, past the FACE_TOP 0.02 window
+ * edge: at the old fit the ear tips sat only ~13 px from the stage
+ * top on desktop (480 px stage), so any rise clipped them. The fit
+ * below therefore frames from the TALLER form: in furry form the
+ * window starts at FURRY_TOP 0.0 (the canvas top itself), so any ear
+ * position inside the canvas lands at least 0.02*h inside the stage.
  */
 const FACE_TOP = 0.02
+const FURRY_TOP = 0.0
 const FACE_BOTTOM = 0.68
 /** Head width is ~0.56 of the canvas width — the horizontal guard. */
 const HEAD_WIDTH_FRAC = 0.62
@@ -349,6 +360,12 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // top of the bounds: getBounds() is the whole canvas rect, so
           // the window is placed by measured canvas fractions. A
           // horizontal guard keeps the head inside narrow stages.
+          // Fix pass 11: fit from the TALLER form — in furry form the
+          // window starts at FURRY_TOP (canvas top) instead of
+          // FACE_TOP, because the ears rise above the human hair top
+          // and the old 0.02 window clipped their tips (see the FACE
+          // BAND note above). The scale drops slightly to hold the
+          // taller window; eyes/mouth move by only a few px.
           m.scale.set(1)
           m.position.set(0, 0)
           const b = m.getBounds()
@@ -358,14 +375,15 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             m.position.set(w / 2, h * 0.55)
             return
           }
-          const windowH = FACE_BOTTOM - FACE_TOP
+          const top = formRef.current === 'furry' ? FURRY_TOP : FACE_TOP
+          const windowH = FACE_BOTTOM - top
           const s = Math.min((h * 0.98) / (b.height * windowH), (w * 0.96) / (b.width * HEAD_WIDTH_FRAC))
           m.scale.set(s)
-          m.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * FACE_TOP) * s)
+          m.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * top) * s)
           // Debug projection (verifiable without a real browser): where
           // the eyes and mouth land in stage pixels, from the measured
           // fractions and the actual scale/position just applied.
-          const stageY = (fracFromTop: number) => h * 0.02 + (fracFromTop - FACE_TOP) * b.height * s
+          const stageY = (fracFromTop: number) => h * 0.02 + (fracFromTop - top) * b.height * s
           window.__nekomiDebug = {
             status: 'ready',
             form: formRef.current,
@@ -570,8 +588,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     // Re-fit after the form change: the Henshin expression fades over
     // ~500 ms (expressionFadingDuration) and moves geometry (ears rise in
     // furry form), so re-measure at the start, mid-fade and end of the
-    // transition. The face band itself is the same in both forms
-    // (measured), so this is a safety net, not the fix.
+    // transition. Fix pass 11: these re-fits now matter — fit() frames
+    // the furry window from the canvas top (FURRY_TOP), so each
+    // re-measure re-frames the taller form instead of re-applying the
+    // human window to risen ears.
     window.setTimeout(() => fitRef.current?.(), 250)
     window.setTimeout(() => fitRef.current?.(), 600)
     window.setTimeout(() => fitRef.current?.(), 1000)

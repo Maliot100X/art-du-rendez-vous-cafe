@@ -681,10 +681,19 @@ export default function VrmModel({
       framedH = size.y * 1.03
       framedW = size.x * 1.06
     } else if (framingRef.current === 'face') {
-      // Head + shoulders: hair top (box.max.y) down to the chest.
-      // Window 0.62 m tall, centred 0.10 m below the eyes.
-      targetY = eyePos.y - 0.1
-      framedH = 0.62
+      // Head + shoulders, framed from the MEASURED box so the whole
+      // head fits: window top = hair top (box.max.y) + 0.05 m
+      // clearance, window bottom = chest (0.41 m below the eyes, as
+      // before). The old window (0.62 m tall, centred 0.10 m below
+      // the eyes: top at eyes + 0.21 m = 1.741 m) left only 0.028 m
+      // over the documented 1.713 m hair top — and any hair above
+      // that (box.max.y up to ~1.76 m) was sliced by the top edge
+      // (projected top-of-hair y < 0). Framing from the box keeps the
+      // hair 0.05 m inside the window whatever box.max.y measures.
+      const faceTop = box.max.y + 0.05
+      const faceBottom = eyePos.y - 0.41
+      targetY = (faceTop + faceBottom) / 2
+      framedH = faceTop - faceBottom
       framedW = 0.55
     } else if (framingRef.current === 'half') {
       // Head to upper thighs: the face stays ~2x larger than
@@ -1953,10 +1962,29 @@ export default function VrmModel({
 
   return (
     <div className="min-w-0 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
+      {/* Non-compact stage (Agent tab): viewport-capped so the full
+          body + the framing controls below fit on one screen. Column
+          math, measured from the code (desktop 1920x1000): main top
+          padding 72 + sticky tab bar 60 + tab ribbon 29 + section
+          top padding 96 + Agent header 113 + grid gap 24 + model
+          switcher 64 = 458 px above the stage, caption row ~92 px
+          below it — a 560 px stage makes the column ~1110 px, so the
+          framing buttons sit a full scroll below the fold. The caps
+          subtract that chrome (+~10 px margin) from the viewport:
+          lg 100dvh-560 -> 440 px stage at 1000 px viewport (column
+          990 px, fits), full 560 px again at >=1120 px viewports.
+          Phone 390x844: 322 px above + caption ~111 px -> base cap
+          100dvh-450 -> 394 px stage (column 827 px, fits). sm cap
+          100dvh-520 covers the md tab-bar case. The max() floor
+          keeps a usable stage on very short (landscape) viewports
+          instead of collapsing to a negative height. Compact stages
+          (Menu/Livre side columns) already fit and are untouched. */}
       <div
         ref={setStageRef}
         className={`relative touch-pan-y ${
-          compact ? 'h-[260px] sm:h-[300px] lg:h-[480px]' : 'h-[520px] sm:h-[540px] lg:h-[560px]'
+          compact
+            ? 'h-[260px] sm:h-[300px] lg:h-[480px]'
+            : 'h-[min(520px,max(240px,calc(100dvh-450px)))] sm:h-[min(540px,max(260px,calc(100dvh-520px)))] lg:h-[min(560px,max(280px,calc(100dvh-560px)))]'
         }`}
         style={{
           background:
