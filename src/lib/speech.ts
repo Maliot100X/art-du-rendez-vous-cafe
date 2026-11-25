@@ -59,6 +59,18 @@ import { SpeechViseme } from './speechViseme'
 let muted = false
 let speaking = false
 let raf = 0
+/** Fix pass 16: true while a tickSpeaking rAF callback is queued —
+    the tick is driven from TWO sources now (rAF + the interval
+    below), so the rAF chain must be scheduled at most once. */
+let rafPending = false
+/** Fix pass 16: the setInterval id driving tickSpeaking alongside
+    rAF (0 = no interval running). Created in speak(), cleared in
+    endSpeaking(). */
+let tickInterval: ReturnType<typeof setInterval> | 0 = 0
+/** Fix pass 16: the interval period. ~50 ms (20 Hz) samples the
+    ~2-3 Hz viseme envelope far above its Nyquist rate, so the bridge
+    tracks the envelope even when rAF is starved to ~0.4 fps. */
+const TICK_INTERVAL_MS = 50
 let prevMouth = 0
 let lastT = 0
 let cachedVoices: SpeechSynthesisVoice[] = []
@@ -139,6 +151,23 @@ function pickVoice(): SpeechSynthesisVoice | null {
  * Fix pass 13: if the engine never reports speaking within
  * OPEN_LOOP_AFTER_MS, the clock starts anyway (open-loop) so the
  * mouth moves during readings even with no audio at all.
+ *
+ * Fix pass 16: the tick is ALSO driven by a ~50 ms setInterval
+ * (see TICK_INTERVAL_MS, started in speak()). The whole mouth chain
+ * was rAF-gated, and in a no-audio headless/cloud browser the page
+ * renders at ~0.3-2 fps — rAF fired 5-6 times in a 13 s reply
+ * window, so the ~2-3 Hz viseme envelope was sampled at ~0.3 Hz and
+ * aliased to a mostly-closed staircase: the bridge held one random
+ * sample for seconds and the model re-baked just as rarely, so a
+ * 10-12 s pixel sample saw an essentially frozen closed mouth. The
+ * interval samples the envelope at 20 Hz regardless of frame rate
+ * (timers fire at ~3.6 Hz even in that environment — still 10x the
+ * rAF rate — and at 50 ms the tick itself is cheap). rAF stays a
+ * driver too, so a real phone at 60 fps is unchanged: the tick is
+ * time-based (performance.now + clamped dt), so running it from
+ * both sources only samples more often, never double-advances.
+ * The rAF chain is guarded by rafPending so the two drivers never
+ * stack duplicate rAF callbacks.
  */
 function tickSpeaking() {
   const now = performance.now()
@@ -210,11 +239,34 @@ function tickSpeaking() {
   // stop on `speaking` (still false while the voice is queued, and
   // the poll is exactly what notices it starting). endSpeaking()
   // clears `viseme`, which is what stops the loop.
-  if (viseme !== null) raf = requestAnimationFrame(tickSpeaking)
+  // Fix pass 16: schedule the next rAF through the guard — the
+  // interval driver below also calls tickSpeaking, and without the
+  // guard each interval tick would queue another rAF chain.
+  if (viseme !== null) scheduleRaf()
+}
+
+/** Fix pass 16: queue one tickSpeaking rAF callback, at most one
+    pending at a time. Called from tickSpeaking() itself and from
+    speak() (first frame); the setInterval driver does not go through
+    here — it calls tickSpeaking() directly on its own schedule. */
+function scheduleRaf() {
+  if (rafPending) return
+  rafPending = true
+  raf = requestAnimationFrame(() => {
+    rafPending = false
+    tickSpeaking()
+  })
 }
 
 function stopEnvelope() {
   cancelAnimationFrame(raf)
+  rafPending = false
+  // Fix pass 16: stop the interval driver with the rAF driver — a
+  // leaked interval would keep sampling a dead viseme forever.
+  if (tickInterval) {
+    clearInterval(tickInterval)
+    tickInterval = 0
+  }
   prevMouth = 0
   avatarBridge.setMouthOpen(0)
   avatarBridge.setMouthVowel(null)
@@ -341,9 +393,16 @@ export function speak(text: string): void {
   }
   // Start the poll tick at once — it, not `onstart`, notices the
   // voice starting and drives the mouth from the first frame.
+  // Fix pass 16: TWO drivers now. rAF (scheduleRaf) is the driver
+  // when frames flow; the ~50 ms interval is the driver when they
+  // don't (headless/cloud browsers at ~0.4 fps — see the tickSpeaking
+  // header). Both call the same time-based tick, so a 60 fps phone
+  // just samples more often. The interval is cleared in
+  // stopEnvelope() (via endSpeaking), so it never outlives the run.
   lastT = performance.now()
   prevMouth = 0
-  raf = requestAnimationFrame(tickSpeaking)
+  scheduleRaf()
+  tickInterval = setInterval(tickSpeaking, TICK_INTERVAL_MS)
 }
 
 export function stopSpeaking(): void {

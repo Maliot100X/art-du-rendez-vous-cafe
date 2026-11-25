@@ -111,6 +111,10 @@ type WarmStage = {
   /** Fix pass 14: removes the Henshin `afterMotionUpdate` hook from the
       cached internalModel when the stage is really discarded. */
   unapplyHenshin: () => void
+  /** Fix pass 16: the starved-rAF bake timer (setInterval id, created
+      at cold init, lives with the cached stage). Cleared here so a
+      discarded stage never keeps forcing renders. */
+  bakeTimer: ReturnType<typeof setInterval> | null
 }
 let warmStage: WarmStage | null = null
 
@@ -136,6 +140,10 @@ function dropWarmStage(): void {
   // joined the shared promise) — a destroyed model must never be
   // re-served to a later mount, so clear the promise with the cache.
   preloadedModelPromise = null
+  // Fix pass 16: stop the bake timer with the stage — it closes over
+  // this stage's app/model, and a leaked timer would keep forcing
+  // renders on a destroyed renderer.
+  if (stage.bakeTimer) clearInterval(stage.bakeTimer)
   try {
     stage.unapplyHenshin()
   } catch {
@@ -220,6 +228,16 @@ declare global {
        */
       mouthBridge: number
       mouthWritten: number
+      /**
+       * Fix pass 16 — forced-bake telemetry (debug only): how many
+       * renders the starved-rAF bake timer forced, and how long the
+       * last one took (ms). -1 / 0 = none yet. The probe reads these
+       * to tell a timer that never fires from one whose renders eat
+       * the thread (a forced render under SwiftShader can take
+       * seconds — see the bake timer's backoff).
+       */
+      bakeCount: number
+      lastBakeMs: number
       /**
        * The init failure, when status is 'failed' — the exact error
        * message (fix pass 4: the old code swallowed it, so a failed
@@ -565,6 +583,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
       // 14): keep the last written values, like param3 above.
       mouthBridge: window.__nekomiDebug?.mouthBridge ?? -1,
       mouthWritten: window.__nekomiDebug?.mouthWritten ?? -1,
+      // A fit must not wipe the bake telemetry either (fix pass 16).
+      bakeCount: window.__nekomiDebug?.bakeCount ?? -1,
+      lastBakeMs: window.__nekomiDebug?.lastBakeMs ?? 0,
       // A successful fit means no error — never carry a stale
       // failure forward into the ready diagnostic (fix pass 5).
       error: null,
@@ -604,6 +625,14 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     const init = async () => {
       const container = containerRef.current
       if (!container) return
+      // Fix pass 16: performance.now() of the last model update that
+      // actually ran (a bake). Updated in writeMouth, which fires on
+      // `beforeModelUpdate` inside the model's own update — i.e. only
+      // when a frame was really baked, never when a write merely
+      // waited. The bake timer below reads it to decide whether the
+      // rAF-driven loop has starved. Lives in init scope so both the
+      // hook and the timer close over the same value.
+      let lastModelUpdateAt = 0
 
       // WARM PATH (fix pass 13, bug 3): the parsed stage survived the
       // last unmount — re-attach it instead of re-loading the model.
@@ -860,6 +889,12 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // write below stays as the fallback.
         let mouthHooked = false
         const writeMouth = () => {
+          // Fix pass 16: a model update really ran (this hook fires
+          // inside internalModel.update, i.e. inside a bake) — record
+          // it so the bake timer can tell a starved loop from a live
+          // one. Updated before the write: even a failed write still
+          // proves the bake happened.
+          lastModelUpdateAt = performance.now()
           const value = bridge.getMouthOpen()
           setParam('ParamMouthOpenY', value)
           if (window.__nekomiDebug) {
@@ -928,6 +963,94 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         pointerContainerRef.current = container
         container.addEventListener('pointermove', onPointer)
 
+        // Fix pass 16 — decouple the model bake from the starved
+        // ticker. The whole mouth chain was rAF-gated: the Automator
+        // accumulates the model's deltaTime on the shared (rAF)
+        // ticker, and Live2DModel._render only calls
+        // internalModel.update(deltaTime) `if (this.deltaTime)` — so
+        // at ~0.4 fps in a no-audio headless/cloud browser the bake
+        // ran 5-6 times in a 13 s reply and a bare app.render()
+        // would bake NOTHING (deltaTime stays 0 between rAF fires).
+        // This timer therefore feeds the delta itself and then
+        // renders, so a presented frame carries the CURRENT bridge
+        // value instead of a seconds-old hold:
+        //   - gated: only while the bridge reports speaking (the
+        //     speech.ts viseme run) — idle frames stay on the
+        //     normal rAF loop, no extra SwiftShader work;
+        //   - gated: only when no model update has run for
+        //     >250 ms (lastModelUpdateAt, set by writeMouth) — at
+        //     60 fps on a real phone it never fires at all;
+        //   - capped: the interval is 80 ms (~12.5 Hz), and the
+        //     250 ms staleness gate holds forced renders to ~3 Hz
+        //     when fully starved, so the timer can never flood the
+        //     renderer;
+        //   - skipped when the canvas is detached (tab left Agent
+        //     mid-reading) — no off-screen SwiftShader work.
+        // The write before the update covers the unhooked fallback
+        // (no beforeModelUpdate hook: the app-ticker tick that
+        // normally writes the mouth is starved too); when hooked,
+        // writeMouth re-writes the same value inside the update.
+        // Honest caveat (kept): if SwiftShader genuinely cannot
+        // rasterize faster than ~2 fps, the mouth still updates in
+        // jumps rather than smoothly — but each presented frame
+        // shows the current value, so a 10 s pixel sample catches
+        // several genuinely open frames instead of one frozen one.
+        // Backoff (measured in the fix-16 probe run 1): a forced
+        // render under SwiftShader can block the main thread for
+        // seconds, and renders fired back-to-back leave the 50 ms
+        // speech tick no room to run — the bridge then freezes
+        // between renders instead of tracking the envelope. So a
+        // forced render also sets the floor for the NEXT one: the
+        // timer waits at least as long as the last render took
+        // (250 ms minimum) before forcing again. The tick gets the
+        // gaps; each presented frame still carries the current
+        // value. On a real phone the gate never trips, so the
+        // backoff is inert there. bakeCount / lastBakeMs are
+        // reported in __nekomiDebug so the probe can tell a timer
+        // that never fires from one whose renders eat the thread.
+        const BAKE_TIMER_MS = 80
+        const BAKE_STALE_MS = 250
+        let lastForcedBakeAt = 0
+        let lastForcedRenderMs = BAKE_STALE_MS
+        let bakeCount = 0
+        const bakeTimer = setInterval(() => {
+          try {
+            if (!bridge.isSpeaking()) return
+            if (!canvas.isConnected) return
+            // `app` is a mutable let captured by the effect cleanup —
+            // narrow it into a const for this tick.
+            const renderApp = app
+            if (!renderApp) return
+            const now = performance.now()
+            const staleMs = now - lastModelUpdateAt
+            if (staleMs <= BAKE_STALE_MS) return
+            // Backoff: never start a forced render sooner than the
+            // last one took — back-to-back multi-second renders
+            // would starve the speech tick that produces the values
+            // being rendered.
+            if (now - lastForcedBakeAt < Math.max(BAKE_STALE_MS, lastForcedRenderMs)) return
+            setParam('ParamMouthOpenY', bridge.getMouthOpen())
+            // Feed the delta the starved Automator never accumulated
+            // (capped: a multi-second stall must not inject a
+            // multi-second motion step), then render — _render bakes
+            // the mouth value into this frame via beforeModelUpdate.
+            const renderStart = performance.now()
+            model.update(Math.min(staleMs, BAKE_STALE_MS))
+            renderApp.render()
+            lastForcedRenderMs = performance.now() - renderStart
+            lastForcedBakeAt = renderStart
+            bakeCount += 1
+            if (window.__nekomiDebug) {
+              window.__nekomiDebug.bakeCount = bakeCount
+              window.__nekomiDebug.lastBakeMs = Math.round(lastForcedRenderMs)
+            }
+          } catch {
+            // A forced bake must never break the stage: the normal
+            // rAF loop is still there, and the next interval tick
+            // retries.
+          }
+        }, BAKE_TIMER_MS)
+
         // Publish the warm cache now that the stage is fully built:
         // the next mount re-attaches this app/model/canvas instead
         // of re-loading. Fix pass 14: the Henshin form DOES need a
@@ -935,7 +1058,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // eased Param3 into the cached model's core (see above), and
         // the `afterMotionUpdate` hook attached here keeps driving it
         // on every model update, so the form survives with the stage.
-        warmStage = { app, model, canvas, unsubscribe, unapplyHenshin }
+        warmStage = { app, model, canvas, unsubscribe, unapplyHenshin, bakeTimer }
 
         setStatus('ready')
       } catch (err: unknown) {
@@ -960,6 +1083,8 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             expressionOk: null,
             mouthBridge: -1,
             mouthWritten: -1,
+            bakeCount: -1,
+            lastBakeMs: 0,
             error: message,
           }
           setStatus('failed')
