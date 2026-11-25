@@ -169,6 +169,8 @@ interface VrmDebug {
   bodyHeightPx: number
   /** Hand-book prop, when attached: world position + reading state. */
   book: { world: [number, number, number]; reading: boolean; blend: number; prop: 'open' | 'carry' } | null
+  /** Walk state, for the cloud-browser check (see layout() + the walk effect). */
+  walk: { tick: number; t: number; x: number; rig: boolean; reducedMotion: boolean; hidden: boolean }
 }
 
 declare global {
@@ -308,9 +310,14 @@ export default function VrmModel({
 
   framingRef.current = framing
 
-  /* ---- Walk trigger: each increment starts one traverse. ---- */
+  /* ---- Walk trigger: each increment starts one traverse. ----
+     Fix pass 5: the old `&& !reducedMotion` gate silently killed
+     the walk whenever the browser/OS reported
+     prefers-reduced-motion, with no log — and the walk IS the
+     feature. Reduced motion is already honoured where it matters
+     (sway, reading-blend snap); the gate must not swallow the walk. */
   useEffect(() => {
-    if (walkTick > 0 && !reducedMotion) {
+    if (walkTick > 0) {
       const w = walkRef.current
       w.fromX = w.toX
       // Alternate ends: at/near the right end go left, otherwise right.
@@ -321,6 +328,22 @@ export default function VrmModel({
       w.step = -1
       w.footL = w.fromX - HIP_HALF
       w.footR = w.fromX + HIP_HALF
+      // Walk debug hook: record the trigger so the cloud-browser
+      // check reads state instead of guessing. layout()'s snapshot
+      // is mount-time only (its walkTick is the mount value), so the
+      // tick is refreshed here — live walkTick — and t/x per frame
+      // in the render loop below.
+      const dbg = window.__vrmDebug
+      if (dbg) {
+        dbg.walk = {
+          tick: walkTick,
+          t: walkRef.current.t,
+          x: threeRef.current?.group.position.x ?? 0,
+          rig: !!threeRef.current?.walkRig,
+          reducedMotion,
+          hidden: document.hidden,
+        }
+      }
     }
   }, [walkTick, reducedMotion])
 
@@ -454,6 +477,14 @@ export default function VrmModel({
       headHeightPx: Math.round(chinPx - topPx),
       bodyHeightPx: Math.round(feetPx - topPx),
       book: null,
+      walk: {
+        tick: walkTick,
+        t: walkRef.current.t,
+        x: threeRef.current?.group.position.x ?? 0,
+        rig: !!threeRef.current?.walkRig,
+        reducedMotion,
+        hidden: document.hidden,
+      },
     }
   }, [])
 
@@ -486,6 +517,14 @@ export default function VrmModel({
         headHeightPx: 0,
         bodyHeightPx: 0,
         book: null,
+        walk: {
+          tick: walkTick,
+          t: walkRef.current.t,
+          x: threeRef.current?.group.position.x ?? 0,
+          rig: !!threeRef.current?.walkRig,
+          reducedMotion,
+          hidden: document.hidden,
+        },
       }
       setStatus('failed')
       onFailed?.()
@@ -1062,6 +1101,23 @@ export default function VrmModel({
                 prop: blend >= 0.5 ? 'open' : 'carry',
               }
             }
+          }
+        }
+
+        // Walk debug: keep window.__vrmDebug.walk live for the
+        // cloud-browser check — layout() only runs on mount/resize,
+        // so its snapshot would go stale mid-traverse. Tick is
+        // written by the walk effect (live walkTick there); here the
+        // per-frame values refresh from the refs.
+        const wdbg = window.__vrmDebug
+        if (wdbg) {
+          wdbg.walk = {
+            tick: wdbg.walk?.tick ?? 0,
+            t: walkRef.current.t,
+            x: three.group.position.x,
+            rig: !!three.walkRig,
+            reducedMotion,
+            hidden: document.hidden,
           }
         }
 
