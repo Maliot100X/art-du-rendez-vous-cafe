@@ -43,7 +43,7 @@ html.lenis body {
   --ease-silk: cubic-bezier(0.2, 0.7, 0.1, 1);
   --ease-drawer: cubic-bezier(0.7, 0, 0.2, 1);
 
-  --text-hero: clamp(3rem, 10vw, 9.5rem);
+  --text-hero: clamp(2.5rem, 10vw, 9.5rem);
   --text-hero--line-height: 0.9;
   --text-hero--letter-spacing: -0.02em;
 
@@ -160,12 +160,15 @@ html.lenis body {
     animation: grain-jitter 0.6s steps(3) infinite;
   }
 
+  /* 1s fades left tab text and section headings dim for too long after
+     a tab switch (the check read them as "very dim"). 0.6s is still a
+     silk fade, but text is readable almost immediately. */
   [data-reveal] {
     opacity: 0;
     transform: translate3d(0, 24px, 0);
     transition:
-      opacity 1s var(--ease-silk),
-      transform 1s var(--ease-silk);
+      opacity 0.6s var(--ease-silk),
+      transform 0.6s var(--ease-silk);
     transition-delay: var(--d, 0ms);
   }
   [data-reveal].is-in {

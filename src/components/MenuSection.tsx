@@ -114,7 +114,7 @@ export default function MenuSection({
     [],
   )
 
-  const tabTransition = { duration: reducedMotion ? 0 : 0.45, ease: EASE_SILK }
+  const tabTransition = { duration: reducedMotion ? 0 : 0.3, ease: EASE_SILK }
 
   return (
     <section id="carte" ref={sectionRef} className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36">
@@ -186,7 +186,7 @@ export default function MenuSection({
                 >
                   <span className="font-mono text-[11px] text-mist">{String(i + 1).padStart(2, '0')}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-display text-lg font-bold tracking-wide text-bone sm:text-xl">
+                    <span className="block font-display text-lg font-bold tracking-wide text-bone sm:text-xl">
                       {item.name}
                     </span>
                     {item.note && <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[0.14em] text-mist">{item.note}</span>}

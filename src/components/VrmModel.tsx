@@ -64,8 +64,14 @@ function rotateBoneWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: numbe
 
 const MODEL_URL = '/vrm/vita.vrm'
 const FOV = 30
-/** One walk cycle: two steps, ~0.7 s per step. */
-const WALK_DURATION = 1.4
+/** One walk: three steps, ~0.7 s per step, and a real lateral traverse —
+    she walks from one side of the stage to the other and STAYS there
+    (alternating sides each trigger). The previous version swung the legs
+    in place for 1.4 s and then restored the exact rest pose, so any
+    screenshot taken after the window showed the identical pose and the
+    walk was invisible. */
+const WALK_DURATION = 2.2
+const WALK_SIDE = 0.32
 
 type Framing = 'full' | 'half' | 'face'
 
@@ -143,7 +149,7 @@ export default function VrmModel({
   const containerRef = useRef<HTMLDivElement>(null)
   const threeRef = useRef<ThreeStage | null>(null)
   const framingRef = useRef<Framing>(compact ? 'half' : 'full')
-  const walkRef = useRef({ t: Infinity })
+  const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0 })
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [progress, setProgress] = useState(0)
   const [framing, setFraming] = useState<Framing>(compact ? 'half' : 'full')
@@ -161,9 +167,14 @@ export default function VrmModel({
 
   framingRef.current = framing
 
-  /* ---- Walk trigger: each increment starts one cycle. ---- */
+  /* ---- Walk trigger: each increment starts one traverse. ---- */
   useEffect(() => {
-    if (walkTick > 0 && !reducedMotion) walkRef.current.t = 0
+    if (walkTick > 0 && !reducedMotion) {
+      const w = walkRef.current
+      w.fromX = w.toX
+      w.toX = w.toX >= 0 ? -WALK_SIDE : WALK_SIDE
+      w.t = 0
+    }
   }, [walkTick, reducedMotion])
 
   /* ---- Framing: measured box + stage size -> camera. ---- */
@@ -487,9 +498,13 @@ export default function VrmModel({
         if (!three) return
         three.vrm.update(dt)
 
-        // Procedural walk: while the cycle runs, legs and arms swing in
-        // opposition and the hips bob; the envelope fades in and out so
-        // the cycle starts and ends exactly at the rest pose.
+        // Procedural walk: while the traverse runs, legs and arms swing
+        // in opposition and the hips bob, AND the whole model walks
+        // laterally from one side of the stage to the other (smoothstep
+        // over the full cycle) and stays there. The envelope fades the
+        // limb swing in and out so the cycle starts and ends at the
+        // rest pose — but the lateral position is kept, so the walk is
+        // visible in a screenshot taken after it ends, not just during.
         const rig = three.walkRig
         if (rig) {
           const wt = walkRef.current.t
@@ -503,20 +518,27 @@ export default function VrmModel({
             }
             // Forward swing is negative rotation.x (legs point down, the
             // model faces +Z): left leg forward while right arm forward.
-            setX(rig.leftUpperLeg, -0.5 * s)
-            setX(rig.rightUpperLeg, 0.5 * s)
-            setX(rig.leftLowerLeg, 0.28 * Math.max(0, Math.sin(phase + Math.PI / 2)))
-            setX(rig.rightLowerLeg, 0.28 * Math.max(0, Math.sin(phase - Math.PI / 2)))
-            setX(rig.leftUpperArm, 0.35 * s)
-            setX(rig.rightUpperArm, -0.35 * s)
+            setX(rig.leftUpperLeg, -0.62 * s)
+            setX(rig.rightUpperLeg, 0.62 * s)
+            setX(rig.leftLowerLeg, 0.34 * Math.max(0, Math.sin(phase + Math.PI / 2)))
+            setX(rig.rightLowerLeg, 0.34 * Math.max(0, Math.sin(phase - Math.PI / 2)))
+            setX(rig.leftUpperArm, 0.45 * s)
+            setX(rig.rightUpperArm, -0.45 * s)
             three.group.position.y = 0.03 * Math.abs(s) * env
+            const u = Math.min(1, wt / WALK_DURATION)
+            const smooth = u * u * (3 - 2 * u)
+            three.group.position.x =
+              walkRef.current.fromX + (walkRef.current.toX - walkRef.current.fromX) * smooth
           } else if (walkRef.current.t !== Infinity) {
-            // Cycle finished: restore the rest pose exactly, once.
+            // Traverse finished: restore the rest pose exactly, once —
+            // but KEEP the lateral position, so she is visibly standing
+            // on the other side of the stage.
             walkRef.current.t = Infinity
             rig.baseX.forEach((base, node) => {
               node.rotation.x = base
             })
             three.group.position.y = 0
+            three.group.position.x = walkRef.current.toX
           }
         }
 
@@ -648,9 +670,14 @@ export default function VrmModel({
         <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/85 backdrop-blur">
           {compact ? 'Vita · 3D' : 'VRM · Vita · corps entier'}
         </div>
-        {status === 'ready' && (
+      </div>
+      {/* Framing controls live BELOW the stage, in the caption row —
+          they used to float over the bottom of the stage and cover
+          Vita's feet/shoes in "Corps entier". */}
+      {status === 'ready' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2.5 sm:px-5">
           <div
-            className="absolute bottom-4 left-1/2 flex -translate-x-1/2 rounded-full border border-white/20 bg-black/40 p-1 backdrop-blur"
+            className="flex rounded-full border border-line bg-ink p-1"
             role="group"
             aria-label="Cadrage du modèle"
           >
@@ -667,20 +694,27 @@ export default function VrmModel({
                 onClick={() => setFraming(opt.id)}
                 aria-pressed={framing === opt.id}
                 className={`min-h-11 rounded-full px-4 py-2 text-xs font-bold transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
-                  framing === opt.id ? 'bg-bone text-ink' : 'text-white/70 hover:text-white'
+                  framing === opt.id ? 'bg-bone text-ink' : 'text-bone/70 hover:text-bone'
                 }`}
               >
                 {opt.label}
               </button>
             ))}
           </div>
-        )}
-      </div>
-      <p className="border-t border-line px-4 py-2.5 text-xs leading-relaxed text-mist sm:px-5 sm:py-3">
-        {compact
-          ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
-          : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
-      </p>
+          <p className="text-xs leading-relaxed text-mist">
+            {compact
+              ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
+              : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
+          </p>
+        </div>
+      )}
+      {status !== 'ready' && (
+        <p className="border-t border-line px-4 py-2.5 text-xs leading-relaxed text-mist sm:px-5 sm:py-3">
+          {compact
+            ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
+            : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
+        </p>
+      )}
     </div>
   )
 }

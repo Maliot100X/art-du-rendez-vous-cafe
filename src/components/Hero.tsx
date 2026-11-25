@@ -98,7 +98,7 @@ export default function Hero() {
             <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-ember" />
             {HERO.eyebrow}
           </p>
-          <p className="hero-entrance mt-6 max-w-2xl text-lead text-bone/75">{HERO.sub}</p>
+          <p className="hero-entrance mt-4 max-w-2xl text-lead text-bone drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)] sm:mt-6">{HERO.sub}</p>
           <div className="hero-entrance mt-7 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
@@ -120,7 +120,7 @@ export default function Hero() {
         {/* The frame — visor grammar: 16:9, rounded, giant type overlapping it */}
         <div
           ref={frameRef}
-          className="relative mt-10 aspect-[16/9] min-h-[380px] w-full overflow-hidden rounded-[2rem] shadow-2xl shadow-black/60 sm:mt-12 lg:aspect-[16/7] lg:min-h-[440px]"
+          className="relative mt-6 aspect-[16/9] min-h-[260px] w-full overflow-hidden rounded-[2rem] shadow-2xl shadow-black/60 sm:mt-12 sm:min-h-[380px] lg:aspect-[16/7] lg:min-h-[440px]"
         >
           <div
             ref={photoWrapRef}

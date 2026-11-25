@@ -176,6 +176,18 @@ export default function MenuBook({
         onComplete: () => {
           visualRef.current = next;
           emit();
+          // After a flip the top of the book was observed clipped under
+          // the sticky header/tab bar. If the stage's top has slipped
+          // above the header's bottom (~130px), nudge it back into
+          // view — only in that case, so a deliberate scroll is never
+          // fought.
+          const stage = stageRef.current;
+          if (stage) {
+            const top = stage.getBoundingClientRect().top;
+            if (top < 130) {
+              window.scrollTo({ top: window.scrollY + top - 132, behavior: 'smooth' });
+            }
+          }
         },
       });
     },
@@ -305,11 +317,11 @@ export default function MenuBook({
         const base = new Float32Array((geometry.attributes.position as THREE.BufferAttribute).array);
         const frontTex = textures[2 * i];
         const backTex = textures[2 * i + 1];
-        // The back mesh is rotated π around Y, which mirrors its texture —
-        // mirror it back so the text reads correctly.
-        backTex.wrapS = THREE.RepeatWrapping;
-        backTex.repeat.x = -1;
-        backTex.offset.x = 1;
+        // No texture mirror here: the back mesh is rotated π around Y,
+        // and the leaf group rotates −π when flipped, so the back
+        // mesh's net rotation is 0 and its texture already reads
+        // correctly. Mirroring the texture as well was a double flip —
+        // the left page showed reversed text.
         const frontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.85, metalness: 0 });
         const backMat = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.85, metalness: 0 });
         const group = new THREE.Group();
@@ -661,7 +673,7 @@ function StaticSpread({
             <li key={item.name} className="flex items-baseline gap-2 border-b border-ink/10 py-2.5">
               <span className="font-mono text-[10px] text-[#8a7d6c]">{String(i + 1).padStart(2, '0')}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-display text-base font-bold tracking-wide sm:text-lg">{item.name}</span>
+                <span className="block font-display text-base font-bold tracking-wide sm:text-lg">{item.name}</span>
                 {item.note && (
                   <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[0.14em] text-[#8a7d6c]">{item.note}</span>
                 )}

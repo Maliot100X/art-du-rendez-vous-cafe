@@ -107,7 +107,7 @@ export default function Gallery() {
       </figure>
 
       {/* The four photos. */}
-      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {GALLERY.items.map((item, i) => (
           <figure key={item.src} className="gallery-item group relative cursor-pointer overflow-hidden rounded-[1.5rem]">
             <button

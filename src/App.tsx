@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { BookOpen, Bot, Coffee, Home, Images, MapPin, Sparkles } from 'lucide-react'
 import { lazyWithRetry } from './lib/lazyRetry'
 import Nav from './components/Nav'
 import Hero from './components/Hero'
@@ -83,6 +84,63 @@ function FluidFallbackDiv() {
   return <div className="fluid-fallback pointer-events-none fixed inset-0 z-0" aria-hidden="true" />
 }
 
+/**
+ * Mobile bottom tab bar — the unmistakable mobile navigation. The
+ * desktop tab pills row is hidden below md (see TabBar) and this bar
+ * replaces it: seven thumb-sized targets, fixed to the bottom with
+ * safe-area padding, so a phone never shows the desktop row shrunken
+ * into one line. Icons + short labels; the active tab is a bone pill.
+ */
+const MOBILE_TAB_ICONS: Record<TabId, typeof Home> = {
+  home: Home,
+  menu: Coffee,
+  book: BookOpen,
+  gallery: Images,
+  ambiance: Sparkles,
+  visit: MapPin,
+  agent: Bot,
+}
+const MOBILE_TAB_LABELS: Record<TabId, string> = {
+  home: 'Accueil',
+  menu: 'Carte',
+  book: 'Livre',
+  gallery: 'Galerie',
+  ambiance: 'Ambiance',
+  visit: 'Venir',
+  agent: 'Agent',
+}
+
+function MobileTabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => void }) {
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-ink/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+      aria-label="Sections du site"
+    >
+      <div className="grid grid-cols-7" role="tablist">
+        {TABS.map((tab) => {
+          const Icon = MOBILE_TAB_ICONS[tab.id]
+          const isActive = active === tab.id
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onSelect(tab.id)}
+              className={`flex min-h-[60px] flex-col items-center justify-center gap-1 px-1 py-2 ${
+                isActive ? 'text-amber' : 'text-bone/70'
+              }`}
+            >
+              <Icon size={19} strokeWidth={isActive ? 2.4 : 1.8} />
+              <span className="text-[9px] font-bold uppercase tracking-[0.08em]">{MOBILE_TAB_LABELS[tab.id]}</span>
+            </button>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
 function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => void }) {
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -93,7 +151,7 @@ function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => 
   }, [active])
 
   return (
-    <div className="sticky top-[64px] z-40 border-b border-line bg-ink/90 backdrop-blur-xl sm:top-[72px]">
+    <div className="sticky top-[64px] z-40 hidden border-b border-line bg-ink/90 backdrop-blur-xl sm:top-[72px] md:block">
       <div
         ref={listRef}
         className="mx-auto flex max-w-[1400px] gap-1 overflow-x-auto px-3 py-2 sm:justify-center sm:px-6"
@@ -108,7 +166,7 @@ function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => 
             aria-selected={active === tab.id}
             onClick={() => onSelect(tab.id)}
             className={`min-h-11 shrink-0 whitespace-nowrap rounded-full px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
-              active === tab.id ? 'bg-bone text-ink' : 'text-bone/70 hover:text-bone'
+              active === tab.id ? 'bg-bone text-ink' : 'text-bone/85 hover:text-bone'
             }`}
           >
             {tab.label}
@@ -170,7 +228,7 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
       onItemAdd={handleItemAdd}
       betweenBarAndList={
         <>
-          <div className="sticky top-[184px] z-20 mt-4 sm:top-[192px]">
+          <div className="sticky top-[76px] z-20 mt-4 md:top-[192px]">
             <MenuVitaStage guide={guide} />
           </div>
           <MenuVitaPanel guide={guide} />
@@ -214,7 +272,9 @@ export default function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-ink font-sans text-bone">
+    // pb clears the fixed mobile bottom tab bar so the footer (and the
+    // last panel content) can scroll fully above it on phones.
+    <div className="min-h-screen bg-ink pb-[76px] font-sans text-bone md:pb-0">
       <div className="grain" aria-hidden="true" />
       <FluidFallbackDiv />
       <Nav />
@@ -277,6 +337,7 @@ export default function App() {
         )}
       </main>
       <Footer />
+      <MobileTabBar active={activeTab} onSelect={setTab} />
     </div>
   )
 }

@@ -37,10 +37,10 @@ export default function Visit() {
         {
           y: 0,
           autoAlpha: 1,
-          duration: 0.8,
+          duration: 0.5,
           ease: GSAP_EASE_SILK,
-          stagger: 0.09,
-          scrollTrigger: { trigger: timelineRef.current, start: 'top 85%', once: true },
+          stagger: 0.06,
+          scrollTrigger: { trigger: timelineRef.current, start: 'top 90%', once: true },
         },
       )
     }, sectionRef)
