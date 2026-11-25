@@ -555,7 +555,15 @@ export default function App() {
     // is 60 px + the safe-area inset (home indicator) — the old flat
     // 76 px left ~18 px of content hiding under it on notched phones.
     <div className="min-h-screen bg-ink pb-[calc(76px+env(safe-area-inset-bottom,0px))] font-sans text-bone md:pb-0">
-      <div className="grain" aria-hidden="true" />
+      {/* FIX PASS 10: the stylesheet gates this 0.6s stepped jitter off
+          on coarse pointers, but that gate is only as good as the
+          pointer media query matching on the visitor's phone — and a
+          full-screen fixed layer jumping ±2% forever reads as the
+          whole page shaking when it runs. An inline style beats every
+          stylesheet rule, so the jitter is off unconditionally here;
+          the grain stays as a static texture (the pass-4 phone
+          behaviour, now guaranteed on every device). */}
+      <div className="grain" aria-hidden="true" style={{ animation: 'none' }} />
       <FluidFallbackDiv />
       <Nav />
       {/* pt clears the fixed nav pill; the tab bar sticks under it.
