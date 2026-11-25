@@ -13,11 +13,14 @@ export const CAFE = {
   mapsNameNote: 'Sur Google Maps, le lieu est listé sous « Casa da Santana ».',
   rating: '3,5',
   reviews: '2 avis',
-  // Phone is the number listed on the Google Maps listing for Casa da
-  // Santana — Minir has NOT confirmed it is his number. No website is
-  // listed for the café — never invent one.
-  phone: '+32 476 75 18 34',
-  phoneHref: 'tel:+32476751834',
+  // Phone is the café's number, given by Minir himself (2026-11-25
+  // 18:02 CET) — +1 650 459 7993, the outbound agent number. It replaces
+  // the +32 476 75 18 34 from the Casa da Santana Maps listing, which
+  // Minir rejected. NOTE: this number is outbound-only, it cannot
+  // receive incoming calls — do NOT "fix" it back to the Maps number.
+  // No website is listed for the café — never invent one.
+  phone: '+1 650 459 7993',
+  phoneHref: 'tel:+16504597993',
   social: {
     // Facebook Page is being created — no URL yet. Do not invent one.
     facebookLabel: 'Facebook — page en cours de création',

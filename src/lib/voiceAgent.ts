@@ -96,7 +96,7 @@ function agentPrompt(): string {
     menuSummary(),
     'Tu conseilles selon les goûts, tu composes la commande avec la fonction add_to_order,',
     'et tu proposes de rappeler le client pour confirmer sa commande.',
-    `Téléphone (listé sur Google Maps, à confirmer) : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
+    `Téléphone du café : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
   ].join('\n')
 }
 

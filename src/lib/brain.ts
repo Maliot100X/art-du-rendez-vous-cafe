@@ -108,7 +108,7 @@ export function brainSystemPrompt(): string {
     menuSummary(),
     'Tu conseilles selon les goûts du client. Quand tu proposes une boisson, cite son nom exact tel qu\u2019il figure sur la carte, avec son prix.',
     'Si le client veut commander, confirme les boissons et leurs prix, puis propose de préparer la commande : l\u2019interface affiche des boutons « Ajouter » à côté de ta réponse.',
-    `Téléphone (listé sur Google Maps, à confirmer) : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
+    `Téléphone du café : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
   ].join('\n')
 }
 
