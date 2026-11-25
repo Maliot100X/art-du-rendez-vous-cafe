@@ -11,6 +11,8 @@ const b = await chromium.launch({args: ['--use-gl=angle', '--use-angle=swiftshad
 const ctx = await b.newContext({viewport: {width: 1280, height: 800}, recordVideo: {dir: 'qa/rec-tmp', size: {width: 1280, height: 800}}});
 const p = await ctx.newPage();
 const errs = [];
+const labels = [];
+const lab = async () => labels.push(await p.evaluate(() => [...document.querySelectorAll('#livre span.label')].map((e) => e.textContent).find((t) => /Pages|Couverture/.test(t))));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 200)));
 p.on('pageerror', (e) => errs.push(e.message));
 const T0 = Date.now();
@@ -28,7 +30,8 @@ for (let i = 0; i < 20; i++) {
 }
 for (let k = 0; k < 2; k++) {
   await p.click('button[aria-label="Page suivante"]');
-  await p.waitForTimeout(2500);
+  await p.waitForTimeout(3500);
+  await lab();
 }
 // drag swipe right-to-left across the book
 await p.mouse.move(1000, 480);
@@ -38,7 +41,8 @@ for (let i = 0; i <= 20; i++) {
   await p.waitForTimeout(60);
 }
 await p.mouse.up();
-await p.waitForTimeout(3000);
+await p.waitForTimeout(4000);
+await lab();
 await p.click('button[aria-label="Page précédente"]');
 await p.waitForTimeout(2500);
 await ctx.close();
@@ -48,4 +52,4 @@ renameSync(`qa/rec-tmp/${webm}`, 'qa/phase2/livre-raw.webm');
 rmSync('qa/rec-tmp', {recursive: true, force: true});
 execSync(`ffmpeg -y -loglevel error -ss ${start.toFixed(2)} -i qa/phase2/livre-raw.webm -t 15 -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart qa/phase2/livre-flip.mp4`);
 execSync(`ffmpeg -y -loglevel error -ss ${start.toFixed(2)} -i qa/phase2/livre-raw.webm -t 10 -vf "crop=480:560:0:180" -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart qa/avatar/host-idle.mp4`);
-console.log(JSON.stringify({start, errs}));
+console.log(JSON.stringify({start, labels, errs}));

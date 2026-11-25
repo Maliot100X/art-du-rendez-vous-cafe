@@ -2,3 +2,5 @@ node_modules
 dist
 qa/png
 *.log
+livre-raw.webm
+*.webm

@@ -141,7 +141,7 @@ export function Livre() {
           </div>
         </div>
 
-        {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-[10svh] left-[2%] h-[62svh] w-[34vw] max-md:left-[-10%] max-md:bottom-[30svh] max-md:h-[36svh] max-md:w-[80vw]" />}
+        {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-[10svh] left-[2%] h-[62svh] w-[34vw] max-md:left-[-6%] max-md:bottom-[44svh] max-md:h-[30svh] max-md:w-[64vw]" />}
 
         {/* host speech bubble */}
         <div
@@ -166,7 +166,7 @@ export function Livre() {
             {voiceRef.current ? `Raccrocher · ${voice}` : voice || 'Parler à l’hôte'}
           </button>
         </div>
-        <p className="label pointer-events-none absolute bottom-24 w-full text-center text-cream/60 md:bottom-28">Glissez pour tourner les pages</p>
+        <p className="label pointer-events-none absolute bottom-28 w-full text-center text-cream/60 max-md:hidden">Glissez pour tourner les pages</p>
       </div>
     </section>
   );

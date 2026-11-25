@@ -567,7 +567,7 @@ export function createCafeScene(canvas: HTMLCanvasElement, opts: {reduced: boole
     camera.fov = W / H < 0.8 ? 44 : 30;
     camera.updateProjectionMatrix();
     const portrait = W / H < 0.8;
-    title.scale.setScalar(portrait ? 0.62 : 1);
+    title.scale.setScalar(portrait ? 0.46 : 1);
     title.position.y = portrait ? 3.5 : 2.75;
   };
   resize();

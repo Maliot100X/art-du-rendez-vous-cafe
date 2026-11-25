@@ -371,12 +371,13 @@ export function createBookScene(
   let flipping = 0;
 
   function render(enter: number) {
-    const dt = Math.min(0.05, clock.getDelta());
+    const rawDt = clock.getDelta();
+    const dt = Math.min(0.05, rawDt);
     const time = opts.reduced ? 0 : clock.elapsedTime;
     mouse.x += (mouse.tx - mouse.x) * 0.06;
     mouse.y += (mouse.ty - mouse.y) * 0.06;
     const prev = flip;
-    flip += (target - flip) * (drag ? 0.35 : 1 - Math.exp(-dt * 5));
+    flip += (target - flip) * (drag ? 0.35 : 1 - Math.exp(-Math.min(0.3, rawDt) * 4.5));
     flipping = Math.abs(flip - prev) > 0.002 ? 1 : flipping * 0.9;
     sheets.forEach((m, i) => {
       const t = THREE.MathUtils.clamp(flip - i, 0, 1);
@@ -393,9 +394,9 @@ export function createBookScene(
     // camera: dolly in on entry, parallax on the cursor
     const portrait = W / H < 0.8;
     const e = 1 - Math.pow(1 - THREE.MathUtils.clamp(enter, 0, 1), 3);
-    const dist = THREE.MathUtils.lerp(portrait ? 16 : 12.5, portrait ? 11.5 : 9.6, e);
+    const dist = THREE.MathUtils.lerp(portrait ? 16 : 12.5, portrait ? 13.5 : 9.6, e);
     camera.position.set((portrait ? 1.1 : 0.4) + mouse.x * 0.5, THREE.MathUtils.lerp(7.5, 5.6, e) + mouse.y * 0.3, dist);
-    camera.lookAt(portrait ? 1.15 : 0.8, portrait ? 0.4 : 0.6, 0.6);
+    camera.lookAt(portrait ? 1.15 : 0.8, portrait ? 1.6 : 0.6, 0.6);
 
     if (host) {
       // look at the reader's cursor, or at the page while it turns

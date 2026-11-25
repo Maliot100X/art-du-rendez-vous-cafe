@@ -91,9 +91,9 @@ export function CarteReel() {
       <div className="sticky top-0 h-svh overflow-clip">
         <canvas ref={canvasRef} className="absolute inset-0 size-full" aria-hidden="true" />
 
-        <div className="relative z-10 m-4 mt-20 max-w-[30rem] rounded-[22px] border border-cream/15 bg-ink/55 p-5 backdrop-blur-md md:absolute md:top-1/2 md:left-8 md:m-0 md:w-[26vw] md:-translate-y-1/2 md:p-7">
+        <div className="relative z-10 m-3 mt-[68px] max-w-[30rem] rounded-[22px] border border-cream/15 bg-ink/55 p-4 backdrop-blur-md md:absolute md:top-1/2 md:left-8 md:m-0 md:w-[26vw] md:-translate-y-1/2 md:p-7">
           <p className="label text-gold-light">La carte · {N} boissons · prix en euros</p>
-          <h2 id="carte-title" className="display mt-3 text-[clamp(34px,3.8vw,68px)] text-cream">
+          <h2 id="carte-title" className="display mt-2 text-[clamp(26px,3.8vw,68px)] text-cream md:mt-3">
             Du premier café <em className="text-gold-light">au dernier verre</em>
           </h2>
           <ul className="mt-5 flex flex-wrap gap-2 md:flex-col md:gap-1.5">

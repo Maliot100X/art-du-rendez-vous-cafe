@@ -162,7 +162,7 @@ export function createCarteScene(
     mouse.y += (mouse.ty - mouse.y) * 0.06;
     wheel.rotation.y = -(pos / N) * Math.PI * 2;
     const portrait = W / H < 0.8;
-    camera.position.set(mouse.x * 0.8, 3.1 + mouse.y * 0.4, R + (portrait ? 12.5 : 10.5));
+    camera.position.set(mouse.x * 0.8, 3.1 + mouse.y * 0.4, R + (portrait ? 9.5 : 10.5));
     camera.lookAt(0, 1.4, R - 2.5);
     if (Math.abs(xShift) > 0.5) camera.setViewOffset(W, H, -xShift, 0, W, H);
     else camera.clearViewOffset();
