@@ -17,9 +17,18 @@
  *   `pointer-events: none` so it never blocks taps or scrolling).
  * - Mobile gets lower sim/dye resolution, fewer pressure iterations and
  *   a 1x pixel-ratio cap; the loop pauses while the tab is hidden.
+ * - Phones (fix pass 10): the sim RUNS on coarse-pointer devices — fix
+ *   pass 4 froze it to a static gradient because the URL bar
+ *   showing/hiding changes the viewport height on every scroll and each
+ *   resize re-initialised the framebuffers, so the background jumped.
+ *   That is fixed at the source instead: small height-only resizes are
+ *   ignored (see shouldApplyResize), so the sim never re-initialises
+ *   mid-scroll. Mobile also gets an even lower resolution and a slower
+ *   ambient splat (see resolveFluidConfig).
  * - Every failure path throws (or calls onFatal on context loss) so the
- *   caller can fall back to the static CSS gradient — a dead WebGL
- *   context must never blank the page.
+ *   caller can fall back to the animated CSS fallback — a dead WebGL
+ *   context must never blank the page, and must never leave a flat
+ *   static gradient on the Home tab either.
  */
 
 export interface FluidOptions {
@@ -99,21 +108,75 @@ function hashCode(s: string): number {
   return hash
 }
 
-export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}): () => void {
-  const mobile = opts.mobile ?? false
-  const config = {
-    SIM_RESOLUTION: mobile ? 96 : 128,
-    DYE_RESOLUTION: mobile ? 512 : 1024,
+export interface FluidConfig {
+  SIM_RESOLUTION: number
+  DYE_RESOLUTION: number
+  DENSITY_DISSIPATION: number
+  VELOCITY_DISSIPATION: number
+  PRESSURE: number
+  PRESSURE_ITERATIONS: number
+  CURL: number
+  SPLAT_RADIUS: number
+  SPLAT_FORCE: number
+  SHADING: boolean
+  /** DPR cap for the canvas backing store. */
+  DPR_CAP: number
+  /** Seconds between ambient splats when there is no pointer input. */
+  AMBIENT_INTERVAL: number
+}
+
+/**
+ * Sim cost by device class. Phones (mobile) run a much cheaper sim —
+ * SIM 80 / DYE 384 / 10 pressure iterations / 1x DPR, and a slower
+ * ambient splat — so the animated background stays smooth on a phone.
+ * The field is a soft glow behind text, not a sharp render, so the
+ * lower dye resolution is not visible; what matters is that it MOVES.
+ */
+export function resolveFluidConfig(mobile: boolean): FluidConfig {
+  return {
+    SIM_RESOLUTION: mobile ? 80 : 128,
+    DYE_RESOLUTION: mobile ? 384 : 1024,
     DENSITY_DISSIPATION: 0.3,
     VELOCITY_DISSIPATION: 0.6,
     PRESSURE: 0.25,
-    PRESSURE_ITERATIONS: mobile ? 12 : 20,
+    PRESSURE_ITERATIONS: mobile ? 10 : 20,
     CURL: 10,
     SPLAT_RADIUS: 0.35,
     SPLAT_FORCE: 5000,
     SHADING: true,
+    DPR_CAP: mobile ? 1 : 1.5,
+    AMBIENT_INTERVAL: mobile ? 3.2 : 2.4,
   }
-  const dprCap = mobile ? 1 : 1.5
+}
+
+/**
+ * Height-only resize tolerance, in backing-store pixels. On a phone the
+ * URL bar showing/hiding while scrolling changes the viewport height by
+ * ~50–60 px every time; each such resize used to re-initialise the
+ * sim's framebuffers, so the background jumped — which is why fix pass
+ * 4 froze the sim on phones entirely. A height-only change smaller
+ * than this is URL-bar wobble and is ignored (the canvas is
+ * CSS-stretched a few px, invisible on a fluid field); any width
+ * change, or a large height change (rotation, split-screen), still
+ * re-initialises the framebuffers.
+ */
+export const RESIZE_HEIGHT_TOLERANCE_PX = 160
+
+export function shouldApplyResize(
+  prevWidth: number,
+  prevHeight: number,
+  nextWidth: number,
+  nextHeight: number,
+): boolean {
+  if (nextWidth !== prevWidth) return true
+  if (nextHeight === prevHeight) return false
+  return Math.abs(nextHeight - prevHeight) >= RESIZE_HEIGHT_TOLERANCE_PX
+}
+
+export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}): () => void {
+  const mobile = opts.mobile ?? false
+  const config = resolveFluidConfig(mobile)
+  const dprCap = config.DPR_CAP
 
   let destroyed = false
   let raf = 0
@@ -126,12 +189,13 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
   const resizeCanvas = (): boolean => {
     const width = scaleByPixelRatio(canvas.clientWidth)
     const height = scaleByPixelRatio(canvas.clientHeight)
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width
-      canvas.height = height
-      return true
-    }
-    return false
+    // URL-bar wobble guard (see shouldApplyResize): a small height-only
+    // change leaves the backing store alone, so the sim never
+    // re-initialises mid-scroll and the background never jumps.
+    if (!shouldApplyResize(canvas.width, canvas.height, width, height)) return false
+    canvas.width = width
+    canvas.height = height
+    return true
   }
 
   resizeCanvas()
@@ -1073,9 +1137,10 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     dt = Math.min(dt, 0.016666)
     lastUpdateTime = now
     if (resizeCanvas()) initFramebuffers()
-    // Gentle ambient life with no input: one soft splat every ~2.4 s.
+    // Gentle ambient life with no input: one soft splat every few
+    // seconds (slower on mobile — see config.AMBIENT_INTERVAL).
     ambientTimer += dt
-    if (ambientTimer > 2.4) {
+    if (ambientTimer > config.AMBIENT_INTERVAL) {
       ambientTimer = 0
       const color = generateColor()
       splat(Math.random(), Math.random(), 700 * (Math.random() - 0.5), 700 * (Math.random() - 0.5), color)
