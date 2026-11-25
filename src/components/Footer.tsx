@@ -43,7 +43,7 @@ export function Footer() {
             COLORFUL: false,
             COLOR_UPDATE_SPEED: 10,
             PAUSED: false,
-            BACK_COLOR: {r: 15, g: 36, b: 27},
+            BACK_COLOR: {r: 58, g: 20, b: 10},
             TRANSPARENT: false,
             BLOOM: false,
             BLOOM_ITERATIONS: 8,
@@ -75,7 +75,7 @@ export function Footer() {
   return (
     <footer ref={ref} id="venir" className="relative overflow-hidden bg-ink px-5 pt-[clamp(80px,14vh,160px)] pb-8 text-cream md:px-10">
       <canvas ref={fluidRef} aria-hidden className="absolute inset-0 h-full w-full opacity-90" />
-      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(15_36_27/0.85),rgb(15_36_27/0.25)_45%,rgb(15_36_27/0.7))]" />
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(42_16_9/0.85),rgb(42_16_9/0.25)_45%,rgb(42_16_9/0.7))]" />
       <div className="pointer-events-none relative mx-auto max-w-[1680px] [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
         <div className="grid gap-12 md:grid-cols-12">
           <div data-reveal className="md:col-span-6">

@@ -1,7 +1,7 @@
 import {type Ref} from 'react';
 import {address, brand, formatPrice, hero, products} from '../content';
 import {openStatus} from '../data/store.js';
-import {scrollToHash} from '../lib/scroll';
+import {go} from '../lib/router';
 
 /**
  * The hero's DOM type, kept minimal (NAÏADE's HeroCopy layout): the café's
@@ -12,10 +12,6 @@ import {scrollToHash} from '../lib/scroll';
 export function HeroCopy({ref}: {ref?: Ref<HTMLDivElement>}) {
   const latte = products[0];
   const s = openStatus();
-  const go = (h: string) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    scrollToHash(h);
-  };
   return (
     <div ref={ref} className="pointer-events-none absolute inset-0 z-10">
       <h1 className="sr-only">
@@ -24,11 +20,11 @@ export function HeroCopy({ref}: {ref?: Ref<HTMLDivElement>}) {
       <div
         data-out
         aria-hidden
-        className="absolute inset-0 bg-[radial-gradient(55%_40%_at_0%_100%,rgb(15_36_27/0.75),transparent_75%),radial-gradient(40%_30%_at_100%_100%,rgb(15_36_27/0.6),transparent_75%)]"
+        className="absolute inset-0 bg-[radial-gradient(55%_40%_at_0%_100%,rgb(42_16_9/0.75),transparent_75%),radial-gradient(40%_30%_at_100%_100%,rgb(42_16_9/0.6),transparent_75%)]"
       />
 
       <div className="absolute inset-x-0 top-0 mx-auto max-w-[1680px] px-5 pt-[clamp(88px,13vh,130px)] md:px-10">
-        <p data-out className="label flex items-center gap-3 text-cream/70">
+        <p data-out className="on-sky label flex items-center gap-3 text-cream/70">
           <span className={`size-1.5 rounded-full ${s.open ? 'bg-[#7fd18b] shadow-[0_0_10px_2px_rgb(127_209_139/0.7)]' : 'bg-cream/40'}`} />
           {s.open ? `Ouvert${s.until && !s.allNight ? ` jusqu'à ${s.until}` : ''}` : 'Fermé pour l’instant'} · {hero.kicker}
         </p>
@@ -40,10 +36,10 @@ export function HeroCopy({ref}: {ref?: Ref<HTMLDivElement>}) {
             {hero.line}
           </p>
           <div data-out className="pointer-events-auto mt-5 flex flex-wrap gap-3">
-            <a href="#carte" onClick={go('#carte')} className="glint label rounded-full bg-gold px-6 py-3.5 text-ink">
+            <a href="#/carte" onClick={go('/carte')} className="glint label rounded-full bg-gold px-6 py-3.5 text-ink">
               <span className="relative z-10">Voir la carte · 59 boissons</span>
             </a>
-            <a href="#venir" onClick={go('#venir')} className="label rounded-full border border-cream/30 px-6 py-3.5 text-cream hover:border-gold hover:text-gold-light">
+            <a href="#/venir" onClick={go('/venir')} className="label rounded-full border border-cream/30 px-6 py-3.5 text-cream hover:border-gold hover:text-gold-light">
               Venir
             </a>
           </div>

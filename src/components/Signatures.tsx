@@ -1,150 +1,127 @@
-import {useEffect, useRef, type CSSProperties} from 'react';
+import {useEffect, useRef} from 'react';
 import {formatPrice, signatures} from '../content';
-import {StretchEngine} from '../gl/stretch';
+import {createSignaturesScene} from '../gl/signaturesScene';
+import {createRemap} from '../lib/timeRemap';
+import {clamp, pinProgress} from '../lib/math';
+import {onFrame} from '../lib/scroll';
 import {bagStore} from '../lib/bag';
-import {useReveals} from '../hooks/useReveals';
-import type {Drink} from '../data/store.js';
+import {useReducedMotion} from '../hooks/useReducedMotion';
 
-const BLEED = 70; // px the stretched photo may spill past its frame
+/** Scroll → station (0..3) with a hold on each drink: NAÏADE's speed-ramp engine again. */
+const REMAP = createRemap(
+  [
+    [0, 0],
+    [0.1, 0],
+    [0.24, 1],
+    [0.36, 1],
+    [0.5, 2],
+    [0.62, 2],
+    [0.76, 3],
+    [1, 3],
+  ],
+  3,
+);
 
-/** One drink photo on Otis's taffy engine: grab, pull, let go and it snaps back. */
-function StretchCard({drink, i}: {drink: Drink; i: number}) {
-  const host = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-
-  useEffect(() => {
-    const el = host.current!;
-    const canvas = canvasRef.current!;
-    const img = imgRef.current!;
-    let engine: StretchEngine | null = null;
-    let cancelled = false;
-    const downs = new Map<number, {t: number; x: number; y: number; moved: number; u: number; v: number}>();
-
-    const layout = () => {
-      if (!engine) return;
-      const w = el.clientWidth + BLEED * 2;
-      const h = el.clientHeight + BLEED * 2;
-      engine.resize(w, h, Math.min(2, window.devicePixelRatio || 1), {x: BLEED, y: BLEED, w: el.clientWidth, h: el.clientHeight});
-    };
-    const local = (ev: PointerEvent) => {
-      const c = canvas.getBoundingClientRect();
-      return {x: ev.clientX - c.left, y: ev.clientY - c.top};
-    };
-    const onDown = (ev: PointerEvent) => {
-      if (!engine) return;
-      const p = local(ev);
-      const at = engine.pick(p.x, p.y);
-      if (!at) return;
-      ev.preventDefault();
-      el.setPointerCapture(ev.pointerId);
-      engine.grab(ev.pointerId, at.u, at.v, p.x, p.y);
-      downs.set(ev.pointerId, {t: performance.now(), x: p.x, y: p.y, moved: 0, u: at.u, v: at.v});
-    };
-    const onMove = (ev: PointerEvent) => {
-      const d = downs.get(ev.pointerId);
-      if (!d || !engine) return;
-      const p = local(ev);
-      d.moved = Math.max(d.moved, Math.hypot(p.x - d.x, p.y - d.y));
-      engine.drag(ev.pointerId, p.x, p.y);
-    };
-    const onUp = (ev: PointerEvent) => {
-      const d = downs.get(ev.pointerId);
-      if (!d || !engine) return;
-      downs.delete(ev.pointerId);
-      engine.release(ev.pointerId);
-      if (performance.now() - d.t < 240 && d.moved < 8) engine.poke(d.u, d.v);
-    };
-
-    const ready = img.complete && img.naturalWidth ? Promise.resolve() : new Promise<void>((r) => img.addEventListener('load', () => r(), {once: true}));
-    let io: IntersectionObserver | null = null;
-    ready.then(() => {
-      if (cancelled) return;
-      try {
-        engine = new StretchEngine(canvas, img);
-        el.classList.add('is-live');
-      } catch {
-        return; // the <img> stays as the content
-      }
-      layout();
-      // Say hello once, the first time the card comes into view.
-      io = new IntersectionObserver(([en]) => {
-        if (!en.isIntersecting) return;
-        io?.disconnect();
-        window.setTimeout(() => engine?.poke(0.5, 0.35, 0.7), 300 + i * 220);
-      }, {threshold: 0.5});
-      io.observe(el);
-    });
-    const ro = new ResizeObserver(layout);
-    ro.observe(el);
-    el.addEventListener('pointerdown', onDown);
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
-    return () => {
-      cancelled = true;
-      ro.disconnect();
-      io?.disconnect();
-      el.removeEventListener('pointerdown', onDown);
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
-      engine?.destroy();
-    };
-  }, [i]);
-
-  const add = () => {
-    bagStore.add(drink.id, 1);
-    bagStore.flash(drink.id);
-  };
-
-  return (
-    <li data-reveal style={{'--d': `${i * 110}ms`} as CSSProperties} className="group">
-      <div ref={host} data-stretch={drink.id} className="stretch relative aspect-[3/4] [&.is-live>img]:opacity-0">
-        <img ref={imgRef} src={drink.img.l} alt={drink.name.fr} width={drink.img.w} height={drink.img.h} className="absolute inset-0 h-full w-full rounded-[22px] object-cover" />
-        <canvas
-          ref={canvasRef}
-          aria-hidden
-          className="pointer-events-none absolute z-10"
-          style={{left: -BLEED, top: -BLEED, width: `calc(100% + ${BLEED * 2}px)`, height: `calc(100% + ${BLEED * 2}px)`}}
-        />
-        <span className="label pointer-events-none absolute top-3 left-4 z-20 text-cream/90">0{i + 1}</span>
-      </div>
-      <div className="mt-4 flex items-start justify-between gap-3">
-        <div>
-          <p className="display text-[clamp(24px,2vw,32px)] text-cream">{drink.name.fr}</p>
-          <p className="mt-1 text-[12.5px] text-cream/50">{drink.name.en}</p>
-        </div>
-        <p className="display text-[clamp(22px,1.8vw,28px)] whitespace-nowrap text-gold-light tabular-nums">{formatPrice(drink.fromPrice)}</p>
-      </div>
-      <button type="button" onClick={add} className="glint label mt-4 w-full rounded-full border border-cream/20 py-3 text-cream transition-colors hover:border-gold hover:text-gold-light">
-        <span className="relative z-10">Ajouter</span>
-      </button>
-    </li>
-  );
-}
+const NOTES = ['Mousse de lait, chantilly maison, cacao', 'Apérol, prosecco, soda, rondelle d’orange', 'Trappiste d’Orval, servie dans son calice', 'Crème de cassis, mousseux bien frais'];
 
 export function Signatures() {
-  const ref = useReveals<HTMLElement>();
+  const reduced = useReducedMotion();
+  const root = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const countRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const section = root.current!;
+    let scene: ReturnType<typeof createSignaturesScene> | null = null;
+    try {
+      scene = createSignaturesScene(canvasRef.current!, {reduced});
+    } catch (err) {
+      console.warn('WebGL unavailable for signatures', err);
+    }
+    let head = 0;
+    let last = performance.now();
+    let lastCount = -1;
+    const off = onFrame((now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const {p, rect, vh} = pinProgress(section);
+      if (rect.bottom < 0 || rect.top > vh || !scene) return;
+      const target = REMAP.at(p);
+      const diff = target - head;
+      const step = Math.max(0.6, Math.abs(diff) * 4) * dt;
+      head = Math.abs(diff) <= step ? target : head + Math.sign(diff) * step;
+      scene.render(head);
+      labelRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const near = clamp(1 - Math.abs(head - i) * 1.6);
+        const a = scene!.project(i);
+        el.style.transform = `translate3d(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px, 0)`;
+        el.style.opacity = near.toFixed(3);
+        el.style.pointerEvents = near > 0.6 ? 'auto' : 'none';
+      });
+      const c = Math.round(head);
+      if (c !== lastCount && countRef.current) {
+        lastCount = c;
+        countRef.current.textContent = `0${c + 1}`;
+      }
+    });
+    return () => {
+      off();
+      scene?.dispose();
+    };
+  }, [reduced]);
+
   return (
-    <section ref={ref} id="signatures" aria-labelledby="sig-title" className="relative overflow-hidden bg-ink-2 px-5 py-[clamp(80px,14vh,160px)] md:px-10">
-      <div className="mx-auto max-w-[1680px]">
-        <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-          <div>
-            <p data-reveal className="label text-gold-light">Signatures · attrapez, étirez</p>
-            <h2 id="sig-title" data-reveal style={{'--d': '80ms'} as CSSProperties} className="display mt-4 text-[clamp(48px,7vw,120px)] text-cream">
-              Quatre verres, <em className="text-gold-light">à pleines mains</em>
-            </h2>
-          </div>
-          <p data-reveal style={{'--d': '160ms'} as CSSProperties} className="max-w-[34ch] text-[14px] leading-[1.6] text-cream/60">
-            Saisissez une photo et tirez : elle s’étire comme du caramel, puis revient en place. Le prix est celui de la carte.
+    <section ref={root} id="signatures" aria-labelledby="sig-title" className="relative h-[520svh] bg-ink">
+      <div className="sticky top-0 h-svh overflow-clip">
+        <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_60%,rgb(20_8_4/0.45))]" />
+        <div className="pointer-events-none absolute top-0 left-0 px-5 pt-[clamp(84px,12vh,120px)] md:px-10">
+          <p className="label text-gold-light">Signatures · au comptoir</p>
+          <h2 id="sig-title" className="display mt-3 text-[clamp(40px,4.6vw,80px)] text-cream">
+            Quatre verres <em className="text-gold-light">de la maison</em>
+          </h2>
+          <p className="label mt-4 text-cream/50">
+            <span ref={countRef} className="text-cream">
+              01
+            </span>{' '}
+            / 04 · scroll pour passer au suivant
           </p>
         </div>
-        <ul className="mt-[clamp(40px,7vh,80px)] grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-4 md:gap-x-8">
-          {signatures.map((d, i) => (
-            <StretchCard key={d.id} drink={d} i={i} />
-          ))}
-        </ul>
+        {signatures.map((d, i) => (
+          <div
+            key={d.id}
+            ref={(el) => {
+              labelRefs.current[i] = el;
+            }}
+            className="absolute top-0 left-0 z-10"
+            style={{opacity: 0}}
+          >
+            <span className="absolute -top-1.5 -left-1.5 size-3 rounded-full bg-gold-light shadow-[0_0_14px_3px_rgb(217_166_80/0.8)]" />
+            <svg className="absolute top-0 left-0 overflow-visible" width="90" height="60" aria-hidden>
+              <path d="M0 0 L50 -50 L90 -50" fill="none" stroke="rgb(226 189 118 / 0.75)" strokeWidth="1" />
+            </svg>
+            <div className="absolute top-[-92px] left-[90px] w-[250px] rounded-2xl border border-cream/15 bg-ink/55 px-4 py-3 text-cream shadow-[0_20px_50px_-20px_rgb(0_0_0/0.6)] backdrop-blur-md">
+              <p className="label text-gold-light">N°0{i + 1} · {d.name.en}</p>
+              <p className="mt-1 flex items-baseline justify-between gap-3">
+                <span className="display text-[24px] leading-tight">{d.name.fr}</span>
+                <span className="text-[15px] whitespace-nowrap text-gold-light tabular-nums">{formatPrice(d.fromPrice)}</span>
+              </p>
+              <p className="mt-1 text-[12px] text-cream/55">{NOTES[i]}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  bagStore.add(d.id, 1);
+                  bagStore.flash(d.id);
+                }}
+                className="glint label mt-3 w-full rounded-full bg-gold py-2.5 text-ink"
+              >
+                <span className="relative z-10">Ajouter</span>
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );

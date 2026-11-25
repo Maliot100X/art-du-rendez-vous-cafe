@@ -3,9 +3,9 @@
 /* Art du Rendez-Vous palette: bottle-green room, cream porcelain, brass/gold,
    espresso. Token names follow NAÏADE's (ink / cream / gold) so its classes carry over. */
 @theme {
-  --color-ink: #0f241b;
-  --color-ink-2: #16352a;
-  --color-ink-3: #1d4234;
+  --color-ink: #2a1009;
+  --color-ink-2: #3d180c;
+  --color-ink-3: #54220f;
   --color-cream: #efe3c8;
   --color-cream-2: #e6d8b9;
   --color-paper: #f6eedd;
@@ -166,3 +166,6 @@ body {
 /* Visor hotspot: the leader line draws itself */
 .hotspot-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-line 1.4s 1.8s var(--ease-silk) forwards; }
 @keyframes draw-line { to { stroke-dashoffset: 0; } }
+
+/* light sky look: dark type where it sits on the sky */
+[data-look='b'] .on-sky { color: rgb(74 36 18 / 0.8); }

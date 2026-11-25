@@ -196,7 +196,7 @@ export function Stage({onProgress}: Props) {
         {/* Lens falloff + a floor of shadow for the type */}
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_58%,rgb(8_22_16/0.6))]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_58%,rgb(20_8_4/0.45))]"
         />
         <Hotspot ref={hotRef} />
         <HeroCopy ref={heroRef} />

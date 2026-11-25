@@ -16,6 +16,7 @@
  */
 import * as THREE from 'three';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import {getLook, makeDome} from './kit';
 
 export type Frame = {
   t: number; // film seconds 0..DURATION
@@ -104,7 +105,7 @@ function titleTexture() {
   g.clearRect(0, 0, W, H);
   g.textAlign = 'center';
   g.textBaseline = 'alphabetic';
-  g.fillStyle = C.cream;
+  g.fillStyle = getLook().small;
   g.font = `italic 300 150px Fraunces, Georgia, serif`;
   g.fillText('Art du', W / 2, 250);
   const gold = g.createLinearGradient(0, 300, 0, 720);
@@ -346,9 +347,10 @@ export function createCafeScene(canvas: HTMLCanvasElement, opts: {reduced: boole
   renderer.shadowMap.autoUpdate = false;
   opts.onProgress(0.2);
 
+  const look = getLook();
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(C.ink);
-  scene.fog = new THREE.Fog(C.ink, 16, 34);
+  scene.background = new THREE.Color(look.bottom);
+  scene.fog = new THREE.Fog(look.fog, 20, 60);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const env = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
   scene.environment = env;
@@ -365,7 +367,7 @@ export function createCafeScene(canvas: HTMLCanvasElement, opts: {reduced: boole
   key.shadow.bias = -0.0004;
   Object.assign(key.shadow.camera, {left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30});
   scene.add(key);
-  const rim = new THREE.DirectionalLight('#f0c27a', 2.2);
+  const rim = new THREE.DirectionalLight(look.rim, 2.4);
   rim.position.set(4, 4, -7);
   scene.add(rim);
   const fill = new THREE.HemisphereLight('#cfe8da', '#1a0f0a', 0.35);
@@ -374,23 +376,8 @@ export function createCafeScene(canvas: HTMLCanvasElement, opts: {reduced: boole
   glow.position.set(0, 3.2, 0.8);
   scene.add(glow);
 
-  // Backdrop dome
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(60, 48, 24),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      fog: false,
-      vertexShader: domeVert,
-      fragmentShader: domeFrag,
-      uniforms: {
-        uTop: {value: new THREE.Color('#06120c')},
-        uBottom: {value: new THREE.Color(C.bottle)},
-        uGlow: {value: new THREE.Color('#c98d3c')},
-        uGlowDir: {value: new THREE.Vector3(0, 0.12, -1)},
-      },
-    }),
-  );
+  // Backdrop dome: the art direction's flowing gradient sky (kit.ts LOOKS)
+  const dome = makeDome(look);
   scene.add(dome);
 
   // Table: round green-marble bistro top with a brass edge
@@ -681,6 +668,7 @@ export function createCafeScene(canvas: HTMLCanvasElement, opts: {reduced: boole
 
     // Title: full in the hero, gone once the camera cranes over the cup.
     titleMat.uniforms.uTime.value = time;
+    (dome.material as THREE.ShaderMaterial).uniforms.uTime.value = time;
     titleMat.uniforms.uHover.value = mouse.hover;
     titleMat.uniforms.uOpacity.value = (1 - smooth(2.2, 5.5, f.t)) * (1 - f.dim) + smooth(19.2, 20, f.t) * 0;
     title.visible = titleMat.uniforms.uOpacity.value > 0.003;

@@ -24,6 +24,7 @@ export const address = {
 
 export const nav = [
   ['La carte', '#carte'],
+  ['Le livre', '#livre'],
   ['Signatures', '#signatures'],
   ['Venir', '#venir'],
 ] as const;
