@@ -355,9 +355,12 @@ function BookTab({
    * reply must only re-time the reading IT started: not one the
    * visitor stopped (stoppedNonce), not one a flip superseded (live
    * nonce differs) — either would raise the arm again after stop.
-   * But a natural end that cleared the banner must NOT block the
-   * reply (live reading null, nonce not stopped), or a slow brain
-   * answer would be silently dropped.
+   * Fix pass 16: the same rule now covers a NATURAL end, too — the
+   * old carve-out ("a natural end must not block the reply") let a
+   * slow brain answer restart a reading whose timer had already
+   * finished it, so "Lecture en cours…" came back after it had
+   * gone; a finished reading stays finished, and a late reply can
+   * only re-time a reading that is still live.
    */
   const readingRef = useRef(reading)
   readingRef.current = reading
@@ -436,11 +439,15 @@ function BookTab({
       armReadingTimer(nonce, 12)
       const request = `Lis-moi la page ${cat.label} à voix haute`
       void askBrain(request).then(({ reply }) => {
-        // Fix pass 8: only re-time (and speak) the reading THIS press
-        // started — see the stoppedNonceRef/readingRef note above.
+        // Fix pass 8 + 16: only re-time (and speak) the reading THIS
+        // press started — not one the visitor stopped, not one a
+        // flip superseded, and NOT one whose timer already finished
+        // it (live reading null). A finished reading stays finished;
+        // a slow brain answer to it is dropped, not replayed.
         if (stoppedNonceRef.current === nonce) return
         const cur = readingRef.current
-        if (cur !== null && cur.nonce !== nonce) return
+        if (cur === null) return
+        if (cur.nonce !== nonce) return
         const nextNonce = Date.now()
         const seconds = estimateSeconds(shortenForSpeech(reply.text))
         setReading({ categoryId: catId, nonce: nextNonce, seconds })

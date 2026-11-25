@@ -42,6 +42,28 @@
  * this module is importable from a plain node probe (see
  * scripts/fix14-reading-probe.mjs). Timers use the global setTimeout,
  * which is the browser's setTimeout on the page.
+ *
+ * Fix pass 16 — a finished reading stays finished. The pixel check
+ * found a reading coming back after it had finished; the mechanism
+ * (proven on pixels with a slow brain reply, see
+ * scripts/fix16-reading-probe.mjs) is a LATE brain reply re-timing a
+ * reading whose timer already fired: the reply handler re-started it
+ * as if it were still live. Two holes made that possible here:
+ * (1) finishReading HELD the pending open when the reply had not
+ * arrived yet (the fix-14 "held end") — finished state that was
+ * never cleared or expired, so a stale "chaudes is owed a book open"
+ * lingered indefinitely; and it was dead state anyway, because the
+ * nonce guard already refused every re-time after expiry, so the
+ * held open could never deliver the book it was held for. (2) The
+ * re-time guard lived in each CALLER (getReading()?.nonce checks in
+ * MenuGuide), not in the store, so any consumer could re-start a
+ * completed reading. Fix: completion is TERMINAL — finishReading
+ * always clears the pending open and the reply flag — and the ONLY
+ * way to re-time a reading is retimeReading(), which succeeds only
+ * while the exact reading (nonce + category) is still live and
+ * refuses everything else. A late reply can therefore update the
+ * guide line (harmless text) but can never start, restart or extend
+ * a reading that has finished or been stopped.
  */
 
 /** One reading aloud: the asked category, a trigger nonce, and the
@@ -143,20 +165,26 @@ export function registerSpeechStopper(fn: SpeechStopper | null): void {
 }
 
 /**
- * The reading is over: fire the pending big-book open, then clear the
- * indicator. A pending open fires only once the brain's reply has
- * arrived — if the timer runs out first, the end is held: the reading
- * clears but the pending open stays, and the reply re-times the
- * reading (startReading below) whose own finish then opens the book.
+ * The reading is over — TERMINALLY (fix pass 16). The pending
+ * big-book open fires only if the brain's reply had already arrived;
+ * otherwise the open is dropped with the reading instead of being
+ * held: the old "held end" kept a stale pending open forever, and it
+ * could never fire anyway, because a late reply cannot re-time an
+ * expired reading (see retimeReading) — so the held open only ever
+ * looked like a reading still owed. A reading that ends without a
+ * reply simply does not open the book, exactly as fix 14's T4a
+ * asserted; the reply arriving later updates the guide line only.
  */
 function finishReading(nonce: number): void {
   if (reading?.nonce !== nonce) return
   timer = null
   const pending = pendingOpen
+  const arrived = replyArrived
   reading = null
+  pendingOpen = null
+  replyArrived = false
   notify()
-  if (pending !== null && replyArrived) {
-    pendingOpen = null
+  if (pending !== null && arrived) {
     try {
       finishHandler?.(pending)
     } catch {
@@ -173,6 +201,31 @@ export function startReading(catId: string, seconds: number): number {
   notify()
   timer = setTimeout(() => finishReading(nonce), seconds * 1000)
   return nonce
+}
+
+/**
+ * Re-time the reading a brain reply belongs to — the ONLY way a reply
+ * may extend a reading (fix pass 16). Atomic: it succeeds only while
+ * the exact reading that nonce started is still live (same nonce AND
+ * same category); otherwise it changes nothing and returns false.
+ * A reply that lands after the reading finished, was stopped, or was
+ * superseded by a newer reading is therefore refused HERE, in the
+ * store, instead of relying on each caller remembering to check the
+ * nonce first — no consumer can resurrect a completed reading, not
+ * even by calling startReading again with the old category, because
+ * retime is the only re-time path and startReading is only ever
+ * called for a NEW reading (button press, chat ask, item tap). The
+ * re-timed reading keeps its nonce (it is still the same press's
+ * reading, only longer), so a second late reply for the same press
+ * is judged against the same identity.
+ */
+export function retimeReading(nonce: number, catId: string, seconds: number): boolean {
+  if (reading === null || reading.nonce !== nonce || reading.categoryId !== catId) return false
+  clearTimer()
+  reading = { categoryId: catId, nonce, seconds }
+  notify()
+  timer = setTimeout(() => finishReading(nonce), seconds * 1000)
+  return true
 }
 
 /**
