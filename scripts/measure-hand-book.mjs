@@ -4,12 +4,18 @@
  * GLB — no browser, no WebGL. Pure three.js math (Quaternion/Vector3)
  * over the glTF node hierarchy.
  *
- * Outputs the left hand's world position/quaternion in vrm.scene space
- * (the model faces +Z there; the group's faceFront rotation is identity
- * on this file — extensions.VRM.lookAt is absent), plus the book prop's
- * LOCAL offset/quaternion for a chosen world-space offset from the hand,
- * so handBook.ts can parent the book to the hand bone with measured
- * constants instead of guessed ones.
+ * Outputs the left hand's world position/quaternion in GROUP space
+ * (the hierarchy walk is seeded with groupQuat, matching
+ * vrmCache.prepare, which does its rest pose in group space) plus the
+ * book prop's LOCAL offset/quaternion for a chosen world-space offset
+ * from the hand, so handBook.ts can parent the book to the hand bone
+ * with measured constants instead of guessed ones. Fix pass 5: the
+ * offsets are stated in GROUP space (z toward the camera) and the
+ * model group is rotated Ry(180°) — the measured faceFront quat
+ * (0,1,0,0) from vrmCache.ts — so scene-space values must go through
+ * groupQuat; seeding the walk with it keeps every later step in
+ * group space. The old script ran in scene space and "verified"
+ * back-facing geometry.
  *
  * Usage: node scripts/measure-hand-book.mjs
  */
@@ -17,6 +23,8 @@ import * as THREE from 'three'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+
+const groupQuat = new THREE.Quaternion(0, 1, 0, 0) // measured faceFront, vrmCache.ts
 
 const VRM_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'vrm', 'vita.vrm')
 
@@ -51,7 +59,7 @@ function computeWorld() {
     worldQuat[idx].copy(q)
     ;(nodes[idx].children ?? []).forEach((c) => walk(c, p, q, s))
   }
-  roots.forEach((r) => walk(r, new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)))
+  roots.forEach((r) => walk(r, new THREE.Vector3(), groupQuat.clone(), new THREE.Vector3(1, 1, 1)))
 }
 computeWorld()
 
@@ -70,9 +78,15 @@ function rotateBoneWorld(idx, axis, angle) {
   const qWorld = new THREE.Quaternion().setFromAxisAngle(axis, angle)
   const delta = parentQ.clone().invert().multiply(qWorld).multiply(parentQ)
   const pivot = worldPos[idx].clone()
+  // World-space update is by qWorld itself (the rotation in world
+  // space), NOT by delta — delta is the LOCAL change (parent-space),
+  // and premultiplying descendants by it is only correct when the
+  // parent world quat is identity. With the group-space seed (Ry 180°)
+  // it is not, and the arm swung up instead of down. Only the local
+  // quat of the bone itself takes delta (via the sync below).
   for (const d of descendants(idx)) {
-    worldQuat[d].premultiply(delta)
-    worldPos[d].sub(pivot).applyQuaternion(delta).add(pivot)
+    worldQuat[d].premultiply(qWorld)
+    worldPos[d].sub(pivot).applyQuaternion(qWorld).add(pivot)
   }
 }
 
@@ -108,8 +122,8 @@ const eye = boneIndex.leftEye
 const head = boneIndex.head
 const chest = boneIndex.chest
 console.log('leftHand node:', nodes[hand].name, 'index', hand)
-console.log('leftHand world pos (scene space):', fmt(worldPos[hand]))
-console.log('leftHand world quat (scene space):', fmt(worldQuat[hand]))
+console.log('leftHand world pos (group space):', fmt(worldPos[hand]))
+console.log('leftHand world quat (group space):', fmt(worldQuat[hand]))
 console.log('left elbow world pos:', fmt(worldPos[boneIndex.leftLowerArm]))
 console.log('left shoulder world pos:', fmt(worldPos[boneIndex.leftUpperArm]))
 console.log('eye world pos:', fmt(worldPos[eye]), 'eye y =', worldPos[eye].y.toFixed(3))
@@ -122,22 +136,25 @@ console.log(
 )
 
 // ---- Book local transform for a chosen world offset from the hand -----
-// Book centre in scene space = hand pos + offset (x: out/in, y: down,
+// Book centre in GROUP space = hand pos + offset (x: out/in, y: down,
 // z: forward toward the camera). The hand grips the book's top edge, so
-// the centre sits mostly below the hand joint.
+// the centre sits mostly below the hand joint. Hand pos/quat are now in
+// GROUP space too, and the desired book orientation is identity in
+// group space (pages toward the camera), so the local quat is simply
+// the inverse of the hand's group-space quat.
 function bookLocal(offset) {
   const off = new THREE.Vector3(...offset)
   const localPosBook = off.clone().applyQuaternion(worldQuat[hand].clone().invert())
-  const localQuatBook = worldQuat[hand].clone().invert() // desired world quat = identity (faces +Z)
-  return { localPosBook, localQuatBook }
+  const localQuatBook = worldQuat[hand].clone().invert() // desired group-space quat = identity (faces +Z)
+  const centreGroup = worldPos[hand].clone().add(off)
+  return { localPosBook, localQuatBook, centreGroup }
 }
 for (const offset of [
   [0.02, -0.08, 0.03],
   [0.0, -0.07, 0.04],
 ]) {
-  const { localPosBook, localQuatBook } = bookLocal(offset)
-  const centre = worldPos[hand].clone().add(new THREE.Vector3(...offset))
-  console.log(`offset ${JSON.stringify(offset)} -> book centre world ${fmt(centre)}`)
+  const { localPosBook, localQuatBook, centreGroup } = bookLocal(offset)
+  console.log(`offset ${JSON.stringify(offset)} -> book centre group ${fmt(centreGroup)}`)
   console.log(`  book local pos: ${fmt(localPosBook)}`)
   console.log(`  book local quat: ${fmt(localQuatBook)}`)
 }

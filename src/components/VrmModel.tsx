@@ -208,19 +208,21 @@ interface ReadRig {
 /**
  * Reading pose, measured from the real VRM file (Node sim over the
  * normalized rig — scripts/sim-fix4-book.mjs), not guessed:
- * upper arm forward -0.60 + elbow bend 0.60 (world-axis) + adduction
- * +0.50 toward the midline puts the hand at (-0.01, 1.10, 0.32) with
+ * upper arm forward +0.60 + elbow bend 0.30 (world-axis) + adduction
+ * +0.50 toward the midline puts the hand at (0.01, 1.10, 0.31) with
  * a level forearm pointing forward, fingers forward, and the book
  * centre at 1.19 m — chest height (chest bone 1.15 m), book top
  * 1.28 m, 12 cm clear of her chin (1.40 m) at every blend and on
  * both walked sides. The adduction is what keeps the 26 cm open
  * spread inside the 0.72 m frame: without it the spread sticks 32 px
  * out of the left edge even with no walk, and fully out after a
- * leftward walk. The old -0.55 / -1.55 only lifted the hand to
- * 1.00 m (waist height) with a twisted forearm.
+ * leftward walk. Fix pass 5: the signs were backwards — the elbow
+ * hinge in the real frame is -Y, not +Y, so the old -0.60 / +0.60
+ * swung the arm backwards and left the hand 6 cm behind the chest
+ * plane with the book occluded by the torso.
  */
-const READ_UPPER = -0.6
-const READ_ELBOW = 0.6
+const READ_UPPER = 0.6
+const READ_ELBOW = 0.3
 const READ_ADDUCT = 0.5
 
 interface ThreeStage {
@@ -624,8 +626,8 @@ export default function VrmModel({
           const hand = vrm.humanoid.getNormalizedBoneNode('leftHand')
           if (hand) {
             handBook = createHandBook()
-            handBook.group.position.set(-0.0744, -0.0336, 0.0321)
-            handBook.group.quaternion.set(-0.0576, -0.0901, -0.6058, 0.7884)
+            handBook.group.position.set(-0.0596, 0.0037, 0.0231)
+            handBook.group.quaternion.set(-0.6044, -0.7895, 0.0657, 0.0839)
             hand.add(handBook.group)
             // The carry prop rides the same hand, same first-frame pose.
             handBook.carry.position.copy(handBook.group.position)
@@ -964,10 +966,14 @@ export default function VrmModel({
               // to reading (8.5 cm ABOVE the hand, 1 cm forward — the
               // palm touches the open book's bottom edge, so the book
               // is visibly IN her hand, not floating under it), and
-              // the facing stays camera-readable (group facing × a
-              // tilt back toward her face) whatever the arm bones do
-              // — parenting alone would roll the book with the hand
-              // and could hide the pages. The open spread faces the
+              // the facing stays camera-readable (a tilt back toward
+              // her face) whatever the arm bones do — parenting alone
+              // would roll the book with the hand and could hide the
+              // pages. Fix pass 5: the book's local +Z is already
+              // "toward camera", so bookWant must NOT be multiplied
+              // by the group quaternion — the group is rotated
+              // Ry(180°) and that multiplication turned the page
+              // normal AWAY from the camera (green back cover). The open spread faces the
               // camera; the carry book faces front-left (Ry -0.9) at
               // rest and turns to face the camera as it rises, so at
               // the blend-0.5 swap the two props already agree on
@@ -991,11 +997,9 @@ export default function VrmModel({
               hb.group.position.copy(bookOff).applyQuaternion(bookInv)
               hb.carry.position.copy(hb.group.position)
               bookTilt.setFromAxisAngle(xAxis, -0.35 * blend)
-              bookWant.copy(three.group.quaternion).multiply(bookTilt)
+              bookWant.copy(bookTilt)
               hb.group.quaternion.copy(bookInv).multiply(bookWant)
-              bookCarryIdle.copy(three.group.quaternion).multiply(
-                bookTilt.setFromAxisAngle(yAxis, -0.9),
-              )
+              bookCarryIdle.copy(bookTilt.setFromAxisAngle(yAxis, -0.9))
               bookCarryWant.slerpQuaternions(
                 bookCarryIdle,
                 bookWant,

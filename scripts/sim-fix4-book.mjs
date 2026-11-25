@@ -19,6 +19,15 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const VRM_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'vrm', 'vita.vrm')
+
+// Fix pass 5: the model group is rotated Ry(180°) — the measured
+// faceFront quat from vrmCache.ts (0,1,0,0) — NOT identity. The whole
+// sim runs in GROUP space (the hierarchy walk is seeded with
+// groupQuat), matching vrmCache.prepare, which does its rest pose in
+// group space via getWorldPosition with the group rotation applied.
+// Running the walk in scene space was the old "sim-frame" bug: it
+// "verified" back-facing geometry as if it faced the camera.
+const groupQuat = new THREE.Quaternion(0, 1, 0, 0)
 const buf = readFileSync(VRM_PATH)
 if (buf.toString('ascii', 0, 4) !== 'glTF') throw new Error('not a GLB')
 const jsonLen = buf.readUInt32LE(12)
@@ -45,7 +54,7 @@ function computeWorld() {
     worldQuat[idx].copy(q)
     ;(nodes[idx].children ?? []).forEach((c) => walk(c, p, q, s))
   }
-  roots.forEach((r) => walk(r, new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)))
+  roots.forEach((r) => walk(r, new THREE.Vector3(), groupQuat.clone(), new THREE.Vector3(1, 1, 1)))
 }
 // localQuat is mutated by the rest pose / reading pose; world follows.
 const localQuat = localQuat0.map((q) => q.clone())
@@ -63,9 +72,15 @@ function rotateBoneWorld(idx, axis, angle) {
   const qWorld = new THREE.Quaternion().setFromAxisAngle(axis, angle)
   const delta = parentQ.clone().invert().multiply(qWorld).multiply(parentQ)
   const pivot = worldPos[idx].clone()
+  // World-space update is by qWorld itself (the rotation in world
+  // space), NOT by delta — delta is the LOCAL change (parent-space),
+  // and premultiplying descendants by it is only correct when the
+  // parent world quat is identity. With the group-space seed (Ry 180°)
+  // it is not, and the arm swung up instead of down. Only the local
+  // quat of the bone itself takes delta (via the sync below).
   for (const d of descendants(idx)) {
-    worldQuat[d].premultiply(delta)
-    worldPos[d].sub(pivot).applyQuaternion(delta).add(pivot)
+    worldQuat[d].premultiply(qWorld)
+    worldPos[d].sub(pivot).applyQuaternion(qWorld).add(pivot)
   }
   // Keep localQuat in sync for the node itself (world = parentWorld * local).
   const pQ = parent.has(idx) ? worldQuat[parent.get(idx)] : new THREE.Quaternion()
@@ -107,7 +122,7 @@ function recomputeWorldFromLocals() {
     worldQuat[idx].copy(q)
     ;(nodes[idx].children ?? []).forEach((c) => walk(c, p, q, s))
   }
-  roots.forEach((r) => walk(r, new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)))
+  roots.forEach((r) => walk(r, new THREE.Vector3(), groupQuat.clone(), new THREE.Vector3(1, 1, 1)))
 }
 recomputeWorldFromLocals()
 
@@ -127,8 +142,8 @@ hingeWorld0.normalize()
 const upperWorldQuat = worldQuat[upperArm].clone()
 const hingeLocal = hingeWorld0.clone().applyQuaternion(upperWorldQuat.clone().invert())
 
-const READ_UPPER = -0.6
-const READ_ELBOW = 0.6
+const READ_UPPER = 0.6
+const READ_ELBOW = 0.3
 /** Adduction: swing the raised left arm toward the midline so the open
     26 cm spread (centred on the hand) fits the 0.72 m frame. Sign is
     determined empirically below (try +0.5 first). */
@@ -214,23 +229,27 @@ function bookCorners(centre, quat, w) {
   return out
 }
 
-const groupQuat = new THREE.Quaternion() // faceFront is identity on this file
 const xAxis = new THREE.Vector3(1, 0, 0)
 const yAxis = new THREE.Vector3(0, 1, 0)
 
 function report(stageName, stageW, stageH, groupX, blend, offRest, offRead) {
   const cam = makeCamera(stageW, stageH)
+  // worldPos/worldQuat are already in GROUP space (walk seeded with
+  // groupQuat), as are the offsets (z toward the camera).
   const { pos: handPos } = blend > 0 ? readingHandPos(blend) : { pos: worldPos[hand].clone() }
   restoreRest()
   const off = new THREE.Vector3().lerpVectors(new THREE.Vector3(...offRest), new THREE.Vector3(...offRead), blend)
   const centre = handPos.clone().add(off).add(new THREE.Vector3(groupX, 0, 0))
-  // Book world orientation, as the loop composes it.
+  // Book world orientation, as the FIXED loop composes it (fix pass 5):
+  // the book's local +Z is already toward camera, so bookWant is the
+  // tilt alone — multiplying by the group quaternion turned the pages
+  // away from the camera.
   const tilt = new THREE.Quaternion().setFromAxisAngle(xAxis, -0.35 * blend)
-  const bookWant = groupQuat.clone().multiply(tilt)
+  const bookWant = tilt.clone()
   let quat
   if (blend >= 0.5) quat = bookWant
   else {
-    const idle = groupQuat.clone().multiply(new THREE.Quaternion().setFromAxisAngle(yAxis, -0.9))
+    const idle = new THREE.Quaternion().setFromAxisAngle(yAxis, -0.9)
     quat = idle.clone().slerp(bookWant, THREE.MathUtils.clamp(blend * 2, 0, 1))
   }
   const w = blend >= 0.5 ? BOOK_W_OPEN : BOOK_W_CARRY
@@ -262,10 +281,10 @@ function report(stageName, stageW, stageH, groupX, blend, offRest, offRead) {
 }
 
 console.log('== baseline (rest pose) ==')
-console.log('hand world:', worldPos[hand].toArray().map((v) => v.toFixed(4)).join(', '))
+console.log('hand world (group):', worldPos[hand].toArray().map((v) => v.toFixed(4)).join(', '))
 console.log('eye y:', eyeY.toFixed(4), 'chin y:', chinY.toFixed(4), 'upperBaseX:', upperBaseX.toFixed(4))
 const handRead = readingHandPos(1)
-console.log('READING blend=1: hand world:', handRead.pos.toArray().map((v) => v.toFixed(4)).join(', '))
+console.log('READING blend=1: hand world (group):', handRead.pos.toArray().map((v) => v.toFixed(4)).join(', '))
 restoreRest()
 
 const OLD_REST = [0.02, -0.08, 0.03]
@@ -278,7 +297,7 @@ const NEW_READ = [0, 0.085, 0.01]
 
 console.log('\n== ADDUCT test: hand at blend=1 with READ_ADDUCT =', READ_ADDUCT, '==')
 const handAdd = readingHandPos(1)
-console.log('hand world with adduction:', handAdd.pos.toArray().map((v) => v.toFixed(4)).join(', '))
+console.log('hand world with adduction (group):', handAdd.pos.toArray().map((v) => v.toFixed(4)).join(', '))
 restoreRest()
 
 console.log('\n== OLD offsets, OLD walk (±0.32), desktop menu stage 356x480 ==')
