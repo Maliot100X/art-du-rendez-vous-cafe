@@ -14,7 +14,12 @@ import { EASE_SILK, gsap, GSAP_EASE_SILK } from '../lib/motion';
  * motion skips it.
  */
 
-const ALL = [GALLERY.poster, ...GALLERY.items, GALLERY.posterTall];
+type GalItem = { src: string; alt: string; caption: string; video?: boolean; credit?: string };
+
+const ALL: GalItem[] = [GALLERY.poster, ...GALLERY.items, ...GALLERY.mapsPhotos, GALLERY.posterTall];
+
+// Index of the first Maps visitor photo inside ALL.
+const MAPS_OFFSET = 1 + GALLERY.items.length;
 
 export default function Gallery() {
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -135,6 +140,49 @@ export default function Gallery() {
         ))}
       </div>
 
+      {/* Real visitor photos from Google Maps. */}
+      <div className="mt-16" data-reveal>
+        <p className="font-mono text-label uppercase text-amber">{GALLERY.mapsTitle}</p>
+        <p className="mt-3 max-w-md text-body text-bone/70">{GALLERY.mapsLede}</p>
+      </div>
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {GALLERY.mapsPhotos.map((item, j) => (
+          <figure key={item.src} className="gallery-item group relative cursor-pointer overflow-hidden rounded-[1.5rem]">
+            <button
+              type="button"
+              onClick={() => setLightbox(MAPS_OFFSET + j)}
+              className="block w-full text-left"
+              aria-label={`${item.caption} — agrandir`}
+            >
+              <img
+                src={item.src}
+                alt={item.alt}
+                loading="lazy"
+                decoding="async"
+                className="aspect-[4/3] w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.2,0.7,0.1,1)] group-hover:scale-[1.05]"
+              />
+              <span className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/40 text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
+                <Expand size={14} />
+              </span>
+              {item.video && (
+                <span className="absolute left-3 top-3 rounded-full border border-white/25 bg-black/50 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-white backdrop-blur">
+                  Vidéo
+                </span>
+              )}
+              <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-4 pt-10">
+                <span className="block font-display text-lg italic leading-tight text-bone">{item.caption}</span>
+                <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[0.14em] text-bone/70">
+                  {item.credit}
+                </span>
+              </figcaption>
+            </button>
+          </figure>
+        ))}
+      </div>
+      <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.14em] text-bone/50" data-reveal>
+        {GALLERY.mapsCredit}
+      </p>
+
       {/* The tall portrait poster — same code-built menu, vertical format. */}
       <figure className="gallery-item group relative mx-auto mt-4 w-full max-w-sm cursor-pointer overflow-hidden rounded-[1.5rem]">
         <button
@@ -198,7 +246,14 @@ export default function Gallery() {
                 className="max-h-[78svh] w-full rounded-[1.5rem] object-contain"
               />
               <figcaption className="mt-4 flex items-center justify-between gap-4">
-                <span className="font-display text-xl italic text-bone sm:text-2xl">{current.caption}</span>
+                <span>
+                  <span className="block font-display text-xl italic text-bone sm:text-2xl">{current.caption}</span>
+                  {current.credit && (
+                    <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.14em] text-mist">
+                      {current.credit}
+                    </span>
+                  )}
+                </span>
                 <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.16em] text-mist">
                   {lightbox + 1} / {ALL.length}
                 </span>

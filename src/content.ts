@@ -286,6 +286,78 @@ export const GALLERY = {
   lightboxClose: 'Fermer l’image',
   lightboxPrev: 'Image précédente',
   lightboxNext: 'Image suivante',
+  // Real visitor photos from the café's Google Maps listing
+  // (downloaded from the listing's photo gallery, 2026-11-25).
+  mapsTitle: 'Photos des visiteurs — Google Maps',
+  mapsLede:
+    'Ce que les clients ont vraiment photographié : la façade au néon, le bar, la terrasse, les verres.',
+  mapsCredit:
+    'Photos des visiteurs — Google Maps. Sur Google Maps, le lieu est listé sous « Cafe Artistes ».',
+  mapsPhotos: [
+    {
+      src: '/images/maps/maps-01-neon-exterieur.jpg',
+      alt: 'Façade du café à la tombée du jour, enseignes néon rouges « Cafe Artistes »',
+      caption: 'La façade au néon, le soir',
+      video: false,
+      credit: 'Mariana Cudric — juin 2024',
+    },
+    {
+      src: '/images/maps/maps-02-cocktails-menthe.jpg',
+      alt: 'Deux cocktails verts à la menthe et au citron, sur la terrasse',
+      caption: 'Cocktails à la menthe, sur la terrasse',
+      video: false,
+      credit: 'Avril 2024',
+    },
+    {
+      src: '/images/maps/maps-03-bar-marilyn.jpg',
+      alt: 'Le bar en bois courbé, lumière bleue, portraits de Marilyn Monroe au mur',
+      caption: 'Le bar en bois, lumière bleue et Marilyn',
+      video: false,
+      credit: 'Mariana Cudric — juin 2026',
+    },
+    {
+      src: '/images/maps/maps-04-cafe-terrasse-neige.jpg',
+      alt: 'Café en couches dans un verre, posé sur une table de terrasse couverte de neige',
+      caption: 'Café en couches, sur la terrasse enneigée',
+      video: false,
+      credit: 'Avril 2024',
+    },
+    {
+      src: '/images/maps/maps-05-boisson-rose.jpg',
+      alt: 'Boisson rose dans un grand verre, lys jaunes en arrière-plan',
+      caption: 'Boisson rose, lys jaunes',
+      video: false,
+      credit: 'Avril 2024',
+    },
+    {
+      src: '/images/maps/maps-06-boissons-glacees.jpg',
+      alt: 'Quatre boissons glacées sombres avec tranches d’orange, sur le comptoir',
+      caption: 'Quatre boissons glacées, tranches d’orange',
+      video: false,
+      credit: 'Avril 2024',
+    },
+    {
+      src: '/images/maps/maps-07-video-rue.jpg',
+      alt: 'La rue devant le café au crépuscule, tonneaux en bois et néon rouge',
+      caption: 'La rue, au crépuscule',
+      video: true,
+      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
+    },
+    {
+      src: '/images/maps/maps-08-video-terrasse.jpg',
+      alt: 'La terrasse sous un grand parasol noir, clients attablés',
+      caption: 'La terrasse, sous le parasol',
+      video: true,
+      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
+    },
+    {
+      src: '/images/maps/maps-09-video-toast.jpg',
+      alt: 'Groupe de clients qui trinquent à l’intérieur, portraits encadrés au mur',
+      caption: 'On trinque, à l’intérieur',
+      video: true,
+      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
+    },
+  ],
 } as const;
 
 export const VISIT = {
