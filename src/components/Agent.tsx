@@ -13,7 +13,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { AGENT, MENU } from '../content'
+import { AGENT, CHARACTER, MENU } from '../content'
 import { expressionForReply, orderTotal, type BotAction } from '../lib/agentBrain'
 import { askBrain } from '../lib/brain'
 import { avatarBridge } from '../lib/avatarBridge'
@@ -40,6 +40,18 @@ const Live2DModel = lazyWithRetry(() => import('./Live2DModel'))
  * re-selects Nekomi instead of silently switching back to Vita.
  */
 let lastAgentStage: 'vrm' | 'live2d' = 'vrm'
+
+/**
+ * Fix pass 11: the chat transcript survives a tab switch — same
+ * module-level pattern as lastAgentStage above. Agent unmounts when
+ * the visitor leaves the tab, which used to wipe the conversation and
+ * its tap-to-add actions. A full page reload still resets the chat.
+ */
+let lastChatMessages: ChatMsg[] | null = null
+
+/** Fix pass 11: the welcome matches the selected stage (Vita in 3D, Nekomi in Live2D). */
+const welcomeForStage = (s: 'vrm' | 'live2d') =>
+  s === 'vrm' ? CHARACTER.greetings.agentVita : CHARACTER.greetings.agent
 
 interface ChatMsg {
   role: 'user' | 'bot'
@@ -78,7 +90,9 @@ interface AgentProps {
  * stages use touch-action: pan-y so a vertical swipe still scrolls.
  */
 export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
-  const [messages, setMessages] = useState<ChatMsg[]>([{ role: 'bot', text: AGENT.chatWelcome }])
+  const [messages, setMessages] = useState<ChatMsg[]>(
+    () => lastChatMessages ?? [{ role: 'bot', text: welcomeForStage(lastAgentStage) }],
+  )
   const [input, setInput] = useState('')
   // True only after the LLM brain has actually answered once (see
   // src/lib/brain.ts): a configured key alone never flips this — the
@@ -93,6 +107,8 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const [agentSpeaking, setAgentSpeaking] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const [stage, setStage] = useState<'vrm' | 'live2d'>(() => lastAgentStage)
+  /** Fix pass 11: every visible agent name follows the selected stage. */
+  const agentName = stage === 'vrm' ? 'Vita' : 'Nekomi'
   /** Every stage change goes through here so the remount-proof value above stays in sync. */
   const setStagePersist = (next: 'vrm' | 'live2d') => {
     lastAgentStage = next
@@ -149,11 +165,39 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     }
   }, [])
 
-  // Keep the transcript pinned to the latest message.
+  // Keep the transcript pinned to the latest message. Fix pass 11:
+  // taller list + rAF so the layout (actions row included) settles
+  // before pinning, and re-pin while the typing indicator is up — the
+  // latest exchange must be fully visible, not cut under the header.
   useEffect(() => {
-    const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    const raf = requestAnimationFrame(() => {
+      const el = listRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [messages, answering])
+
+  // Fix pass 11: write the transcript back to the module-level store
+  // so it survives the unmount on tab leave (see lastChatMessages).
+  useEffect(() => {
+    lastChatMessages = messages
   }, [messages])
+
+  // Fix pass 11: the welcome follows the selected stage — switching
+  // Vita/Nekomi swaps the greeting, but only while the chat is still
+  // just the greeting, never mid-conversation.
+  useEffect(() => {
+    setMessages((prev) => {
+      if (
+        prev.length === 1 &&
+        prev[0].role === 'bot' &&
+        (prev[0].text === CHARACTER.greetings.agent || prev[0].text === CHARACTER.greetings.agentVita)
+      ) {
+        return [{ role: 'bot', text: welcomeForStage(stage) }]
+      }
+      return prev
+    })
+  }, [stage])
 
   // Stop any speech when leaving the agent.
   useEffect(() => () => stopSpeaking(), [])
@@ -178,7 +222,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     const history = messages
       .slice(-6)
       .map((m) => ({ role: m.role, text: m.text }) as { role: 'user' | 'assistant'; text: string })
-    void askBrain(clean, history)
+    void askBrain(clean, history, { persona: stage === 'live2d' ? 'nekomi' : 'vita' })
       .then(({ reply, source }) => {
         if (source === 'llm') setBrainLive(true)
         avatarBridge.setExpression(reply.expression ?? 'neutral')
@@ -204,7 +248,13 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         if (!cat) return
         lastBookCatRef.current = catId
         const picks = cat.items.slice(0, 3)
-        const text = `${cat.label} — ${cat.blurb} Par exemple : ${picks.map((i) => `${i.name} ${i.price}`).join(', ')}.`
+        // Fix pass 11: blurb dropped — with it, the message ran long
+        // enough to spill below the fold of the chat list and the last
+        // prices rendered cut off mid-price ("VIN BLANC 4."). No
+        // truncation CSS exists on the bubble; the cut was the fixed
+        // list height plus the over-long message (see the taller list
+        // and rAF pinning above).
+        const text = `${cat.label} — Par exemple : ${picks.map((i) => `${i.name} ${i.price}`).join(', ')}.`
         const actions: BotAction[] = picks.map((i) => ({ label: `+ ${i.name}`, name: i.name, price: i.price }))
         avatarBridge.setExpression('happy')
         setMessages((prev) => [...prev, { role: 'bot', text, actions }])
@@ -242,27 +292,31 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   // shows the honest offline state below — voice is offline until a
   // working Deepgram key is re-entered.
   const startVoice = () => {
-    const agent = new DeepgramVoiceAgent({
-      onStatus: (status, error) => {
-        setVoiceState({ status, error })
-        if (status === 'idle' || status === 'ended') {
-          voiceAgentRef.current = null
-          if (levelRef.current) levelRef.current.style.transform = 'scaleX(0.04)'
-        }
+    const agent = new DeepgramVoiceAgent(
+      {
+        onStatus: (status, error) => {
+          setVoiceState({ status, error })
+          if (status === 'idle' || status === 'ended') {
+            voiceAgentRef.current = null
+            if (levelRef.current) levelRef.current.style.transform = 'scaleX(0.04)'
+          }
+        },
+        onTranscript: (role, text) => {
+          if (role === 'assistant') {
+            avatarBridge.setExpression(expressionForReply(text))
+            setMessages((prev) => [...prev, { role: 'bot', text }])
+          } else {
+            setMessages((prev) => [...prev, { role: 'user', text }])
+          }
+        },
+        onOrderAdded: (line) => {
+          onAdd(line)
+          setConfirmed(false)
+        },
       },
-      onTranscript: (role, text) => {
-        if (role === 'assistant') {
-          avatarBridge.setExpression(expressionForReply(text))
-          setMessages((prev) => [...prev, { role: 'bot', text }])
-        } else {
-          setMessages((prev) => [...prev, { role: 'user', text }])
-        }
-      },
-      onOrderAdded: (line) => {
-        onAdd(line)
-        setConfirmed(false)
-      },
-    })
+      avatarBridge,
+      stage === 'live2d' ? 'nekomi' : 'vita',
+    )
     voiceAgentRef.current = agent
     void agent.start()
   }
@@ -296,13 +350,16 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
       case 'connecting':
         return AGENT.voiceConnecting
       case 'live':
-        return agentSpeaking ? AGENT.voiceSpeaking : AGENT.voiceListening
+        // Fix pass 11: the speaking line names the selected stage.
+        return agentSpeaking ? (stage === 'live2d' ? AGENT.voiceSpeaking : 'Vita parle…') : AGENT.voiceListening
       case 'ended':
         switch (voiceState.error) {
           case 'no-token':
             return AGENT.voiceNoToken
           case 'mic-denied':
             return AGENT.voiceDenied
+          case 'mic-missing':
+            return AGENT.voiceMicMissing
           case 'worklet-unsupported':
             return AGENT.voiceWorklet
           case 'settings-rejected':
@@ -340,7 +397,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           The longer intro text lives below the stage grid. */}
       <div className="max-w-3xl" data-reveal>
         <p className="font-mono text-label uppercase text-amber">{AGENT.eyebrow}</p>
-        <h2 className="agent-title mt-2 font-display text-bone">{AGENT.title}</h2>
+        <h2 className="agent-title mt-2 font-display text-bone">Parlez à {agentName}.</h2>
         <p
           className={`mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] ${
             brainLive ? 'border-amber/50 bg-amber/10 text-amber' : 'border-line bg-ink-2 text-bone/70'
@@ -403,7 +460,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           </ul>
           <details className="mt-4 sm:hidden">
             <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.16em] text-amber">
-              Ce que Nekomi peut faire
+              Ce que {agentName} peut faire
             </summary>
             <ul className="mt-3 space-y-2">
               {AGENT.guidance.map((g) => (
@@ -421,7 +478,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           <div className="overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
             <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
               <p className="flex min-w-0 items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-bone">
-                <MessageSquareText size={15} className="shrink-0 text-amber" /> Chat en direct
+                <MessageSquareText size={15} className="shrink-0 text-amber" /> Chat
               </p>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden font-mono text-[10px] uppercase tracking-[0.14em] text-mist sm:inline">
@@ -443,7 +500,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               </div>
             </div>
 
-            <div ref={listRef} className="h-[200px] space-y-3 overflow-y-auto overscroll-contain px-4 py-4 sm:h-[260px]">
+            <div ref={listRef} className="h-[200px] space-y-3 overflow-y-auto overscroll-contain px-4 py-4 sm:h-[320px]">
               {messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
@@ -475,11 +532,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               {answering && (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-3xl rounded-bl-md bg-ink-3 px-4 py-3 text-[15px] leading-relaxed text-bone">
-                    <span className="flex items-center gap-1.5" aria-label="Nekomi réfléchit…">
+                    <span className="flex items-center gap-1.5" aria-label={`${agentName} réfléchit…`}>
                       <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />
                       <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" style={{ animationDelay: '0.25s' }} />
                       <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" style={{ animationDelay: '0.5s' }} />
-                      <span className="ml-1 text-sm text-mist">Nekomi réfléchit…</span>
+                      <span className="ml-1 text-sm text-mist">{agentName} réfléchit…</span>
                     </span>
                   </div>
                 </div>

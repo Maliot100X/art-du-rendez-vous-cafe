@@ -64,6 +64,42 @@ function findItems(message: string) {
   return hits.filter((h, i) => hits.findIndex((x) => x.name === h.name) === i)
 }
 
+/**
+ * Fix pass 11: category stems for recommendations and category reads
+ * (same approach as MenuVita.tsx CATEGORY_KEYWORDS, defined locally
+ * here because agentBrain must not import a component). norm() strips
+ * accents, so 'bière' -> 'biere' and the 'biere' stem matches. Order
+ * mirrors MenuVita: a named drink (findItems) always wins over stems.
+ */
+const CATEGORY_STEMS: { id: string; words: string[] }[] = [
+  { id: 'chaudes', words: ['cafe', 'the', 'expresso', 'cappuccino', 'chocolat', 'latte', 'irish', 'deca', 'soupe', 'supe', 'chaud'] },
+  { id: 'bieres', words: ['biere', 'primus', 'pils', 'pression'] },
+  { id: 'froides', words: ['froid', 'soda', 'jus', 'limonade', 'coca', 'perrier', 'eau'] },
+  { id: 'vins', words: ['vin', 'rouge', 'blanc', 'rose', 'champagne', 'prosecco'] },
+  { id: 'aperitifs', words: ['aperitif', 'spritz', 'aperol', 'martini', 'kir', 'pastis', 'ricard'] },
+  { id: 'liqueurs', words: ['liqueur', 'baileys', 'amaretto', 'cointreau', 'marnier'] },
+  { id: 'alcools', words: ['alcool', 'whisky', 'whiskey', 'gin', 'vodka', 'rhum', 'tequila', 'cognac'] },
+]
+
+function findCategory(message: string) {
+  const n = norm(message)
+  for (const entry of CATEGORY_STEMS) {
+    if (entry.words.some((w) => n.includes(w))) {
+      return MENU.find((c) => c.id === entry.id) ?? null
+    }
+  }
+  return null
+}
+
+/** A category read: first three items, exact menu prices, tap-to-add. */
+function categoryReply(cat: (typeof MENU)[number]): BotReply {
+  const picks = cat.items.slice(0, 3)
+  return {
+    text: `Côté ${cat.label.toLowerCase()} : ${picks.map((i) => `${i.name} ${i.price}`).join(', ')}… et bien d’autres sur la carte. Dites-moi ce qui vous tente.`,
+    actions: picks.map((i) => ({ label: `Ajouter ${i.name}`, name: i.name, price: i.price })),
+  }
+}
+
 function botReplyInner(message: string): BotReply {
   const n = norm(message)
 
@@ -86,6 +122,20 @@ function botReplyInner(message: string): BotReply {
     }
   }
   if (/(conseil|recommand|que.*boire|quoi.*boire|specialite|meilleur)/.test(n)) {
+    // Fix pass 11: category-aware — a specifically named drink wins,
+    // then a named category; the fixed favourites are only the fallback
+    // when neither is named (before, the favourites fired for every
+    // "conseil" message, so "quel vin rouge ?" got Spritz + Primus).
+    const named = findItems(message)
+    if (named.length > 0) {
+      const lines = named.map((h) => `${h.name} — ${h.price}`).join(', ')
+      return {
+        text: `Je vous conseille : ${lines}. Je peux les ajouter à votre commande.`,
+        actions: named.map((h) => ({ label: `Ajouter ${h.name}`, name: h.name, price: h.price })),
+      }
+    }
+    const cat = findCategory(message)
+    if (cat) return categoryReply(cat)
     return {
       text: 'Mes trois favoris du moment : l’Aperol Spritz à 9,00 € pour l’apéritif, une Primus Pils 50 CL à 5,30 €, et l’Irish Coffee à 10,00 € pour finir en douceur. Je peux les ajouter à votre commande.',
       actions: [
@@ -128,22 +178,11 @@ function botReplyInner(message: string): BotReply {
       actions: hits.map((h) => ({ label: `Ajouter ${h.name}`, name: h.name, price: h.price })),
     }
   }
-  if (/(vin|biere|aperitif|liqueur|alcool|froid|chaud)/.test(n)) {
-    // Match on the category label's distinctive word, not the shared
-    // "boissons" prefix: "froides" -> Boissons Froides, "chaudes" ->
-    // Boissons Chaudes. The old slice(0,5) on the first word matched
-    // "boiss" for both and always returned Chaudes, the first in MENU.
-    const cat = MENU.find((c) => {
-      const words = norm(c.label)
-        .split(/\s+/)
-        .filter((w) => w !== 'boissons')
-      return words.some((w) => w.length >= 4 && n.includes(w))
-    })
-    if (cat) {
-      const sample = cat.items.slice(0, 3).map((i) => `${i.name} ${i.price}`).join(', ')
-      return { text: `Côté ${cat.label.toLowerCase()} : ${sample}… et bien d’autres sur la carte. Dites-moi ce qui vous tente.` }
-    }
-  }
+  // Fix pass 11: same category stems as the conseil branch above — the
+  // old label-word match needed a word of ≥4 chars from the label, so
+  // "vin" never matched "Vins" and the branch was dead for red wine.
+  const cat = findCategory(message)
+  if (cat) return categoryReply(cat)
 
   return {
     text: 'Je peux vous aider avec la carte et les prix, les horaires, l’adresse, et préparer votre commande. Essayez par exemple « un café », « vos horaires ? » ou « je veux commander ».',

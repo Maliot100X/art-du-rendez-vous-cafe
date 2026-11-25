@@ -351,14 +351,19 @@ export const CHARACTER = {
     menu: 'Bonjour ! Choisissez une catégorie — je marche vers elle et je vous lis les prix.',
     agent:
       'Bonjour ! Je suis Nekomi, l’agent de l’Art du Rendez-Vous. Dites-moi ce qui vous ferait plaisir — je connais toute la carte et je peux préparer votre commande.',
+    // Fix pass 11: the Vita (3D) stage greets as Vita, not Nekomi.
+    agentVita:
+      'Bonjour ! Je suis Vita, la barmaid de l’Art du Rendez-Vous. Dites-moi ce qui vous ferait plaisir — je connais toute la carte et je peux préparer votre commande.',
   },
 } as const;
 
 export const AGENT = {
-  eyebrow: 'Agent en direct',
-  title: 'Parlez à Nekomi.',
-  lede: "Notre agent en direct connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle vous proposera même de vous appeler pour la confirmer.",
-  statusOffline: 'Agent en direct — connexion en cours de mise en place',
+  eyebrow: 'Agent',
+  // Fix pass 11: the rendered title is per-stage, derived in Agent.tsx
+  // from the selected model — this value is the default (Vita · 3D).
+  title: 'Parlez à Vita.',
+  lede: "Notre agent connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle vous proposera même de vous appeler pour la confirmer.",
+  statusOffline: 'Agent — chat disponible · voix et cerveau bientôt en ligne',
   statusHint:
     'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
   chatPlaceholder: 'Écrivez ici… ex. « un café et un Aperol Spritz »',
@@ -366,13 +371,14 @@ export const AGENT = {
   chatWelcome:
     "Bonjour ! Je suis Nekomi, l’agent de l’Art du Rendez-Vous. Dites-moi ce qui vous ferait plaisir — je connais toute la carte et je peux préparer votre commande.",
   chatSuggestions: ['Un café, s’il vous plaît', 'Qu’est-ce que vous conseillez en apéritif ?', 'Vos horaires ?', 'Je veux commander'],
-  voiceTitle: 'Appel vocal en direct',
+  voiceTitle: 'Appel vocal',
   voiceCta: 'Parler à voix haute',
   voiceStop: 'Terminer l’appel',
   voiceOffline:
-    'La voix en direct arrive avec la connexion Deepgram. Pour l’instant, le micro sert uniquement à voir votre niveau de voix — aucune donnée ne quitte votre appareil.',
+    'La voix arrive avec la connexion Deepgram — pour l’instant indisponible, le chat texte ci-dessus répond déjà.',
   voiceListening: 'Je vous écoute…',
   voiceDenied: 'Micro non autorisé — le chat texte reste disponible.',
+  voiceMicMissing: 'Aucun microphone trouvé sur cet appareil — le chat texte reste disponible.',
   voiceConnecting: 'Connexion à l’agent vocal…',
   voiceSpeaking: 'Nekomi parle…',
   // Honest offline states for the Deepgram voice call (Phase 4). The
