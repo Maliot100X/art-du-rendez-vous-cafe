@@ -135,6 +135,17 @@ declare global {
       /** Whether model.expression('Henshin') resolved true. */
       expressionOk: boolean | null
       /**
+       * Fix pass 14 — the mouth write, for the next check: the bridge
+       * value the stage last read (mouthBridge) and the
+       * ParamMouthOpenY read-back right after writing it
+       * (mouthWritten). If the mouth stays shut on screen while these
+       * move, the break is downstream of the write (bake/render);
+       * if these stay 0/-1, the break is upstream (speech/bridge).
+       * -1 = never written yet.
+       */
+      mouthBridge: number
+      mouthWritten: number
+      /**
        * The init failure, when status is 'failed' — the exact error
        * message (fix pass 4: the old code swallowed it, so a failed
        * stage gave no clue what broke). The cloud-browser check reads
@@ -418,6 +429,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
       mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
       param3: window.__nekomiDebug?.param3 ?? -1,
       expressionOk: window.__nekomiDebug?.expressionOk ?? null,
+      // A fit must not wipe the mouth-write diagnostics (fix pass
+      // 14): keep the last written values, like param3 above.
+      mouthBridge: window.__nekomiDebug?.mouthBridge ?? -1,
+      mouthWritten: window.__nekomiDebug?.mouthWritten ?? -1,
       // A successful fit means no error — never carry a stale
       // failure forward into the ready diagnostic (fix pass 5).
       error: null,
@@ -590,6 +605,8 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
               setParameterValueById: (id: string, value: number) => void
               getParameterValueById?: (id: string) => number
             }
+            /** Fix pass 14: the internal model is an EventEmitter. */
+            on?: (event: string, fn: () => void) => unknown
           }
         ).coreModel
         const setParam = (id: string, value: number) => {
@@ -598,6 +615,52 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           } catch {
             // Param absent on this rig — ignore.
           }
+        }
+        // Fix pass 14 — the mouth write lives on the model's own
+        // `beforeModelUpdate` event, not in the app-ticker tick below.
+        // pixi-live2d-display emits it synchronously inside
+        // Cubism4InternalModel.update(), immediately before
+        // coreModel.update() — the call that bakes parameter values
+        // into drawable vertices. Writing here means the bridge value
+        // is baked into the SAME frame it is read, with no reliance
+        // on the app ticker running before the model's own
+        // (shared-ticker) update and no one-frame lag. The old
+        // app-ticker write ran after the bake, so the rendered mouth
+        // only ever showed the previous frame's value. (Measured on
+        // the real .moc3 with the Cubism Core in Node — see
+        // scripts/fix14-mouth-measure.mjs: ParamMouthOpenY 0 -> 0.7
+        // grows the mouth art ArtMesh13 from 61 to 125 canvas px,
+        // ~15 px on a 480 px stage — so the parameter itself was
+        // never the problem; the value has to reach the bake.)
+        // The hook lives with the cached stage like the tick closure
+        // (it dies with the model on dropWarmStage), so no extra
+        // cleanup is needed. If the hook is unavailable, the ticker
+        // write below stays as the fallback.
+        let mouthHooked = false
+        const writeMouth = () => {
+          const value = bridge.getMouthOpen()
+          setParam('ParamMouthOpenY', value)
+          if (window.__nekomiDebug) {
+            let readback = -1
+            try {
+              readback = core?.getParameterValueById?.('ParamMouthOpenY') ?? -1
+            } catch {
+              // Read-back unsupported — ignore.
+            }
+            window.__nekomiDebug.mouthBridge = Math.round(value * 100) / 100
+            window.__nekomiDebug.mouthWritten = Math.round(readback * 100) / 100
+          }
+        }
+        try {
+          const internal = model.internalModel as unknown as {
+            on?: (event: string, fn: () => void) => unknown
+          }
+          if (typeof internal.on === 'function') {
+            internal.on('beforeModelUpdate', writeMouth)
+            mouthHooked = true
+          }
+        } catch {
+          // Hook unavailable — the ticker write below is the fallback.
         }
         let current: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
         let target: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
@@ -617,7 +680,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             current[key] = from + (target[key] - from) * 0.15
             setParam(key, current[key])
           }
-          setParam('ParamMouthOpenY', bridge.getMouthOpen())
+          // Fix pass 14: this ticker write is only the fallback — the
+          // beforeModelUpdate hook above owns the mouth write when
+          // available (same-frame bake; see writeMouth).
+          if (!mouthHooked) setParam('ParamMouthOpenY', bridge.getMouthOpen())
           const param3Target = formRef.current === 'furry' ? 1 : 0
           param3Current += (param3Target - param3Current) * 0.12
           setParam('Param3', param3Current)
@@ -671,6 +737,8 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             mouthScreenPx: [0, 0],
             param3: -1,
             expressionOk: null,
+            mouthBridge: -1,
+            mouthWritten: -1,
             error: message,
           }
           setStatus('failed')

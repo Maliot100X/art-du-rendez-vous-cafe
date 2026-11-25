@@ -239,13 +239,26 @@ export function speak(text: string): void {
     // it re-anchors the clock to the real word being spoken.
     if (e.name === 'word') viseme?.noteBoundary(e.charIndex, performance.now())
   }
-  utter.onend = endSpeaking
-  utter.onerror = endSpeaking
+  // Fix pass 14: an utterance event must never kill a run whose
+  // audio never started. On an engine where speech never starts (no
+  // voices / headless / blocked) the utterance can fire onerror (or
+  // onend) immediately — the old unconditional endSpeaking() here
+  // killed the tick before the 800 ms open-loop start, so the mouth
+  // stayed shut for the whole line even though fix 13's fallback
+  // existed. Only an engine that really spoke may end the run from
+  // its event; a never-started / open-loop run is ended by the poll
+  // in tickSpeaking() when its beats are done.
+  const endIfSpoken = () => {
+    if (visemeStarted && !openLoop) endSpeaking()
+  }
+  utter.onend = endIfSpoken
+  utter.onerror = endIfSpoken
   try {
     window.speechSynthesis.speak(utter)
   } catch {
-    endSpeaking()
-    return
+    // Fix pass 14: speak() throwing (no engine at all) must not kill
+    // the run either — fall through and start the poll tick below, so
+    // the open-loop clock still runs the beats and the mouth moves.
   }
   // Start the poll tick at once — it, not `onstart`, notices the
   // voice starting and drives the mouth from the first frame.
