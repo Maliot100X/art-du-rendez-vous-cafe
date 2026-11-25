@@ -1,7 +1,21 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookOpen, Send, Volume2, VolumeX } from 'lucide-react'
 import { CHARACTER, MENU } from '../content'
 import { askBrain } from '../lib/brain'
+import {
+  getGuideLine,
+  getPendingOpen,
+  getReading,
+  registerReadingFinishHandler,
+  registerSpeechStopper,
+  setGuideLine,
+  setPendingOpen,
+  setReplyArrived,
+  startReading,
+  stopReading,
+  subscribeReadingStore,
+  type ReadingState,
+} from '../lib/readingStore'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
 
 /**
@@ -35,6 +49,19 @@ import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, spe
  * A reading ends on a timer (estimateSeconds) — the old onReadingEnd
  * came from the VRM; the timer is its replacement, nonce-guarded so a
  * newer reading or a stop cannot fire an old timer.
+ *
+ * Fix pass 14: the reading lives in the module-level store
+ * (src/lib/readingStore.ts), NOT in this hook's local state. App.tsx
+ * mounts only the active tab, so this hook unmounts the moment the
+ * visitor leaves LA CARTE — the old local timer, pending big-book
+ * open and reply flag died with it, the reading never finished, the
+ * book never opened and the Agent tab never logged the category.
+ * The store outlives the unmount: a reading started here still
+ * finishes on its timer, still opens the book (switching the visitor
+ * to the Livre tab — the existing pending-open flow) and still
+ * produces the book flip the Agent log entry replays from, even if
+ * the visitor is on AGENT when it finishes. Leaving the tab cancels
+ * nothing; only "Couper la voix" (stopReading) does.
  */
 
 const CATEGORY_KEYWORDS: { id: string; words: string[] }[] = [
@@ -85,12 +112,8 @@ export interface MenuGuideItemEvent {
 }
 
 /** One reading aloud: the asked category, a trigger nonce, and the
-    estimated spoken seconds (the timer ends it — see useMenuGuide). */
-export interface ReadingState {
-  categoryId: string
-  nonce: number
-  seconds: number
-}
+    estimated spoken seconds — see src/lib/readingStore.ts. */
+export type { ReadingState } from '../lib/readingStore'
 
 export interface MenuGuide {
   line: string
@@ -128,83 +151,53 @@ export function useMenuGuide({
   itemEvent: MenuGuideItemEvent | null
   onOpenBook: (catId: string) => void
 }): MenuGuide {
-  const [line, setLine] = useState<string>(CHARACTER.greetings.menu)
+  /**
+   * Fix pass 14: the reading + the shown line live in the module-level
+   * store (src/lib/readingStore.ts) and are only MIRRORED here. The
+   * hook unmounts when the visitor leaves LA CARTE, so any local
+   * reading state, timer or pending open would die with it — the
+   * store's do not. On a remount mid-reading the mirrors initialise
+   * from the store, so the line does not reset to the greeting and
+   * the "Lecture en cours…" indicator comes back with the true
+   * category (Livre label follows the actual reading category).
+   * `line` is mirrored the same way for the same reason; `input`,
+   * `muted` and `brainLive` are per-mount UI and stay local.
+   */
+  const [line, setLineState] = useState<string>(() => getGuideLine() ?? CHARACTER.greetings.menu)
   const [input, setInput] = useState('')
   const [muted, setMutedState] = useState(isSpeechMuted())
   const [brainLive, setBrainLive] = useState(false)
-  const [reading, setReading] = useState<ReadingState | null>(null)
-  /**
-   * Mirror of `reading` for the async brain replies — a reply must
-   * only re-time the reading IT started. A late reply must not
-   * resurrect a reading the visitor stopped or a newer tap superseded
-   * (the nonce no longer matches), or the voice would start again
-   * after "Couper la voix".
-   */
-  const readingRef = useRef<ReadingState | null>(null)
-  readingRef.current = reading
+  const [reading, setReadingState] = useState<ReadingState | null>(() => getReading())
   const firstCategoryRef = useRef(true)
-  /** Big-book tab switch waiting on a reading to finish. */
-  const pendingOpenRef = useRef<string | null>(null)
-  /** The brain's reply has arrived for the pending chat question. */
-  const replyArrivedRef = useRef(false)
-  /** The timer that ends the current reading (replaces the VRM's
-      onReadingEnd). Its nonce guards against a stale timer firing
-      after a newer reading started or a stop. */
-  const readingTimerRef = useRef<number | null>(null)
 
-  const clearReadingTimer = () => {
-    if (readingTimerRef.current !== null) {
-      window.clearTimeout(readingTimerRef.current)
-      readingTimerRef.current = null
-    }
-  }
-
-  // The reading is over: fire the pending big-book open, then clear
-  // the indicator. The React reading state is left alone by the brain
-  // reply path on purpose (see ask()/askBartender): only this end —
-  // or an explicit stop — clears it.
-  const finishReading = useCallback(
-    (nonce: number) => {
-      if (readingRef.current?.nonce !== nonce) return
-      const pending = pendingOpenRef.current
-      readingTimerRef.current = null
-      setReading(null)
-      if (pending && replyArrivedRef.current) {
-        pendingOpenRef.current = null
-        onOpenBook(pending)
-      }
-    },
-    [onOpenBook],
-  )
-
-  /** Start a reading: state + timer, both keyed by the same nonce. */
-  const startReading = useCallback(
-    (catId: string, seconds: number) => {
-      const nonce = Date.now()
-      clearReadingTimer()
-      setReading({ categoryId: catId, nonce, seconds })
-      readingTimerRef.current = window.setTimeout(() => finishReading(nonce), seconds * 1000)
-      return nonce
-    },
-    [finishReading],
-  )
-
-  const stopReading = useCallback(() => {
-    clearReadingTimer()
-    stopSpeaking()
-    pendingOpenRef.current = null
-    setReading(null)
-  }, [])
-
-  // Stop any speech + the reading timer when the menu tab unmounts.
   useEffect(
-    () => () => {
-      clearReadingTimer()
-      stopSpeaking()
-      pendingOpenRef.current = null
-    },
+    () =>
+      subscribeReadingStore(() => {
+        setReadingState(getReading())
+        const stored = getGuideLine()
+        if (stored !== null) setLineState(stored)
+      }),
     [],
   )
+
+  /**
+   * Register the finish handler (App's openBook) and the voice
+   * stopper in the store. Deliberately NO cleanup: the handler must
+   * outlive this hook, or a reading finishing after a tab switch
+   * could never open the book. The hook re-registers the same
+   * functions on every mount; the store keeps the latest.
+   */
+  useEffect(() => {
+    registerReadingFinishHandler(onOpenBook)
+    registerSpeechStopper(stopSpeaking)
+  }, [onOpenBook])
+
+  // Fix pass 14: there is deliberately NO unmount cleanup for the
+  // reading here. The old effect cleared the timer, stopped the voice
+  // and dropped the pending big-book open when the menu tab unmounted
+  // — that was the bug: leaving LA CARTE mid-reading cancelled it.
+  // The voice keeps playing and the timer keeps running in the store;
+  // only stopReading ("Couper la voix") cancels a reading.
 
   // Category change → show the category line only. Fix pass 13: NO
   // reading, NO voice, NO pending big-book open here — the old effect
@@ -221,17 +214,17 @@ export function useMenuGuide({
     }
     const text = categoryLine(categoryId)
     if (!text) return
-    setLine(text)
+    setGuideLine(text)
   }, [categoryId])
 
   // Item tap (+ on a row) → speak that item.
   useEffect(() => {
     if (!itemEvent || itemEvent.nonce === 0) return
     const text = `${itemEvent.name}, ${itemEvent.price} — ajouté à votre commande.`
-    setLine(text)
+    setGuideLine(text)
     // The tapped row belongs to the active category.
     startReading(categoryId, estimateSeconds(text))
-    pendingOpenRef.current = null
+    setPendingOpen(null)
     if (isSpeechSupported()) speak(text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemEvent])
@@ -253,30 +246,31 @@ export function useMenuGuide({
   // (src/lib/brain.ts): LLM when a key is configured and the call
   // succeeds, the offline rule-based brain otherwise. If the question
   // names a category the guide reads it aloud at once; the big book
-  // tab opens only once she has finished reading (finishReading), so
-  // the menu tab is not unmounted mid-read. The reply arrives
-  // asynchronously: the reading starts on a default estimate and is
-  // re-timed on the real spoken line once the brain answers; if the
-  // timer runs out before the reply lands, the end is held until the
-  // re-timed reading finishes.
+  // tab opens only once she has finished reading (the store's
+  // finishReading) — fix pass 14: that open survives a tab switch,
+  // because the reading lives in the module-level store, not this
+  // hook. The reply arrives asynchronously: the reading starts on a
+  // default estimate and is re-timed on the real spoken line once
+  // the brain answers; if the timer runs out before the reply lands,
+  // the end is held until the re-timed reading finishes.
   const ask = (e: FormEvent) => {
     e.preventDefault()
     const clean = input.trim()
     if (!clean) return
     setInput('')
     const catId = findCategoryForText(clean)
-    replyArrivedRef.current = false
+    setReplyArrived(false)
     if (catId) {
       const nonce = startReading(catId, 12)
-      pendingOpenRef.current = catId
+      setPendingOpen(catId)
       void askBrain(clean).then(({ reply, source }) => {
         if (source === 'llm') setBrainLive(true)
-        setLine(reply.text)
+        setGuideLine(reply.text)
         // Only re-time (and speak) the reading THIS ask started — a
         // late reply must not resurrect a reading the visitor stopped
         // or a newer tap superseded (the nonce no longer matches).
-        if (catId && pendingOpenRef.current === catId && readingRef.current?.nonce === nonce) {
-          replyArrivedRef.current = true
+        if (catId && getPendingOpen() === catId && getReading()?.nonce === nonce) {
+          setReplyArrived(true)
           startReading(catId, estimateSeconds(shortenForSpeech(reply.text)))
           if (isSpeechSupported()) speak(reply.text)
         }
@@ -285,7 +279,7 @@ export function useMenuGuide({
     }
     void askBrain(clean).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
-      setLine(reply.text)
+      setGuideLine(reply.text)
       if (isSpeechSupported()) speak(reply.text)
     })
   }
@@ -302,23 +296,23 @@ export function useMenuGuide({
     const cat = MENU.find((c) => c.id === categoryId)
     if (!cat) return
     const text = categoryLine(categoryId)
-    replyArrivedRef.current = false
-    setLine(text)
+    setReplyArrived(false)
+    setGuideLine(text)
     const nonce = startReading(categoryId, estimateSeconds(text))
-    pendingOpenRef.current = categoryId
+    setPendingOpen(categoryId)
     // Speak NOW — the first click must be heard at once, not after
     // the brain answers.
     if (isSpeechSupported()) speak(text)
     const request = `Lis-moi la page ${cat.label} à voix haute`
     void askBrain(request).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
-      if (pendingOpenRef.current !== categoryId) return
+      if (getPendingOpen() !== categoryId) return
       // Only re-time (and speak) the reading THIS press started — see
       // ask(): a late reply must not resurrect a reading the visitor
       // stopped or a newer tap superseded.
-      if (readingRef.current?.nonce !== nonce) return
-      replyArrivedRef.current = true
-      setLine(reply.text)
+      if (getReading()?.nonce !== nonce) return
+      setReplyArrived(true)
+      setGuideLine(reply.text)
       startReading(categoryId, estimateSeconds(shortenForSpeech(reply.text)))
       if (isSpeechSupported()) speak(reply.text)
     })
