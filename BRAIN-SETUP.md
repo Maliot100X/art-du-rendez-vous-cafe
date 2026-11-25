@@ -17,9 +17,9 @@ ci-dessous.
 
 | Variable | Rôle | Exemple |
 |---|---|---|
-| `VITE_LLM_API_KEY` | Clé API du LLM (obligatoire pour activer le cerveau) | `sk-…` |
-| `VITE_LLM_BASE_URL` | URL de base, compatible OpenAI (facultatif) | `https://api.openai.com/v1` |
-| `VITE_LLM_MODEL` | Modèle de chat (facultatif) | `gpt-4o-mini` |
+| `VITE_LLM_API_KEY` | Clé API du LLM (obligatoire pour activer le cerveau) | `inception-…` (clé Inception) |
+| `VITE_LLM_BASE_URL` | URL de base, compatible OpenAI (facultatif) | `https://api.inceptionlabs.ai/v1` |
+| `VITE_LLM_MODEL` | Modèle de chat (facultatif) | `mercury-3` |
 
 Seule `VITE_LLM_API_KEY` est obligatoire. Sans elle, le site reste en
 mode hors ligne.
@@ -37,8 +37,8 @@ déjà dans `.gitignore`) :
 
 ```
 VITE_LLM_API_KEY=sk-votre-cle-ici
-VITE_LLM_BASE_URL=https://api.openai.com/v1
-VITE_LLM_MODEL=gpt-4o-mini
+VITE_LLM_BASE_URL=https://api.inceptionlabs.ai/v1
+VITE_LLM_MODEL=mercury-3
 ```
 
 Puis reconstruire et prévisualiser :
@@ -55,10 +55,24 @@ changer une valeur exige un nouveau déploiement.
 
 ## 3. Quels modèles utiliser
 
-N'importe quel modèle de chat compatible OpenAI (`/chat/completions`) :
+Le cerveau par défaut est **mercury-3** d'Inception Labs
+(`https://api.inceptionlabs.ai/v1`, clé Inception dans
+`VITE_LLM_API_KEY`) — c'est le réglage déjà en place, il suffit de
+mettre la clé. mercury-3 est un modèle de raisonnement : l'adaptateur
+envoie `max_completion_tokens: 512` + `reasoning_effort: "instant"` et
+**omet la température** (un modèle de raisonnement rejette une
+température non par défaut ; avec le raisonnement par défaut et un
+petit budget `max_tokens`, le modèle consomme tout en raisonnement et
+renvoie un contenu vide). Le paramètre déprécié `max_tokens` n'est
+jamais envoyé.
 
-- **OpenAI** : `gpt-4o-mini` (recommandé — rapide, pas cher),
-  `gpt-4o`, `gpt-4.1-mini`.
+Autres modèles de chat compatibles OpenAI (`/chat/completions`) —
+mettre aussi leur `VITE_LLM_BASE_URL` et `VITE_LLM_MODEL` ; pour eux
+l'adaptateur garde l'ancien comportement (température 0.7,
+`max_completion_tokens: 300`, jamais `reasoning_effort`) :
+
+- **OpenAI** : `gpt-4o-mini` (rapide, pas cher), `gpt-4o`,
+  `gpt-4.1-mini` (base `https://api.openai.com/v1`).
 - **Passerelle freellm** : `auto` (défaut quand la clé vient de
   `VITE_FREELLM_API_KEY`), ou `auto:fast` pour le mode rapide.
 - **Autre passerelle compatible OpenAI** : le nom de modèle qu'elle
