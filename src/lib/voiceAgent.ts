@@ -87,17 +87,13 @@ function menuSummary(): string {
   ).join('\n')
 }
 
-/** The agent's spoken/written name: 'vita' is the 3D barmaid, 'nekomi'
-    the Live2D form — one and the same person (see content.ts CHARACTER). */
+/** The agent's name: Nekomi, the barmaid (Live2D). The 'vita' variant
+    is kept for callers that still pass it — it resolves to Nekomi. */
 export type VoicePersona = 'vita' | 'nekomi'
 
-function personaName(persona: VoicePersona): string {
-  return persona === 'nekomi' ? 'Nekomi' : 'Vita'
-}
-
-function agentPrompt(persona: VoicePersona = 'vita'): string {
+function agentPrompt(_persona: VoicePersona = 'nekomi'): string {
   return [
-    `Tu es ${personaName(persona)}, l\u2019agent de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.`,
+    `Tu es Nekomi, l\u2019agent de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.`,
     'Tu parles français, avec chaleur et concision — une ou deux phrases par réponse.',
     `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
     'Horaires : à confirmer — aucun horaire n’est listé sur Google Maps pour ce lieu.',
@@ -109,7 +105,7 @@ function agentPrompt(persona: VoicePersona = 'vita'): string {
   ].join('\n')
 }
 
-function settingsMessage(persona: VoicePersona = 'vita'): Record<string, unknown> {
+function settingsMessage(persona: VoicePersona = 'nekomi'): Record<string, unknown> {
   return {
     type: 'Settings',
     audio: {
@@ -153,7 +149,7 @@ function settingsMessage(persona: VoicePersona = 'vita'): Record<string, unknown
       speak: {
         provider: { type: 'deepgram', version: 'v2', model: 'flux-alexis-en' },
       },
-      greeting: `Bonjour, je suis ${personaName(persona)}, bienvenue à l\u2019Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir.`,
+      greeting: `Bonjour, je suis Nekomi, bienvenue à l\u2019Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir.`,
     },
   }
 }
@@ -260,7 +256,7 @@ export class DeepgramVoiceAgent {
   constructor(
     callbacks: VoiceAgentCallbacks,
     bridge: AvatarBridge = avatarBridge,
-    persona: 'vita' | 'nekomi' = 'vita',
+    persona: 'vita' | 'nekomi' = 'nekomi',
   ) {
     this.callbacks = callbacks
     this.bridge = bridge

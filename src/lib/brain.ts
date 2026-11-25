@@ -26,7 +26,7 @@ import { botReply, expressionForReply, type BotReply } from './agentBrain'
  * URL, network error, non-2xx, timeout, empty reply) it falls back
  * silently to the offline brain, returning the same BotReply shape
  * (text + optional actions + expression) so callers never care which
- * brain answered — the VRM expression + lip-sync path is identical.
+ * brain answered — the expression + lip-sync path is identical.
  *
  * Honesty rule: only a successful LLM call flips the brain to "live".
  * A configured key alone proves nothing (a dead gateway or a wrong key
@@ -96,16 +96,10 @@ function menuSummary(): string {
 
 /** System prompt — built from the site's own data, never retyped. The
     persona comes from the character card (src/content.ts CHARACTER):
-    Vita in 3D, Nekomi in Live2D — one and the same barmaid. The first
-    line always leads with the selected name: 'vita' (default) is
-    addressed as Vita, 'nekomi' as Nekomi — with the note that in 3D
-    she is called Vita, the same person. */
-export function brainSystemPrompt(persona: 'vita' | 'nekomi' = 'vita'): string {
-  const name = persona === 'nekomi' ? CHARACTER.live2dName : CHARACTER.name
-  const firstLine =
-    persona === 'nekomi'
-      ? `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles. (en 3D, on t’appelle ${CHARACTER.name} — c’est la même personne)`
-      : `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles.`
+    Nekomi, the barmaid. The first line always leads with her name. */
+export function brainSystemPrompt(_persona: 'vita' | 'nekomi' = 'nekomi'): string {
+  const name = CHARACTER.name
+  const firstLine = `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles.`
   return [
     firstLine,
     CHARACTER.personality,
@@ -128,7 +122,7 @@ interface ChatCompletionsResponse {
 async function callLlm(
   message: string,
   history: ChatTurn[],
-  persona: 'vita' | 'nekomi' = 'vita',
+  persona: 'vita' | 'nekomi' = 'nekomi',
 ): Promise<string> {
   const { key, baseUrl, model } = brainConfig()
   if (!key) throw new Error('no-key')
@@ -168,7 +162,7 @@ async function callLlm(
 /**
  * Ask the brain. Returns the LLM reply when the key is configured and
  * the call succeeds; otherwise the offline rule-based reply — same
- * shape, so the VRM expression + lip-sync path never changes.
+ * shape, so the expression + lip-sync path never changes.
  * The `actions` (tap-to-add buttons) come from the offline brain's read
  * of the same message: the LLM names the drinks, the buttons add them.
  */
@@ -181,7 +175,7 @@ export async function askBrain(
   if (!clean) return { reply: botReply(''), source: 'offline' }
   const offline = botReply(clean)
   try {
-    const text = await callLlm(clean, history, opts?.persona ?? 'vita')
+    const text = await callLlm(clean, history, opts?.persona ?? 'nekomi')
     brainLive = true
     return {
       reply: {

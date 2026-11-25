@@ -1,6 +1,9 @@
 /**
  * Speech-timed viseme engine — the mouth driver for browser
- * speechSynthesis readings (fix pass 10).
+ * speechSynthesis readings (fix pass 10). It drives Nekomi's Live2D
+ * mouth (ParamMouthOpenY) via avatarBridge — it is NOT VRM-only, so
+ * it stays after the VRM removal: without it, Nekomi's mouth would
+ * never move during read-aloud replies.
  *
  * WHY THIS EXISTS: speechSynthesis exposes NO audio stream, so the
  * YuriOS AnalyserNode/RMS path (avatarBridge.ts, used by the Deepgram

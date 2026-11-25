@@ -72,7 +72,7 @@ export default function HeroDust() {
   // that keeps creating contexts eventually hits the browser's limit
   // (the next renderer creation fails and a stage goes black — the
   // prime suspect for the Agent's Live2D failing after tab-hopping).
-  // forceContextLoss on unmount, like VrmModel / MenuBook already do.
+  // forceContextLoss on unmount, like MenuBook already does.
   useEffect(
     () => () => {
       const gl = glRef.current

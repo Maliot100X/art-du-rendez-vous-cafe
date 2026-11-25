@@ -13,7 +13,7 @@ import { runWhenIdle, shouldDeferHeavyPreload } from './lib/perf'
 import { useReveal } from './lib/useReveal'
 import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
 import { TAB_THEMES } from './lib/tabThemes'
-import MenuVita, { MenuVitaPanel, MenuVitaStage, estimateSeconds, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
+import MenuGuide, { MenuGuidePanel, estimateSeconds, useMenuGuide, type MenuGuideItemEvent } from './components/MenuGuide'
 import { askBrain } from './lib/brain'
 import { isSpeechSupported, shortenForSpeech, speak, stopSpeaking } from './lib/speech'
 import { MENU } from './content'
@@ -28,7 +28,6 @@ const MenuBook = lazyWithRetry(() => import('./components/MenuBook'))
 const Gallery = lazyWithRetry(() => import('./components/Gallery'))
 const Agent = lazyWithRetry(() => import('./components/Agent'))
 const FluidBackground = lazyWithRetry(() => import('./components/FluidBackground'))
-const VrmModel = lazyWithRetry(() => import('./components/VrmModel'))
 
 /** Visible loading state for a tab panel — never a blank dark area. */
 function PanelLoading({ label }: { label: string }) {
@@ -79,17 +78,9 @@ function PanelError({ label, detail, onRetry }: { label: string; detail?: string
  * hash opens that tab; back/forward moves between tabs.
  *
  * Mount-on-activate: only the active tab's panel is mounted, so only
- * one WebGL context is alive at a time (the VRM, the book, the fluid,
- * the Live2D and the hero dust never run together) — except the Livre
- * tab, where Vita's stage and the big book each hold one context (two
- * in that tab, each freed on unmount; the VRM itself is shared from
- * the module-level cache, so no re-download). Heavy scenes are
- * React.lazy chunks that load only when their tab opens. The VRM
- * itself is the exception to "load on open": it is cached at module
- * level (src/lib/vrmCache.ts) and prewarmed on idle after first paint,
- * so the parsed 14 MB model survives tab switches — returning to Menu
- * reuses it instead of re-downloading/re-parsing it. Each mount still
- * builds its own renderer and frees its own GL context on unmount.
+ * one WebGL context is alive at a time (the book, the fluid, the
+ * Live2D and the hero dust never run together). Heavy scenes are
+ * React.lazy chunks that load only when their tab opens.
  * The fluid background lives on the Home tab only; every other tab
  * gets the static CSS gradient (cheap, same palette).
  *
@@ -104,29 +95,19 @@ function FluidFallbackDiv() {
 }
 
 /**
- * Heavy-model prewarm (fix pass 3, defects 4 + 6). Dynamic imports on
- * purpose: statically importing vrmCache / Live2DModel here would drag
- * three-vrm + pixi into the first-paint bundle (the 564 KB initial JS
- * win from the perf pass). Each prewarm is idempotent — the modules
- * share one in-flight promise — so hover + idle + tab open can all
- * call them safely.
+ * Heavy-model prewarm (fix pass 3, defect 6). Dynamic import on
+ * purpose: statically importing Live2DModel here would drag pixi into
+ * the first-paint bundle. The prewarm is idempotent — the module
+ * shares one in-flight promise — so hover + idle + tab open can all
+ * call it safely.
  */
-function prewarmVrm(): void {
-  void import('./lib/vrmCache')
-    .then((m) => m.preloadVrm())
-    .catch(() => undefined)
-}
 function prewarmLive2d(): void {
   void import('./components/Live2DModel')
     .then((m) => m.preloadLive2d())
     .catch(() => undefined)
 }
 function prewarmForTab(id: TabId): void {
-  if (id === 'menu' || id === 'book') prewarmVrm()
-  else if (id === 'agent') {
-    prewarmVrm()
-    prewarmLive2d()
-  }
+  if (id === 'agent') prewarmLive2d()
 }
 
 /**
@@ -260,23 +241,23 @@ function TabSurface({ tab, children }: { tab: TabId; children: ReactNode }) {
 }
 
 /**
- * Menu tab: the menu + Vita walking beside it.
+ * Menu tab: the menu + Nekomi's guide beside it (text + voice — no
+ * model since the VRM was removed).
  *
- * Desktop (lg+): two columns — the menu on the left, Vita in a sticky
- * side column. Phone: Vita sits between the category bar and the list —
- * the stage sticks BELOW the category bar (top 196px = category bar
- * bottom ~190px, +6px margin; sm 204px = bar bottom ~198px, +6px) while
- * the list scrolls beneath it, and her panel (what she says, book
- * button, mini chat) scrolls away in flow.
- * Fix pass 11: the stage used to stick at top 76px (md: 192px) — 114px
- * ABOVE the category bar's bottom edge, so the bar (sticky, z-30)
- * painted over the stage's top ~66px and swallowed her whole head,
- * and on a notched phone the stage also slid 43px under the fixed
- * header (bottom 72px + ~47px safe-area inset; header z-50, stage
- * z-20). The bar top is 124px (sm: 132px) and ~66px tall (py-3 +
- * ~42px buttons), so the stage must stick at >= ~190px / ~198px.
- * Only one layout mounts at a time (matchMedia), so the VRM exists
- * exactly once.
+ * Desktop (lg+): two columns — the menu on the left, the guide panel
+ * in a sticky side column. Phone: the guide panel sits between the
+ * category bar and the list, in flow above it.
+ * Fix pass 9: initialise from the module-level preserved category
+ * (MenuSection's lastMenuCategory), NOT from MENU[0]. MenuTab
+ * unmounts on every tab switch, so MENU[0] re-initialised the
+ * lifted category to 'chaudes' on each return; MenuSection then
+ * reported its preserved category in its mount effect and the
+ * 'chaudes' -> preserved change fired useMenuGuide's category
+ * effect past its first-mount guard — a read + pending big-book open
+ * on every return. With both initialised from the same module value
+ * the mount report is a same-value no-op, so no effect fires. A
+ * manual tap still changes the value and reads; the first mount
+ * still greets without reading (guard untouched).
  */
 function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOpenBook: (catId: string) => void }) {
   /**
@@ -285,15 +266,15 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
    * unmounts on every tab switch, so MENU[0] re-initialised the
    * lifted category to 'chaudes' on each return; MenuSection then
    * reported its preserved category in its mount effect and the
-   * 'chaudes' -> preserved change fired useVitaGuide's category
-   * effect past its first-mount guard — a walk + read + pending
-   * big-book open on every return. With both initialised from the
-   * same module value the mount report is a same-value no-op, so no
-   * effect fires. A manual tap still changes the value and walks;
-   * the first mount still greets without walking (guard untouched).
+   * 'chaudes' -> preserved change fired useMenuGuide's category
+   * effect past its first-mount guard — a read + pending big-book open
+   * on every return. With both initialised from the same module value
+   * the mount report is a same-value no-op, so no effect fires. A
+   * manual tap still changes the value and reads; the first mount
+   * still greets without reading (guard untouched).
    */
   const [categoryId, setCategoryId] = useState(() => getLastMenuCategory())
-  const [itemEvent, setItemEvent] = useState<MenuVitaItemEvent | null>(null)
+  const [itemEvent, setItemEvent] = useState<MenuGuideItemEvent | null>(null)
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -305,7 +286,7 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  const guide = useVitaGuide({ categoryId, itemEvent, onOpenBook })
+  const guide = useMenuGuide({ categoryId, itemEvent, onOpenBook })
   const handleActiveChange = useCallback((id: string) => setCategoryId(id), [])
   const handleItemAdd = useCallback((line: OrderLine) => {
     setItemEvent({ ...line, nonce: Date.now() })
@@ -316,13 +297,10 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
       <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[1fr_380px]">
         <MenuSection onAdd={onAdd} onActiveChange={handleActiveChange} onItemAdd={handleItemAdd} />
         <aside className="min-w-0 pb-16 pr-4 pt-16 sm:pr-6 sm:pt-24 md:pt-36">
-          {/* Fix pass 11: sticky top 136, not 132 — the tab bar bottom
-              sits at exactly 132 (top 72 + 60 tall), so 132 was flush
-              with zero margin; 136 leaves 4 px so her head can never
-              slide under the tab bar / fixed header (z-50, header
-              bottom 76). */}
+          {/* Sticky top 136 — 4 px below the tab-bar bottom (132), so
+              the panel can never slide under the tab bar / header. */}
           <div className="sticky top-[136px]">
-            <MenuVita guide={guide} />
+            <MenuGuide guide={guide} />
           </div>
         </aside>
       </div>
@@ -334,36 +312,24 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
       onAdd={onAdd}
       onActiveChange={handleActiveChange}
       onItemAdd={handleItemAdd}
-      betweenBarAndList={
-        <>
-          <div className="sticky top-[196px] z-20 mt-4 sm:top-[204px]">
-            <MenuVitaStage guide={guide} />
-          </div>
-          <MenuVitaPanel guide={guide} />
-        </>
-      }
+      betweenBarAndList={<MenuGuidePanel guide={guide} />}
     />
   )
 }
 
 /**
- * Livre tab: Vita WITH the big book — Minir's order, fix pass 3.
- * The avatar used to live only in the Menu tab while the Livre tab
- * showed the book alone; now she stands beside it and reads it.
+ * Livre tab: the big book + Nekomi's reading voice (no model since
+ * the VRM was removed). The reading is a voice + panel affair: the
+ * guide reads the category aloud and the "Lecture en cours…" panel
+ * shows what she is reading, with a stop control.
  *
- * Desktop (lg+): Vita in a sticky side column, the book beside her.
- * Phone: her compact stage above the book. Only the active tab
- * mounts, so this VrmModel never coexists with the Menu tab's — but
- * it DOES coexist with MenuBook's own renderer inside this tab (two
- * WebGL contexts; the VRM itself is the shared module-level cache
- * from vrmCache.ts, so no re-download on tab switches).
- *
- * She reads the category the big book lands on: the initial target
- * (menu Vita's "Feuilleter le livre") starts a reading at once, and
- * every later flip landing fires onBookCategory and restarts it. She
- * reads silently here (no speech — the Menu tab already speaks the
- * category); the hand book opens and its pages turn as she reads.
- * No walk: she stands beside the book.
+ * The guide reads the category the big book lands on: the initial
+ * target (menu guide's "Feuilleter le livre") starts a reading at
+ * once, and every later flip landing fires onBookCategory and
+ * restarts it. A reading ends on a timer (estimateSeconds) — the old
+ * end came from the VRM's onReadingEnd; the timer is its replacement,
+ * nonce-guarded so a stale timer cannot clear a newer reading.
+ * No walk: she reads from beside the book, in voice only.
  */
 function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: number } | null }) {
   const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() =>
@@ -382,6 +348,21 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
   const readingRef = useRef(reading)
   readingRef.current = reading
   const stoppedNonceRef = useRef<number | null>(null)
+  /** The timer that ends the current reading (replaces the VRM's
+      onReadingEnd) — nonce-guarded, like the menu guide's timer. */
+  const readingTimerRef = useRef<number | null>(null)
+  const clearReadingTimer = () => {
+    if (readingTimerRef.current !== null) {
+      window.clearTimeout(readingTimerRef.current)
+      readingTimerRef.current = null
+    }
+  }
+  const armReadingTimer = useCallback((nonce: number, seconds: number) => {
+    clearReadingTimer()
+    readingTimerRef.current = window.setTimeout(() => {
+      if (readingRef.current?.nonce === nonce) setReading(null)
+    }, seconds * 1000)
+  }, [])
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -396,55 +377,50 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
   // Follow the big book: every flip landing on a category restarts her
   // reading on it (the scroll-open to the first category included).
   useEffect(
-    () => onBookCategory((catId) => setReading({ categoryId: catId, nonce: Date.now() })),
-    [],
+    () =>
+      onBookCategory((catId) => {
+        const nonce = Date.now()
+        setReading({ categoryId: catId, nonce })
+        armReadingTimer(nonce, 12)
+      }),
+    [armReadingTimer],
   )
 
-  // "Demander à la barmaid" (Livre tab): she is already beside the
-  // book and it is already open on the page, so the button reads this
-  // page aloud — the same brain path as the Menu tab's button
-  // (askBrain → LLM when live, offline brain otherwise). The reading
-  // starts at once on the hand book and is re-timed on the spoken reply.
-  const askBartender = useCallback((catId: string) => {
-    const cat = MENU.find((c) => c.id === catId)
-    if (!cat) return
-    const nonce = Date.now()
-    setReading({ categoryId: catId, nonce, seconds: 12 })
-    const request = `Lis-moi la page ${cat.label} à voix haute`
-    void askBrain(request).then(({ reply }) => {
-      // Fix pass 8: only re-time (and speak) the reading THIS press
-      // started — see the stoppedNonceRef/readingRef note above.
-      if (stoppedNonceRef.current === nonce) return
-      const cur = readingRef.current
-      if (cur !== null && cur.nonce !== nonce) return
-      setReading({ categoryId: catId, nonce: Date.now(), seconds: estimateSeconds(shortenForSpeech(reply.text)) })
-      if (isSpeechSupported()) speak(reply.text)
-    })
+  // The initial target (menu guide's "Feuilleter le livre") starts a
+  // reading at once — arm its timer on mount.
+  useEffect(() => {
+    if (reading) armReadingTimer(reading.nonce, reading.seconds ?? 12)
+    return () => clearReadingTimer()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const vita = (
-    <Suspense
-      fallback={
-        <div className="flex h-[260px] items-center justify-center rounded-[1.75rem] border border-line bg-ink-2 sm:h-[300px] lg:h-[480px]">
-          <span className="live-dot inline-block h-2.5 w-2.5 rounded-full bg-amber" aria-label="Vita se prépare" />
-        </div>
-      }
-    >
-      <VrmModel
-        compact
-        withBook
-        readingTick={reading?.nonce ?? 0}
-        readingCategory={reading?.categoryId}
-        readingSeconds={reading?.seconds ?? 12}
-        // Fix pass 8: the VRM's reading end clears the banner. The
-        // old code passed no onReadingEnd here, so the "Lecture en
-        // cours…" panel — React state, not VRM state — stayed up
-        // forever after the book had already vanished (~13 s into
-        // the default 12 s silent reading). A stop press does not
-        // come through here (cancel suppresses the end callback).
-        onReadingEnd={() => setReading(null)}
-      />
-    </Suspense>
+  // "Demander à la barmaid" (Livre tab): the book is already open on
+  // the page, so the button reads this page aloud — the same brain
+  // path as the Menu tab's button (askBrain → LLM when live, offline
+  // brain otherwise). The reading starts at once and is re-timed on
+  // the spoken reply.
+  const askBartender = useCallback(
+    (catId: string) => {
+      const cat = MENU.find((c) => c.id === catId)
+      if (!cat) return
+      const nonce = Date.now()
+      setReading({ categoryId: catId, nonce, seconds: 12 })
+      armReadingTimer(nonce, 12)
+      const request = `Lis-moi la page ${cat.label} à voix haute`
+      void askBrain(request).then(({ reply }) => {
+        // Fix pass 8: only re-time (and speak) the reading THIS press
+        // started — see the stoppedNonceRef/readingRef note above.
+        if (stoppedNonceRef.current === nonce) return
+        const cur = readingRef.current
+        if (cur !== null && cur.nonce !== nonce) return
+        const nextNonce = Date.now()
+        const seconds = estimateSeconds(shortenForSpeech(reply.text))
+        setReading({ categoryId: catId, nonce: nextNonce, seconds })
+        armReadingTimer(nextNonce, seconds)
+        if (isSpeechSupported()) speak(reply.text)
+      })
+    },
+    [armReadingTimer],
   )
 
   // Fix pass 5: the Livre tab had no feedback surface — a tap on
@@ -468,10 +444,9 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
         onClick={() => {
           // Fix pass 8: remember which reading was stopped, so its
           // late brain reply cannot resurrect it (see askBartender).
-          // setReading(null) drops readingTick to 0 and the VRM
-          // cancels the pose at once — the old code never told the
-          // VRM, so the arm stayed raised until the estimate ran out.
+          // Clear the timer too, or it would clear a newer reading.
           stoppedNonceRef.current = reading?.nonce ?? null
+          clearReadingTimer()
           stopSpeaking()
           setReading(null)
         }}
@@ -486,13 +461,9 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
     return (
       <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[380px_1fr]">
         <aside className="min-w-0 pb-16 pl-4 pt-16 sm:pl-6 sm:pt-24 md:pt-36">
-          {/* Fix pass 11: sticky top 136, not 132 — same 4 px safety
-              margin below the tab-bar bottom (132) as the Menu tab,
-              so her head can never slide under the tab bar / header. */}
-          <div className="sticky top-[136px]">
-            {vita}
-            {readingPanel}
-          </div>
+          {/* Sticky top 136 — 4 px below the tab-bar bottom (132), same
+              safety margin as the Menu tab. */}
+          <div className="sticky top-[136px]">{readingPanel}</div>
         </aside>
         <div className="min-w-0">
           <MenuBook goToCategory={goToCategory} onAskBartender={askBartender} />
@@ -503,10 +474,7 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
 
   return (
     <div className="mx-auto max-w-[1400px]">
-      <div className="px-4 pt-10 sm:px-6">
-        {vita}
-        {readingPanel}
-      </div>
+      <div className="px-4 pt-10 sm:px-6">{readingPanel}</div>
       <MenuBook goToCategory={goToCategory} onAskBartender={askBartender} />
     </div>
   )
@@ -529,19 +497,17 @@ export default function App() {
   useEffect(() => startScroll(reducedMotion), [reducedMotion])
   useReveal()
 
-  // Heavy-model prewarm (fix pass 3, defects 4 + 6): after first paint,
-  // on idle, start the 14 MB VRM + the Nekomi Live2D bytes + their JS
-  // chunks, so opening Menu / Agent later is a cache hit instead of a
-  // 20–35 s wait. Skipped on save-data / 2G — hovering the tab still
-  // warms on demand (see prewarmForTab on the tab buttons).
+  // Heavy-model prewarm (fix pass 3, defect 6): after first paint,
+  // on idle, start the Nekomi Live2D bytes + its JS chunk, so opening
+  // the Agent tab later is a cache hit instead of a 20–35 s wait.
+  // Skipped on save-data / 2G — hovering the tab still warms on
+  // demand (see prewarmForTab on the tab buttons).
   useEffect(() => {
     if (shouldDeferHeavyPreload()) return
     runWhenIdle(() => {
-      prewarmVrm()
       prewarmLive2d()
-      // Warm the component chunks too (VrmModel + Live2DModel are
-      // React.lazy — otherwise the first tab open pays the JS fetch).
-      void import('./components/VrmModel').catch(() => undefined)
+      // Warm the component chunk too (Live2DModel is React.lazy —
+      // otherwise the first tab open pays the JS fetch).
       void import('./components/Live2DModel').catch(() => undefined)
     })
   }, [])
@@ -558,7 +524,7 @@ export default function App() {
   const removeFromOrder = (index: number) => setOrder((prev) => prev.filter((_, i) => i !== index))
   const clearOrder = () => setOrder([])
 
-  // The menu Vita's "Feuilleter le livre": switch to the Book tab and
+  // The menu guide's "Feuilleter le livre": switch to the Book tab and
   // flip the book to that category (MenuBook reacts to the nonce).
   const openBook = useCallback((catId: string) => {
     setBookTarget({ catId, nonce: Date.now() })

@@ -22,8 +22,8 @@ let lastMenuCategory = MENU[0].id
  * initialise to MENU[0] ('chaudes') while MenuSection initialised
  * from here, so on every return MenuSection's mount effect reported
  * the preserved category and the change 'chaudes' -> preserved fired
- * useVitaGuide's category effect past its first-mount guard — a
- * spurious walk + read on every tab return.
+ * useMenuGuide's category effect past its first-mount guard — a
+ * spurious read on every tab return.
  */
 export function getLastMenuCategory(): string {
   return lastMenuCategory
@@ -43,19 +43,17 @@ export default function MenuSection({
 }: {
   onAdd: (line: OrderLine) => void
   /**
-   * The menu Vita (MenuVita) listens: a category change makes her walk
-   * over and read the category aloud; an item tap makes her walk and
-   * speak that item. The tab shell also passes barTopClass so the
-   * sticky category bar sits under the tab bar (and, on a phone, under
-   * the sticky Vita stage above it).
+   * The menu guide (MenuGuide) listens: a category change makes her
+   * read the category aloud; an item tap makes her speak that item.
+   * The tab shell also passes barTopClass so the sticky category bar
+   * sits under the tab bar.
    */
   onActiveChange?: (catId: string) => void
   onItemAdd?: (line: OrderLine) => void
   barTopClass?: string
   /**
    * Node rendered between the sticky category bar and the list — the
-   * tab shell puts the phone Vita stage + panel here, so the stage can
-   * stick under the category bar while the list scrolls beneath it.
+   * tab shell puts the phone guide panel here.
    */
   betweenBarAndList?: ReactNode
 }) {
@@ -70,7 +68,7 @@ export default function MenuSection({
   const safetyRef = useRef<number | null>(null)
 
   // Report the active category outward (initial + every change) so the
-  // Vita can react without owning the menu state.
+  // guide can react without owning the menu state.
   useEffect(() => {
     onActiveChange?.(active)
   }, [active, onActiveChange])

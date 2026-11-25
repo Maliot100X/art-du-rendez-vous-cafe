@@ -66,10 +66,10 @@ function findItems(message: string) {
 
 /**
  * Fix pass 11: category stems for recommendations and category reads
- * (same approach as MenuVita.tsx CATEGORY_KEYWORDS, defined locally
+ * (same approach as MenuGuide.tsx CATEGORY_KEYWORDS, defined locally
  * here because agentBrain must not import a component). norm() strips
  * accents, so 'bière' -> 'biere' and the 'biere' stem matches. Order
- * mirrors MenuVita: a named drink (findItems) always wins over stems.
+ * mirrors MenuGuide: a named drink (findItems) always wins over stems.
  */
 const CATEGORY_STEMS: { id: string; words: string[] }[] = [
   { id: 'chaudes', words: ['cafe', 'the', 'expresso', 'cappuccino', 'chocolat', 'latte', 'irish', 'deca', 'soupe', 'supe', 'chaud'] },
