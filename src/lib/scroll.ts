@@ -106,12 +106,16 @@ export function scrollToHash(hash: string) {
     go();
     // Re-assert the landing once, shortly after the glide should have
     // finished. Bounded: a single correction, only when the visitor has
-    // not taken over the scroll themselves.
+    // not taken over the scroll themselves. Threshold 40px: font swaps
+    // above the target grow the hero + menu by ~69px during a 1.6s
+    // glide, and a 68px drift used to slip under the old 80px bar —
+    // leaving the previous section's tail (e.g. Visit's "ÉTAPE")
+    // peeking under the nav after landing on the agent.
     const glideEndY = el.getBoundingClientRect().top + window.scrollY - SCROLL_OFFSET;
     window.setTimeout(() => {
       const drift = el.getBoundingClientRect().top - SCROLL_OFFSET;
       const userTookOver = Math.abs(window.scrollY - glideEndY) > 120;
-      if (Math.abs(drift) > 80 && !userTookOver) {
+      if (Math.abs(drift) > 40 && !userTookOver) {
         if (lenis) lenis.scrollTo(el, { duration: 0.7 });
         else window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - SCROLL_OFFSET });
       }
