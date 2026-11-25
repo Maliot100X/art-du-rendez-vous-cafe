@@ -6,6 +6,7 @@ import { HERO } from '../content'
 import { onFrame, scrollToHash, useReducedMotion } from '../lib/scroll'
 import { clamp } from '../lib/math'
 import { gsap, GSAP_EASE_SILK } from '../lib/motion'
+import PullPhoto from './PullPhoto'
 
 /** Dust motes drifting over the hero — the selene dust veil, as real 3D. */
 function Dust() {
@@ -79,7 +80,7 @@ function DustScene() {
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
+  const photoWrapRef = useRef<HTMLDivElement>(null)
   const titleRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const introRef = useRef<HTMLDivElement>(null)
@@ -116,19 +117,21 @@ export default function Hero() {
   }, [reducedMotion])
 
   // Scroll-driven frame parallax — direct DOM writes, never React state.
+  // The transform now lives on the photo wrapper (shader canvas or static
+  // fallback alike); PullPhoto corrects pointer coords for the scale.
   useEffect(() => {
     return onFrame(() => {
       const section = sectionRef.current
       const frame = frameRef.current
-      const img = imgRef.current
+      const photo = photoWrapRef.current
       const title = titleRef.current
       const hint = hintRef.current
-      if (!section || !frame || !img || !title || !hint) return
+      if (!section || !frame || !photo || !title || !hint) return
       const rect = section.getBoundingClientRect()
       const vh = window.innerHeight
       if (rect.bottom < 0 || rect.top > vh) return
       const p = clamp(-rect.top / Math.max(1, rect.height - vh))
-      img.style.transform = `scale(${1.12 - p * 0.08}) translateY(${p * 34}px)`
+      photo.style.transform = `scale(${1.12 - p * 0.08}) translateY(${p * 34}px)`
       title.style.transform = `translateY(${p * -56}px)`
       title.style.opacity = String(1 - p * 0.55)
       hint.style.opacity = String(1 - clamp(p * 6))
@@ -179,13 +182,12 @@ export default function Hero() {
           ref={frameRef}
           className="relative mt-10 aspect-[16/9] min-h-[380px] w-full overflow-hidden rounded-[2rem] shadow-2xl shadow-black/60 sm:mt-12"
         >
-          <img
-            ref={imgRef}
-            src={HERO.image}
-            alt={HERO.imageAlt}
-            fetchPriority="high"
-            className="absolute inset-0 h-full w-full object-cover will-change-transform"
-          />
+          <div
+            ref={photoWrapRef}
+            className="absolute inset-0 will-change-transform"
+          >
+            <PullPhoto src={HERO.pullImage} alt={HERO.pullImageAlt} />
+          </div>
           <div
             className="absolute inset-0"
             aria-hidden="true"

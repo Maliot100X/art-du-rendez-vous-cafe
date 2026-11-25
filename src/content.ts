@@ -45,6 +45,11 @@ export const HERO = {
   chips: ['Café dès 08:00', 'Apéritifs dès 18:00', 'Vendredi — dimanche : 24h/24'],
   image: '/images/exterior.jpg',
   imageAlt: 'Le café à la tombée du jour, briques, auvents rouges et néons',
+  // The pullable hero photo: the bar, not a face. The shader canvas shows
+  // this image; the static <img> fallback shows the same one.
+  pullImage: '/images/bar.jpg',
+  pullImageAlt: 'Le bar en bois la nuit, verres et chandelles',
+  pullHint: 'Tirez la photo',
 } as const;
 
 export interface MenuItem {
