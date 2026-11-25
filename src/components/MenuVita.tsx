@@ -3,6 +3,7 @@ import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide
 import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
+import { getWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
 
 const VrmModel = lazy(() => import('./VrmModel'))
 
@@ -312,6 +313,19 @@ export function MenuVitaStage({ guide }: { guide: VitaGuide }) {
 
 /** What she says + controls — in flow on phones, under the stage on desktop. */
 export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
+  // Walk readout (fix pass 6): live walk state as plain DOM text —
+  // the cloud-browser check cannot open devtools, so the walk is
+  // observable here ("Marche… pas 2/4 · x +0.14" while walking,
+  // "Arrivée · x +0.14" once she has arrived — the last state stays
+  // readable at rest, so the check can read it after the fact too).
+  const [walk, setWalk] = useState<WalkStatus>(getWalkStatus())
+  useEffect(() => subscribeWalkStatus(setWalk), [])
+  const walkX = `${walk.x >= 0 ? '+' : ''}${walk.x.toFixed(2)}`
+  const walkLine = walk.walking
+    ? `Marche… pas ${walk.step}/${walk.steps} · x ${walkX}`
+    : walk.tick > 0
+      ? `Arrivée · x ${walkX}`
+      : 'Vita est prête — choisissez une catégorie.'
   return (
     <div className="mt-3 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
@@ -363,6 +377,9 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
             <BookOpen size={15} /> Feuilleter le livre
           </button>
         </div>
+        <p aria-live="polite" className="mt-2 font-mono text-[11px] text-mist/80">
+          {walkLine}
+        </p>
         <form className="mt-3 flex items-center gap-2" onSubmit={guide.ask}>
           <label htmlFor="menu-vita-input" className="sr-only">
             Demander à Vita

@@ -7,6 +7,7 @@ import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
 import { loadVrm } from '../lib/vrmCache'
+import { setWalkStatus } from '../lib/walkStatus'
 
 /**
  * Vita — VRM 0.x full-body model (CC0, VRoid sample), rendered with
@@ -80,12 +81,16 @@ import { loadVrm } from '../lib/vrmCache'
  */
 
 const FOV = 30
-/** One walk: four sidesteps of 0.55 s, and a real lateral traverse —
+/** One walk: four sidesteps of 0.8 s, and a real lateral traverse —
     she walks from one side of the stage to the other and STAYS there
     (alternating sides each trigger). The legs are solved from the
     planted feet (fbtpods gait — see the walk block), so the walk is
-    visible in the legs while it happens AND in her new position after. */
-const WALK_DURATION = 2.2
+    visible in the legs while it happens AND in her new position after.
+    Fix pass 6: 0.55 s steps were too fast to catch in a still frame
+    (peak lift ~100 ms) and the peak foot lift was only 4.5 cm
+    (measured — scripts/measure-leg-axes.mjs) — 0.8 s steps with a
+    held peak put the bent-knee pose on screen for ~1.3 s per walk. */
+const WALK_DURATION = 3.2
 /**
  * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
  * old symmetric ±0.32 m walk pushed the hand book out of the 0.72 m
@@ -122,13 +127,51 @@ const WALK_RIGHT = 0.14
  */
 const HIP_HALF = 0.089
 const LEG_LEN = 0.841
-const STEP_DURATION = 0.55
+const STEP_DURATION = 0.8
 const STEP_COUNT = 4
-const KNEE_SWING = 0.6
-const THIGH_LIFT = 0.25
+/**
+ * Fix pass 6, measured — scripts/measure-leg-axes.mjs, combined
+ * peak-step pose (upperLeg x=-lift, z=+splay; lowerLeg x=+knee):
+ * OLD (lift 0.25, knee 0.60, z 0.13) lifted the stepping foot 0.045 m
+ * and moved it 0.093 m sideways, with the shin swinging mostly in
+ * depth (foot z -0.24 m at knee-only 0.6) — from the straight-on
+ * camera that reads as a ~6 px foreshortening for ~100 ms, i.e.
+ * nothing. NEW (lift 0.35, knee 0.80, z 0.13 solved + 0.15 splay):
+ * foot lift 0.088 m, sideways 0.182 m, knee +0.125 m toward the
+ * camera, front-projected shin length 66% of rest — a bent knee and
+ * a lifted foot a still frame can actually show. rotation.x on the
+ * leg bones is a genuine hinge bend (NOT the elbow's twist error —
+ * the leg nodes keep identity rest quats, local X 91.4 deg from the
+ * shin, hinge local ≈ -X), so the knee stays on rotation.x.
+ */
+const KNEE_SWING = 0.8
+const THIGH_LIFT = 0.35
+/** Extra sideways swing of the STEPPING thigh at peak lift, in the
+    travel direction (rotation.z moves both feet toward +X, measured
+    test F — so the sign is the travel dir). The stance foot is never
+    touched, so the planted-foot discipline holds; the extra swing
+    returns to the solved angle as the lift envelope falls to 0. */
+const SWING_SPLAY = 0.15
 const HIP_BOB = 0.02
 const HIP_SWAY = 0.05
 const WALK_TURN = 0.3
+
+/**
+ * Step-lift envelope with a HELD peak (fix pass 6): the bent-knee
+ * mid-step pose must be the DOMINANT pose of the walk, not a 100 ms
+ * flash. Rises over the first 30% of the step, holds at full lift
+ * until 70%, eases down — at 0.8 s/step that is ~0.32 s at full bend
+ * per step, ~1.3 s per walk.
+ */
+function stepLift(u: number): number {
+  if (u < 0.3) {
+    const s = u / 0.3
+    return s * s * (3 - 2 * s)
+  }
+  if (u <= 0.7) return 1
+  const s = (u - 0.7) / 0.3
+  return 1 - s * s * (3 - 2 * s)
+}
 
 type Framing = 'full' | 'half' | 'face'
 
@@ -292,6 +335,13 @@ export default function VrmModel({
   const threeRef = useRef<ThreeStage | null>(null)
   const framingRef = useRef<Framing>(compact ? 'half' : 'full')
   const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0, step: -1, footL: -HIP_HALF, footR: HIP_HALF })
+  /** True while a walk is running — layout() pulls the camera back to
+      the full-body walk window for its duration (see layout). */
+  const walkActiveRef = useRef(false)
+  /** Live walkTick for the render loop (its closure only sees the
+      mount-time prop — the loop reports the tick to the walk store). */
+  const walkTickRef = useRef(walkTick)
+  walkTickRef.current = walkTick
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [progress, setProgress] = useState(0)
   const [framing, setFraming] = useState<Framing>(compact ? 'half' : 'full')
@@ -308,43 +358,6 @@ export default function VrmModel({
   )
 
   framingRef.current = framing
-
-  /* ---- Walk trigger: each increment starts one traverse. ----
-     Fix pass 5: the old `&& !reducedMotion` gate silently killed
-     the walk whenever the browser/OS reported
-     prefers-reduced-motion, with no log — and the walk IS the
-     feature. Reduced motion is already honoured where it matters
-     (sway, reading-blend snap); the gate must not swallow the walk. */
-  useEffect(() => {
-    if (walkTick > 0) {
-      const w = walkRef.current
-      w.fromX = w.toX
-      // Alternate ends: at/near the right end go left, otherwise right.
-      w.toX = w.toX >= (WALK_LEFT + WALK_RIGHT) / 2 ? WALK_LEFT : WALK_RIGHT
-      w.t = 0
-      // Planted feet start under the hips (fbtpods body.py: hip joints
-      // 0.052 * height apart) — the gait solves the legs from these.
-      w.step = -1
-      w.footL = w.fromX - HIP_HALF
-      w.footR = w.fromX + HIP_HALF
-      // Walk debug hook: record the trigger so the cloud-browser
-      // check reads state instead of guessing. layout()'s snapshot
-      // is mount-time only (its walkTick is the mount value), so the
-      // tick is refreshed here — live walkTick — and t/x per frame
-      // in the render loop below.
-      const dbg = window.__vrmDebug
-      if (dbg) {
-        dbg.walk = {
-          tick: walkTick,
-          t: walkRef.current.t,
-          x: threeRef.current?.group.position.x ?? 0,
-          rig: !!threeRef.current?.walkRig,
-          reducedMotion,
-          hidden: document.hidden,
-        }
-      }
-    }
-  }, [walkTick, reducedMotion])
 
   /* ---- Reading state machine (hand book). Time base is
       performance.now so beginReading can run from any effect, even
@@ -425,19 +438,33 @@ export default function VrmModel({
     let targetY: number
     let framedH: number
     let framedW: number
-    if (framingRef.current === 'face') {
+    if (walkActiveRef.current) {
+      // Walk window (fix pass 6): while she walks, frame the WHOLE
+      // body — same numbers as the 'full' branch. The compact 'half'
+      // window (y 0.73–1.71) crops the knees (0.57 m) and the feet
+      // (0.14 m) entirely (measured — scripts/measure-leg-axes.mjs),
+      // so on the Menu/Livre tabs no knee bend or foot lift could
+      // ever be seen, whatever the walk constants were. The camera
+      // returns to the selected framing when the walk ends (the loop
+      // clears walkActiveRef and re-runs layout).
+      targetY = centre.y
+      framedH = size.y * 1.03
+      framedW = size.x * 1.06
+    } else if (framingRef.current === 'face') {
       // Head + shoulders: hair top (box.max.y) down to the chest.
       // Window 0.62 m tall, centred 0.10 m below the eyes.
       targetY = eyePos.y - 0.1
       framedH = 0.62
       framedW = 0.55
     } else if (framingRef.current === 'half') {
-      // Head to knees: the face stays ~2x larger than full-body on a
-      // phone, and the legs (and the walk) stay in frame. Window is
-      // 0.98 m tall, centred 0.31 m below the eyes (y 0.73–1.71) — it
-      // holds the carried book at rest (0.77–0.96 m) and the open
-      // book while reading (centre 1.19 m, top 1.28 m, measured —
-      // scripts/sim-fix4-book.mjs), so neither clips an edge.
+      // Head to upper thighs: the face stays ~2x larger than
+      // full-body on a phone. Window is 0.98 m tall, centred 0.31 m
+      // below the eyes (y 0.73–1.71) — it holds the carried book at
+      // rest (0.77–0.96 m) and the open book while reading (centre
+      // 1.19 m, top 1.28 m, measured — scripts/sim-fix4-book.mjs),
+      // so neither clips an edge. It does NOT show the knees
+      // (0.57 m) or feet (0.14 m) — while she walks, layout() uses
+      // the walk window above instead, so the stepping IS visible.
       targetY = eyePos.y - 0.31
       framedH = 0.98
       framedW = 0.6
@@ -486,6 +513,56 @@ export default function VrmModel({
       },
     }
   }, [])
+
+  /* ---- Walk trigger: each increment starts one traverse. ----
+     Fix pass 5: the old `&& !reducedMotion` gate silently killed
+     the walk whenever the browser/OS reported
+     prefers-reduced-motion, with no log — and the walk IS the
+     feature. Reduced motion is already honoured where it matters
+     (sway, reading-blend snap); the gate must not swallow the walk.
+     Lives below layout() — it calls layout() to pull the camera back
+     to the walk window, and TS forbids the reference above layout's
+     declaration. */
+  useEffect(() => {
+    if (walkTick > 0) {
+      const w = walkRef.current
+      w.fromX = w.toX
+      // Alternate ends: at/near the right end go left, otherwise right.
+      w.toX = w.toX >= (WALK_LEFT + WALK_RIGHT) / 2 ? WALK_LEFT : WALK_RIGHT
+      w.t = 0
+      // Planted feet start under the hips (fbtpods body.py: hip joints
+      // 0.052 * height apart) — the gait solves the legs from these.
+      w.step = -1
+      w.footL = w.fromX - HIP_HALF
+      w.footR = w.fromX + HIP_HALF
+      // Fix pass 6: while she walks, the camera pulls back to the
+      // full-body walk window (see layout) — the compact 'half'
+      // window crops the knees and feet entirely, so the walk's legs
+      // could never be seen on the Menu/Livre tabs. The window
+      // returns to the selected framing when the walk ends (loop).
+      walkActiveRef.current = true
+      layout()
+      // Walk readout (MenuVita panel): report the trigger at once, so
+      // the panel reacts even before the render loop's first frame.
+      setWalkStatus({ walking: true, step: 1, steps: STEP_COUNT, x: w.fromX, tick: walkTick })
+      // Walk debug hook: record the trigger so the cloud-browser
+      // check reads state instead of guessing. layout()'s snapshot
+      // is mount-time only (its walkTick is the mount value), so the
+      // tick is refreshed here — live walkTick — and t/x per frame
+      // in the render loop below.
+      const dbg = window.__vrmDebug
+      if (dbg) {
+        dbg.walk = {
+          tick: walkTick,
+          t: walkRef.current.t,
+          x: threeRef.current?.group.position.x ?? 0,
+          rig: !!threeRef.current?.walkRig,
+          reducedMotion,
+          hidden: document.hidden,
+        }
+      }
+    }
+  }, [walkTick, reducedMotion, layout])
 
   /* ---- Reframe when the measured stage size or framing changes. ---- */
   useEffect(() => {
@@ -771,7 +848,7 @@ export default function VrmModel({
         // code swung the legs forward/back (rotation.x) while the body
         // travelled sideways, so the legs and the travel disagreed and
         // the walk read as a slide. Now she faces the camera and steps
-        // sideways to the other side of the stage (4 steps of 0.55 s):
+        // sideways to the other side of the stage (4 steps of 0.8 s):
         // each step one foot lifts (knee bends, thigh lifts forward)
         // and plants one step length ahead, while the stance foot NEVER
         // slides (skating_correction) — its thigh angle is solved from
@@ -784,6 +861,7 @@ export default function VrmModel({
         // visibly standing on the other side.
         const rig = three.walkRig
         let walkTurn = 0
+        let walkStep = 0
         if (rig) {
           const w = walkRef.current
           const wt = w.t
@@ -792,6 +870,7 @@ export default function VrmModel({
             const dir = w.toX >= w.fromX ? 1 : -1
             const stepLen = (w.toX - w.fromX) / 2
             const stepIdx = Math.min(STEP_COUNT - 1, Math.floor(wt / STEP_DURATION))
+            walkStep = stepIdx + 1
             const u = Math.min(1, (wt - stepIdx * STEP_DURATION) / STEP_DURATION)
             const leadLeft = dir < 0
             const steppingLeft = (stepIdx % 2 === 0) === leadLeft
@@ -807,7 +886,10 @@ export default function VrmModel({
             three.group.position.x = w.fromX + (w.toX - w.fromX) * smooth
             const hipX = three.group.position.x
             const env = Math.min(1, wt / 0.15) * Math.min(1, (WALK_DURATION - wt) / 0.25)
-            const lift = Math.sin(Math.PI * u)
+            // Held-peak lift (fix pass 6 — stepLift): the bent-knee
+            // pose holds for ~0.32 s per step instead of flashing
+            // past in ~100 ms, so a still frame can catch it.
+            const lift = stepLift(u)
             const setX = (node: THREE.Object3D, v: number) => {
               node.rotation.x = (rig.baseX.get(node) ?? 0) + v * env
             }
@@ -829,7 +911,13 @@ export default function VrmModel({
             const stanceAngle = clampA((stanceFootX - hipX) / LEG_LEN) - stanceRest
             const swingAngle = clampA((swingX - hipX) / LEG_LEN) - swingRest
             if (steppingLeft) {
-              setZ(rig.leftUpperLeg, swingAngle)
+              // Extra sideways swing at peak lift (fix pass 6 —
+              // SWING_SPLAY, in the travel direction): the stepping
+              // thigh angles visibly out sideways on top of its
+              // solved angle, so the step reads from the front camera
+              // instead of hiding in depth. Returns to the solved
+              // angle as lift falls to 0; the stance leg is untouched.
+              setZ(rig.leftUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
               setZ(rig.rightUpperLeg, stanceAngle)
               setX(rig.leftUpperLeg, -THIGH_LIFT * lift)
               setX(rig.leftLowerLeg, KNEE_SWING * lift)
@@ -837,7 +925,7 @@ export default function VrmModel({
               if (rig.leftFoot) rig.leftFoot.rotation.x = (rig.baseX.get(rig.leftFoot) ?? 0) - 0.35 * lift * env
               if (rig.rightFoot) rig.rightFoot.rotation.x = rig.baseX.get(rig.rightFoot) ?? 0
             } else {
-              setZ(rig.rightUpperLeg, swingAngle)
+              setZ(rig.rightUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
               setZ(rig.leftUpperLeg, stanceAngle)
               setX(rig.rightUpperLeg, -THIGH_LIFT * lift)
               setX(rig.rightLowerLeg, KNEE_SWING * lift)
@@ -870,8 +958,25 @@ export default function VrmModel({
             })
             three.group.position.y = 0
             three.group.position.x = w.toX
+            // Walk over: the camera returns to the selected framing
+            // (the walk window pulled back to full-body — see layout).
+            walkActiveRef.current = false
+            layout()
           }
         }
+
+        // Walk readout (MenuVita panel, fix pass 6): live walk state
+        // every frame — the cloud-browser check cannot open devtools,
+        // so the walk is observable as plain DOM text in the panel.
+        // The store only notifies on a displayed change, so the
+        // 60 fps writes do not re-render the panel 60 times a second.
+        setWalkStatus({
+          walking: walkRef.current.t < WALK_DURATION,
+          step: walkStep,
+          steps: STEP_COUNT,
+          x: three.group.position.x,
+          tick: walkTickRef.current,
+        })
 
         const speaking = bridge.isSpeaking()
         if (speaking && !wasSpeaking) nodT = 0
@@ -1136,6 +1241,18 @@ export default function VrmModel({
       cancelled = true
       cancelAnimationFrame(raf)
       const three = threeRef.current
+      // Walk readout (fix pass 6): the loop stops writing on unmount,
+      // so report the rest state here — otherwise a tab switch
+      // mid-walk would leave the panel stuck on a stale "Marche…"
+      // line. The last lateral position is kept, so the panel still
+      // reads "Arrivée · x …" after the fact.
+      setWalkStatus({
+        walking: false,
+        step: 0,
+        steps: STEP_COUNT,
+        x: three?.group.position.x ?? walkRef.current.toX,
+        tick: walkTickRef.current,
+      })
       threeRef.current = null
       if (three) {
         // Hand-book textures (canvas textures are not freed by the
