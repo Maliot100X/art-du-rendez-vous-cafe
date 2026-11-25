@@ -219,9 +219,35 @@ export default function MenuBook({
    * still substantially in view, so a deliberate scroll past the book
    * is never fought.
    */
+  // Fix pass 8: the visitor's own scroll input, for the clamp guard
+  // below. Wheel + touchmove are user input only — Lenis-driven or
+  // programmatic scrolls do not fire them.
+  const lastUserScrollRef = useRef(0);
+  useEffect(() => {
+    const mark = () => {
+      lastUserScrollRef.current = performance.now();
+    };
+    window.addEventListener('wheel', mark, { passive: true });
+    window.addEventListener('touchmove', mark, { passive: true });
+    return () => {
+      window.removeEventListener('wheel', mark);
+      window.removeEventListener('touchmove', mark);
+    };
+  }, []);
+
   const clampReadingPosition = useCallback(() => {
     const stage = stageRef.current;
     if (!stage) return;
+    // Fix pass 8: NEVER yank the scroll under a visitor who is
+    // scrolling. This clamp runs on EVERY flip-tween tick (0.55–
+    // 3.35 s), and it used to re-anchor unconditionally whenever the
+    // stage top sat above the header line — so a flip landing
+    // mid-reading pulled the page back to the book while the visitor
+    // was scrolling away from it. If the visitor moved the page
+    // within the last 1.2 s, their scroll wins and the clamp waits;
+    // it still holds the position when the page moves for any other
+    // reason (layout shift, tab switch, tween settle).
+    if (performance.now() - lastUserScrollRef.current < 1200) return;
     const clear = headerStackBottom();
     const s = stage.getBoundingClientRect();
     if (s.bottom < clear + 240) return;

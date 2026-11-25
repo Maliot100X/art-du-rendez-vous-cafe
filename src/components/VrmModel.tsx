@@ -6,7 +6,7 @@ import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
 import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
-import { loadVrm } from '../lib/vrmCache'
+import { loadVrm, type ReadRest } from '../lib/vrmCache'
 import { setWalkStatus } from '../lib/walkStatus'
 
 /**
@@ -253,6 +253,10 @@ declare global {
  * the pose is recomputed from these rest values every frame, never
  * accumulated with `rotation.x +=` (see the reading block: the old
  * `+=` spun the arm once the walk stopped re-setting it).
+ * Fix pass 8: the rest values are the cache's TRUE rest values
+ * (vrmCache.readRest, captured in prepare() while the bones were in
+ * the rest pose) — never read live on mount from the shared VRM,
+ * whose bones a previous mount may have left mid-reading.
  * - `upperBaseX`: the upper arm's rest-pose rotation.x.
  * - `lowerRestQuat`: the lower arm's rest-pose local quaternion.
  * - `hingeLocal`: the elbow hinge axis, fixed in the UPPER arm's
@@ -312,6 +316,11 @@ interface ThreeStage {
   /** The small book in her left hand (menu tab only). */
   handBook: HandBookRig | null
   readRig: ReadRig | null
+  /** Fix pass 8: the reading arm's TRUE rest values, from the cache
+      (vrmCache prepare() — captured while the bones were in the rest
+      pose). Used for the read rig AND to restore the shared bones on
+      unmount, so the next mount never inherits a posed arm. */
+  readRest: ReadRest | null
 }
 
 export default function VrmModel({
@@ -400,6 +409,14 @@ export default function VrmModel({
     quietSince: number
     swapped: boolean
     ended: boolean
+    /**
+     * Fix pass 8: true once the voice has actually been heard during
+     * this reading. The end condition needs it — a reading that never
+     * speaks (Livre tab: silent by design; muted devices: speak() is
+     * a no-op) must end on its estimate, not on "quiet for 1 s", or
+     * it ends at seconds+1 while the UI still shows it reading.
+     */
+    heardSpeech: boolean
   }
   const readingRef = useRef<ReadingState>({
     active: false,
@@ -412,6 +429,7 @@ export default function VrmModel({
     quietSince: -1,
     swapped: false,
     ended: true,
+    heardSpeech: false,
   })
   const readingBlendRef = useRef(0)
   const pendingReadingRef = useRef<{ categoryId: string; seconds: number } | null>(null)
@@ -437,6 +455,7 @@ export default function VrmModel({
     r.quietSince = -1
     r.swapped = false
     r.ended = false
+    r.heardSpeech = false
     const three = threeRef.current
     if (three?.handBook) {
       three.handBook.setSpreadsForCategory(categoryId)
@@ -445,10 +464,48 @@ export default function VrmModel({
     }
   }, [])
 
-  /* ---- Reading trigger: each increment starts one read. ---- */
+  /**
+   * Fix pass 8 — cancel a reading outright (the "Couper la voix"
+   * stop): the parent clears its reading state, which drops
+   * readingTick to 0, and this runs. The old code had NO path from
+   * the stop button to this state machine at all — the effect below
+   * only acted on tick > 0 — so the VRM kept reading (arm raised,
+   * book open) until its own estimate timer ran out, up to ~30 s
+   * after the visitor pressed stop, and a late brain reply could
+   * re-arm it afterwards. Cancelling forces the arm to the arms-down
+   * idle pose at once (blend 0 + the true rest pose written to the
+   * rig now), it never reports an end (a stop must not open the big
+   * book), and it kills a request still waiting for the model to
+   * load, so init() cannot start it after the stop. A natural end
+   * never comes through here — the loop already set active false —
+   * so this never snaps an arm that was easing down on its own.
+   */
+  const cancelReading = useCallback(() => {
+    pendingReadingRef.current = null
+    const r = readingRef.current
+    if (!r.active) return
+    r.active = false
+    r.ended = true
+    r.spread = 0
+    r.flipT = Infinity
+    r.swapped = false
+    readingBlendRef.current = 0
+    const three = threeRef.current
+    if (three?.readRig && three?.readRest) {
+      three.readRig.leftUpperArm.rotation.x = three.readRest.upperBaseX
+      three.readRig.leftUpperArm.rotation.z = three.readRest.upperBaseZ
+      three.readRig.leftLowerArm.quaternion.copy(three.readRest.lowerRestQuat)
+    }
+  }, [])
+
+  /* ---- Reading trigger: each increment starts one read; dropping
+      the tick back to 0 (parent cleared its reading — stop button,
+      mute, or a natural end the parent already handled) cancels
+      the VRM's reading outright — see cancelReading. ---- */
   useEffect(() => {
     if (readingTick > 0 && readingCategory) beginReading(readingCategory, readingSeconds)
-  }, [readingTick, readingCategory, readingSeconds, beginReading])
+    else if (readingTick === 0) cancelReading()
+  }, [readingTick, readingCategory, readingSeconds, beginReading, cancelReading])
 
   /* ---- Framing: measured box + stage size -> camera. ---- */
   const layout = useCallback(() => {
@@ -695,6 +752,7 @@ export default function VrmModel({
         faceFrontQuat,
         chestBaseRotationX,
         headBaseRotationX,
+        readRest,
       } = cached
 
       const group = new THREE.Group()
@@ -795,26 +853,21 @@ export default function VrmModel({
           const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm')
           const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm')
           if (leftUpperArm && leftLowerArm) {
-            // Absolute-pose rest values (see ReadRig): the upper arm's
-            // rest rotation.x, the lower arm's rest local quaternion,
-            // and the elbow hinge axis in the upper arm's frame.
-            group.updateMatrixWorld(true)
-            const shoulder = leftUpperArm.getWorldPosition(new THREE.Vector3())
-            const elbow = leftLowerArm.getWorldPosition(new THREE.Vector3())
-            const armDir = elbow.sub(shoulder).normalize()
-            const hingeWorld = new THREE.Vector3()
-              .crossVectors(armDir, new THREE.Vector3(0, 0, 1))
-            if (hingeWorld.lengthSq() < 1e-6) hingeWorld.set(0, 1, 0)
-            hingeWorld.normalize()
-            const upperWorldQuat = leftUpperArm.getWorldQuaternion(new THREE.Quaternion())
-            const hingeLocal = hingeWorld.clone().applyQuaternion(upperWorldQuat.clone().invert())
+            // Fix pass 8: the absolute-pose rest values come from the
+            // CACHE (cached.readRest — captured in prepare() while the
+            // bones were in the rest pose), NEVER from a live read
+            // here. The old live read ran on a shared VRM whose bones
+            // a previous mount may have left mid-reading, so the
+            // "rest" base was the raised arm and the absolute pose
+            // compounded on top of it — hand at head height, to the
+            // side, varying run to run with the switch timing.
             readRig = {
               leftUpperArm,
               leftLowerArm,
-              upperBaseX: leftUpperArm.rotation.x,
-              upperBaseZ: leftUpperArm.rotation.z,
-              lowerRestQuat: leftLowerArm.quaternion.clone(),
-              hingeLocal,
+              upperBaseX: readRest.upperBaseX,
+              upperBaseZ: readRest.upperBaseZ,
+              lowerRestQuat: readRest.lowerRestQuat.clone(),
+              hingeLocal: readRest.hingeLocal.clone(),
             }
           }
         } catch {
@@ -837,6 +890,7 @@ export default function VrmModel({
         walkRig,
         handBook,
         readRig,
+        readRest,
       }
       layout()
       setStatus('ready')
@@ -901,6 +955,11 @@ export default function VrmModel({
         const rig = three.walkRig
         let walkTurn = 0
         let walkStep = 0
+        // Fix pass 8: the speak-nod, hoisted so the reading block can
+        // set the head ABSOLUTELY (base + nod + reading dip) instead
+        // of the old `headNode.rotation.x +=` — the last `+=` on a
+        // reading-driven bone.
+        let nod = 0
         // Fix pass 7 (reading-pose audit follow-up): the walk's
         // left-arm counter-swing, captured here so the reading block
         // can set the reading arm ABSOLUTELY (see below) instead of
@@ -1074,7 +1133,7 @@ export default function VrmModel({
         }
         three.group.rotation.y = walkTurn + 0.03 * Math.sin(t * 0.5) * swayAmp
         if (headNode) {
-          let nod = 0
+          nod = 0
           if (nodT < 0.6) {
             nodT += dt
             nod = 0.12 * Math.sin(Math.min(1, nodT / 0.6) * Math.PI)
@@ -1084,9 +1143,18 @@ export default function VrmModel({
 
         // ---- Reading: Vita holds the book, raises it, opens it, and
         // turns the pages while she speaks.
-        // End: the estimated seconds have passed AND she has been quiet
-        // for a second (speech over), or the hard cap (estimate + 8 s)
-        // — so a stuck utterance can never leave her reading forever.
+        // End (fix pass 8 — the old condition ended SILENT readings
+        // at seconds+1: with no speech, quietSince sits at 0 from the
+        // first frame, so `elapsed > seconds && quietFor > 1` fired
+        // ~13 s into the Livre tab's default 12 s reading while the
+        // "Lecture en cours…" banner — a separate React state the VRM
+        // never cleared — stayed up. Now the end depends on whether
+        // a voice was ever heard: a spoken reading ends when the
+        // voice has been quiet for 1 s after the estimate; a reading
+        // that never speaks (Livre tab: silent by design; muted
+        // devices: speak() is a no-op) ends on the estimate alone.
+        // The hard cap (estimate + 8 s) stays, so a stuck utterance
+        // can never leave her reading forever.
         // Muted / no-speech devices end on the estimate alone.
         const read = readingRef.current
         const hb = three.handBook
@@ -1096,10 +1164,14 @@ export default function VrmModel({
           const elapsed = read.active ? now - read.startT : 0
           const speaking = bridge.isSpeaking()
           if (read.active) {
-            if (speaking) read.quietSince = -1
-            else if (read.quietSince < 0) read.quietSince = elapsed
+            if (speaking) {
+              read.heardSpeech = true
+              read.quietSince = -1
+            } else if (read.quietSince < 0) read.quietSince = elapsed
             const quietFor = read.quietSince < 0 ? 0 : elapsed - read.quietSince
-            if ((elapsed > read.seconds && quietFor > 1) || elapsed > read.seconds + 8) {
+            const endSpoken = read.heardSpeech && elapsed > read.seconds && quietFor > 1
+            const endSilent = !read.heardSpeech && elapsed > read.seconds
+            if (endSpoken || endSilent || elapsed > read.seconds + 8) {
               read.active = false
               if (!read.ended) {
                 read.ended = true
@@ -1163,8 +1235,15 @@ export default function VrmModel({
               .multiply(rr.lowerRestQuat)
             rr.leftLowerArm.quaternion.copy(readTmpQ)
           }
-          if (headNode && blend > 0.001) {
-            headNode.rotation.x += 0.18 * blend
+          // Fix pass 8: the head dip is ABSOLUTE now (base + nod +
+          // reading dip, recomputed every frame) — the old
+          // `headNode.rotation.x += 0.18 * blend` was safe only
+          // because the nod block above sets the head absolutely
+          // first, every frame; one skipped nod frame would have
+          // accumulated the dip. No `+=` remains on any
+          // reading-driven bone.
+          if (headNode) {
+            headNode.rotation.x = three.headBaseRotationX + nod + 0.18 * blend
           }
 
           if (hb) {
@@ -1237,6 +1316,15 @@ export default function VrmModel({
               // arm is still visibly raised on the way down (blend >
               // 0.1); it hides only once the arm is nearly down, so
               // the idle hands-empty rule (pass 6) still holds.
+              // Fix pass 8: this gate can no longer flicker
+              // MID-reading — blend only falls after read.active goes
+              // false, and read.active itself is deterministic now
+              // (the heardSpeech-aware end above: a silent reading
+              // ends on its estimate, a spoken one on the voice, and
+              // a stop cancels it outright). The blend tail is kept
+              // on purpose: without it the book would vanish the
+              // instant the read ends while the arm is still
+              // half-raised — the pass-6 empty-palm symptom again.
               hb.group.visible = read.active || blend > 0.1
               hb.carry.visible = false
             }
@@ -1355,6 +1443,22 @@ export default function VrmModel({
       })
       threeRef.current = null
       if (three) {
+        // Fix pass 8: restore the SHARED cached VRM's reading arm to
+        // its true rest pose before this mount lets go of it. The
+        // cache's rest pose is applied once per page lifetime
+        // (prepare()), but nothing ever restored the bones after a
+        // mount posed them — so a mount that unmounted mid-reading
+        // left the arm raised for the next mount, whose "absolute"
+        // pose compounded on top of it (hand at head height). The
+        // next mount now reads its bases from the cache anyway, but
+        // this restore also keeps the walk rig's live-captured arm
+        // base honest, and leaves the shared model at rest.
+        if (three.readRig && three.readRest) {
+          three.readRig.leftUpperArm.rotation.x = three.readRest.upperBaseX
+          three.readRig.leftUpperArm.rotation.z = three.readRest.upperBaseZ
+          three.readRig.leftLowerArm.quaternion.copy(three.readRest.lowerRestQuat)
+          three.vrm.humanoid?.update()
+        }
         // Hand-book textures (canvas textures are not freed by the
         // generic traverse below — it only disposes geometries and
         // materials). The book is this mount's own prop: unparent it

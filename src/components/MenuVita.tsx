@@ -3,7 +3,7 @@ import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide
 import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
-import { getWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
+import { getWalkStatus, resetWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
 
 const VrmModel = lazy(() => import('./VrmModel'))
 
@@ -138,6 +138,15 @@ export function useVitaGuide({
   const [collapsed, setCollapsed] = useState(false)
   const [brainLive, setBrainLive] = useState(false)
   const [reading, setReading] = useState<ReadingState | null>(null)
+  /**
+   * Fix pass 8: mirror of `reading` for the async brain replies —
+   * a reply must only re-time the reading IT started. The old code
+   * re-armed unconditionally, so a late reply could restart a reading
+   * the visitor had already stopped (or one a newer tap superseded),
+   * raising the arm again after "Couper la voix".
+   */
+  const readingRef = useRef<ReadingState | null>(null)
+  readingRef.current = reading
   const firstCategoryRef = useRef(true)
   /** Big-book tab switch waiting on a chat reading to finish. */
   const pendingOpenRef = useRef<string | null>(null)
@@ -197,6 +206,15 @@ export function useVitaGuide({
     const next = !muted
     setMutedState(next)
     setSpeechMuted(next)
+    // Fix pass 8: muting stops the voice (setSpeechMuted calls
+    // stopSpeaking), so a spoken reading with no voice is over — clear
+    // it, and the VRM cancels the pose at once (tick → 0), instead of
+    // leaving the arm raised until the estimate runs out. Unmuting
+    // does not restart anything; the visitor asks again.
+    if (next && reading !== null) {
+      setReading(null)
+      resetWalkStatus()
+    }
   }
 
   const toggleCollapse = () => setCollapsed((c) => !c)
@@ -224,20 +242,31 @@ export function useVitaGuide({
     replyArrivedRef.current = false
     if (catId) {
       setWalkTick((t) => t + 1)
-      setReading({ categoryId: catId, nonce: Date.now(), seconds: 12 })
+      const nonce = Date.now()
+      setReading({ categoryId: catId, nonce, seconds: 12 })
       pendingOpenRef.current = catId
+      void askBrain(clean).then(({ reply, source }) => {
+        if (source === 'llm') setBrainLive(true)
+        setLine(reply.text)
+        // Fix pass 8: only re-time (and speak) the reading THIS ask
+        // started — a late reply must not resurrect a reading the
+        // visitor stopped or a newer tap superseded (the nonce no
+        // longer matches), or the arm would rise again after stop.
+        if (catId && pendingOpenRef.current === catId && readingRef.current?.nonce === nonce) {
+          replyArrivedRef.current = true
+          setReading({
+            categoryId: catId,
+            nonce: Date.now(),
+            seconds: estimateSeconds(shortenForSpeech(reply.text)),
+          })
+          if (isSpeechSupported()) speak(reply.text)
+        }
+      })
+      return
     }
     void askBrain(clean).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
       setLine(reply.text)
-      if (catId && pendingOpenRef.current === catId) {
-        replyArrivedRef.current = true
-        setReading({
-          categoryId: catId,
-          nonce: Date.now(),
-          seconds: estimateSeconds(shortenForSpeech(reply.text)),
-        })
-      }
       if (isSpeechSupported()) speak(reply.text)
     })
   }
@@ -256,12 +285,17 @@ export function useVitaGuide({
     replyArrivedRef.current = false
     setWalkTick((t) => t + 1)
     setLine(text)
-    setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(text) })
+    const nonce = Date.now()
+    setReading({ categoryId, nonce, seconds: estimateSeconds(text) })
     pendingOpenRef.current = categoryId
     const request = `Lis-moi la page ${cat.label} à voix haute`
     void askBrain(request).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
       if (pendingOpenRef.current !== categoryId) return
+      // Fix pass 8: only re-time (and speak) the reading THIS press
+      // started — see ask(): a late reply must not resurrect a reading
+      // the visitor stopped or a newer tap superseded.
+      if (readingRef.current?.nonce !== nonce) return
       replyArrivedRef.current = true
       setLine(reply.text)
       setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(shortenForSpeech(reply.text)) })
@@ -271,6 +305,15 @@ export function useVitaGuide({
 
   const onReadingEnd = useCallback(() => {
     const pending = pendingOpenRef.current
+    // Fix pass 8: the VRM's reading is over — the walk line returns to
+    // "Vita est prête…". The React reading state is deliberately left
+    // alone here: a brain reply may still be in flight for this
+    // reading, and clearing it would make the reply's nonce guard
+    // drop the re-time + the spoken answer (see ask()/askBartender).
+    // The stale object is harmless — the reading effect only fires on
+    // a tick/category/seconds change, and the next ask or tap
+    // replaces it with a fresh nonce.
+    resetWalkStatus()
     if (pending && replyArrivedRef.current) {
       pendingOpenRef.current = null
       onOpenBook(pending)

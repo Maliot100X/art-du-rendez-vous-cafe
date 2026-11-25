@@ -343,6 +343,19 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
   const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() =>
     goToCategory ? { categoryId: goToCategory.catId, nonce: goToCategory.nonce } : null,
   )
+  /**
+   * Fix pass 8: mirrors of `reading` for the async brain reply, and
+   * the nonce of a reading the visitor explicitly stopped. A late
+   * reply must only re-time the reading IT started: not one the
+   * visitor stopped (stoppedNonce), not one a flip superseded (live
+   * nonce differs) — either would raise the arm again after stop.
+   * But a natural end that cleared the banner must NOT block the
+   * reply (live reading null, nonce not stopped), or a slow brain
+   * answer would be silently dropped.
+   */
+  const readingRef = useRef(reading)
+  readingRef.current = reading
+  const stoppedNonceRef = useRef<number | null>(null)
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
   )
@@ -369,9 +382,15 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
   const askBartender = useCallback((catId: string) => {
     const cat = MENU.find((c) => c.id === catId)
     if (!cat) return
-    setReading({ categoryId: catId, nonce: Date.now(), seconds: 12 })
+    const nonce = Date.now()
+    setReading({ categoryId: catId, nonce, seconds: 12 })
     const request = `Lis-moi la page ${cat.label} à voix haute`
     void askBrain(request).then(({ reply }) => {
+      // Fix pass 8: only re-time (and speak) the reading THIS press
+      // started — see the stoppedNonceRef/readingRef note above.
+      if (stoppedNonceRef.current === nonce) return
+      const cur = readingRef.current
+      if (cur !== null && cur.nonce !== nonce) return
       setReading({ categoryId: catId, nonce: Date.now(), seconds: estimateSeconds(shortenForSpeech(reply.text)) })
       if (isSpeechSupported()) speak(reply.text)
     })
@@ -391,6 +410,13 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
         readingTick={reading?.nonce ?? 0}
         readingCategory={reading?.categoryId}
         readingSeconds={reading?.seconds ?? 12}
+        // Fix pass 8: the VRM's reading end clears the banner. The
+        // old code passed no onReadingEnd here, so the "Lecture en
+        // cours…" panel — React state, not VRM state — stayed up
+        // forever after the book had already vanished (~13 s into
+        // the default 12 s silent reading). A stop press does not
+        // come through here (cancel suppresses the end callback).
+        onReadingEnd={() => setReading(null)}
       />
     </Suspense>
   )
@@ -414,6 +440,12 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
       <button
         type="button"
         onClick={() => {
+          // Fix pass 8: remember which reading was stopped, so its
+          // late brain reply cannot resurrect it (see askBartender).
+          // setReading(null) drops readingTick to 0 and the VRM
+          // cancels the pose at once — the old code never told the
+          // VRM, so the arm stayed raised until the estimate ran out.
+          stoppedNonceRef.current = reading?.nonce ?? null
           stopSpeaking()
           setReading(null)
         }}

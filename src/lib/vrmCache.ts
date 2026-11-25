@@ -48,6 +48,31 @@ export interface CachedVrm {
   faceFrontQuat: THREE.Quaternion
   chestBaseRotationX: number
   headBaseRotationX: number
+  /**
+   * Fix pass 8 — the reading arm's TRUE rest values, captured here in
+   * prepare(), the one moment the bones are known to be in the rest
+   * pose. VrmModel used to read them live on every mount from the
+   * SHARED cached VRM — but a mount that unmounts mid-reading (arm
+   * raised, elbow bent) leaves the bones posed, so the next mount
+   * captured the raised arm as its "rest" base and its absolute
+   * reading pose compounded on top of it (hand at head height, to
+   * the side — the pass-8 check's run-to-run variance: same code,
+   * different starting bones). These cached values make every mount
+   * deterministic, whatever pose the previous mount left behind.
+   */
+  readRest: ReadRest
+}
+
+/**
+ * The reading arm's rest values (see CachedVrm.readRest): the upper
+ * arm's rest rotation.x/z, the lower arm's rest local quaternion, and
+ * the elbow hinge axis in the upper arm's local frame.
+ */
+export interface ReadRest {
+  upperBaseX: number
+  upperBaseZ: number
+  lowerRestQuat: THREE.Quaternion
+  hingeLocal: THREE.Vector3
 }
 
 /**
@@ -221,6 +246,45 @@ function prepare(vrm: VRM): CachedVrm {
   vrm.update(0)
   group.updateMatrixWorld(true)
 
+  // Fix pass 8: capture the reading arm's rest values NOW, while the
+  // bones are in the rest pose applied above (see CachedVrm.readRest).
+  // Same hinge math VrmModel used to compute live per mount — the
+  // elbow hinge axis, fixed in the upper arm's local frame.
+  let readRest: ReadRest
+  try {
+    const humanoid = vrm.humanoid
+    const upper = humanoid.getNormalizedBoneNode('leftUpperArm')
+    const lower = humanoid.getNormalizedBoneNode('leftLowerArm')
+    if (!upper || !lower) throw new Error('No reading arm bones')
+    group.updateMatrixWorld(true)
+    const shoulder = upper.getWorldPosition(new THREE.Vector3())
+    const elbow = lower.getWorldPosition(new THREE.Vector3())
+    const armDir = elbow.sub(shoulder).normalize()
+    const hingeWorld = new THREE.Vector3().crossVectors(armDir, new THREE.Vector3(0, 0, 1))
+    if (hingeWorld.lengthSq() < 1e-6) hingeWorld.set(0, 1, 0)
+    hingeWorld.normalize()
+    const upperWorldQuat = upper.getWorldQuaternion(new THREE.Quaternion())
+    const hingeLocal = hingeWorld.clone().applyQuaternion(upperWorldQuat.clone().invert())
+    readRest = {
+      upperBaseX: upper.rotation.x,
+      upperBaseZ: upper.rotation.z,
+      lowerRestQuat: lower.quaternion.clone(),
+      hingeLocal,
+    }
+  } catch {
+    // Bones unreadable — fall back to the live values (whatever pose
+    // the file is in); VrmModel's read rig needs the same bones and
+    // will be null without them anyway.
+    const upper = vrm.humanoid?.getNormalizedBoneNode('leftUpperArm')
+    const lower = vrm.humanoid?.getNormalizedBoneNode('leftLowerArm')
+    readRest = {
+      upperBaseX: upper ? upper.rotation.x : 0,
+      upperBaseZ: upper ? upper.rotation.z : 0,
+      lowerRestQuat: lower ? lower.quaternion.clone() : new THREE.Quaternion(),
+      hingeLocal: new THREE.Vector3(0, 1, 0),
+    }
+  }
+
   // POSED bounds: SkinnedMesh.computeBoundingBox applies the current
   // bone transforms (the plain geometry box would still be T-pose).
   const box = new THREE.Box3()
@@ -268,7 +332,7 @@ function prepare(vrm: VRM): CachedVrm {
   const chestBaseRotationX = chestNode ? chestNode.rotation.x : 0
   const headBaseRotationX = headNode ? headNode.rotation.x : 0
 
-  return { vrm, box, size, centre, eyePos, faceFrontQuat, chestBaseRotationX, headBaseRotationX }
+  return { vrm, box, size, centre, eyePos, faceFrontQuat, chestBaseRotationX, headBaseRotationX, readRest }
 }
 
 async function loadOnce(): Promise<CachedVrm> {

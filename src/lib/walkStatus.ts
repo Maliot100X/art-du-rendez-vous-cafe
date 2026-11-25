@@ -67,6 +67,27 @@ export function getWalkStatus(): WalkStatus {
   return { ...walkStatus }
 }
 
+/**
+ * Fix pass 8: a reading has ended — the panel's line goes back to
+ * "Vita est prête — choisissez une catégorie." instead of showing a
+ * stale "Arrivée · x …" forever (tick stayed > 0 after the first
+ * walk, so the ready line could never come back). Only the walk
+ * state resets; the lateral position is kept, so she stays standing
+ * where she walked to.
+ */
+export function resetWalkStatus(): void {
+  const next: WalkStatus = { ...walkStatus, walking: false, step: 0, tick: 0, kneeDeg: 0 }
+  if (sameWalkStatus(next, walkStatus)) return
+  walkStatus = next
+  walkListeners.forEach((cb) => {
+    try {
+      cb(walkStatus)
+    } catch {
+      // A status listener must never break the caller.
+    }
+  })
+}
+
 export function subscribeWalkStatus(cb: (s: WalkStatus) => void): () => void {
   walkListeners.add(cb)
   try {
