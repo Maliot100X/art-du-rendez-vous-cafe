@@ -39,13 +39,13 @@ type Form = 'human' | 'furry'
  *
  * The old fit framed 0.00–0.32 — entirely ABOVE the eyes (0.341) — which
  * is exactly why Minir's phone screenshot showed only the top of the
- * purple hair. The new window 0.04–0.68 puts the eyes at ~59% of the
+ * purple hair. The window 0.02–0.68 puts the eyes at ~59% of the
  * stage height and the mouth at ~76%, with the hair top and (in furry
  * form) the ear tips just inside the frame. Eyes and mouth sit at the
  * SAME fractions in both forms (only the ears move), so one window
  * frames both forms.
  */
-const FACE_TOP = 0.04
+const FACE_TOP = 0.02
 const FACE_BOTTOM = 0.68
 /** Head width is ~0.56 of the canvas width — the horizontal guard. */
 const HEAD_WIDTH_FRAC = 0.62
@@ -61,6 +61,10 @@ declare global {
       scale: number
       eyeScreenPx: [number, number]
       mouthScreenPx: [number, number]
+      /** Read-back of the Henshin parameter (0 = human, 1 = furry). */
+      param3: number
+      /** Whether model.expression('Henshin') resolved true. */
+      expressionOk: boolean | null
     }
   }
 }
@@ -186,6 +190,8 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             scale: s,
             eyeScreenPx: [Math.round(w / 2), Math.round(stageY(0.41))],
             mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
+            param3: window.__nekomiDebug?.param3 ?? -1,
+            expressionOk: window.__nekomiDebug?.expressionOk ?? null,
           }
         }
         fitRef.current = fit
@@ -219,7 +225,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // auto-blink stay with pixi-live2d-display's own handling.
         const core = (
           model.internalModel as unknown as {
-            coreModel?: { setParameterValueById: (id: string, value: number) => void }
+            coreModel?: {
+              setParameterValueById: (id: string, value: number) => void
+              getParameterValueById?: (id: string) => number
+            }
           }
         ).coreModel
         const setParam = (id: string, value: number) => {
@@ -231,6 +240,13 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         }
         let current: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
         let target: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
+        // Henshin form, driven directly (see setHenshin): the expression
+        // manager is the proper path, but the toggle was observed doing
+        // nothing in the browser — so Param3 is ALSO written here, every
+        // frame, after the model's own update and before the render, which
+        // puts it in effect at render time by construction. Eased like
+        // the presets so the switch still fades instead of snapping.
+        let param3Current = formRef.current === 'furry' ? 1 : 0
         const unsubscribe = bridge.subscribe((state) => {
           target = { ...EXPRESSION_PRESETS[state.expression] }
         })
@@ -241,6 +257,19 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             setParam(key, current[key])
           }
           setParam('ParamMouthOpenY', bridge.getMouthOpen())
+          const param3Target = formRef.current === 'furry' ? 1 : 0
+          param3Current += (param3Target - param3Current) * 0.12
+          setParam('Param3', param3Current)
+          if (window.__nekomiDebug) {
+            let readback = -1
+            try {
+              readback = core?.getParameterValueById?.('Param3') ?? -1
+            } catch {
+              // Read-back unsupported — ignore.
+            }
+            window.__nekomiDebug.param3 = Math.round(readback * 100) / 100
+            window.__nekomiDebug.form = formRef.current
+          }
         }
         app.ticker.add(tick)
 
@@ -273,9 +302,20 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
       cancelled = true
       detach?.()
       fitRef.current = null
-      modelRef.current?.destroy()
+      // Destroy calls can throw if the renderer is already gone (context
+      // lost mid-unmount) — a throw here during React's unmount would
+      // propagate and unmount the whole app into a black page.
+      try {
+        modelRef.current?.destroy()
+      } catch {
+        // Already destroyed — nothing to free.
+      }
       modelRef.current = null
-      app?.destroy(true, { children: true })
+      try {
+        app?.destroy(true, { children: true })
+      } catch {
+        // Already destroyed — nothing to free.
+      }
       app = null
     }
   }, [bridge])
@@ -288,9 +328,21 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     // The expression API is the toggle: playing Henshin sets Param3 = 1,
     // resetting the expression manager returns it to the human default
     // (Param3 = 0). A direct parameter write would be overwritten while an
-    // expression is active, so it is not used here.
+    // expression is active, so it is not used here — EXCEPT that the tick
+    // ALSO writes Param3 directly every frame (see above): the toggle was
+    // observed doing nothing in the browser, and the direct write is the
+    // guarantee the render actually shows the chosen form. The result of
+    // the expression call is recorded in the debug object so a future
+    // check can tell which path worked.
     if (next === 'furry') {
-      void model.expression('Henshin').catch(() => undefined)
+      void model
+        .expression('Henshin')
+        .then((ok) => {
+          if (window.__nekomiDebug) window.__nekomiDebug.expressionOk = ok
+        })
+        .catch(() => {
+          if (window.__nekomiDebug) window.__nekomiDebug.expressionOk = false
+        })
     } else {
       model.internalModel.motionManager.expressionManager?.resetExpression()
     }

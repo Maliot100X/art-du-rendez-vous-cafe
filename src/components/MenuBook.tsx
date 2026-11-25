@@ -395,6 +395,14 @@ export default function MenuBook({
         tweenRef.current?.kill();
         leafRuntimes.forEach((leaf) => leaf.geometry.dispose());
         textures.forEach((tex) => tex.dispose());
+        // Give the GL context back: without forceContextLoss the context
+        // stays allocated after unmount, and repeated tab switches can
+        // exhaust the browser's context budget and black-screen the page.
+        try {
+          renderer.forceContextLoss();
+        } catch {
+          // Context already lost — nothing to free.
+        }
         renderer.dispose();
         if (renderer.domElement.parentElement === stage) {
           stage.removeChild(renderer.domElement);

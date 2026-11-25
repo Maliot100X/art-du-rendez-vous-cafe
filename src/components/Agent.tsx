@@ -295,22 +295,25 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
       ref={sectionRef}
       className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-12 sm:px-6 sm:py-16 md:py-24"
     >
+      {/* Compact header — deliberately short: the stage below must start
+          high enough that the model's FULL face is in the first viewport
+          without scrolling (the previous long intro pushed the stage
+          down so only the top of the head and the eyes were visible).
+          The longer intro text lives below the stage grid. */}
       <div className="max-w-3xl" data-reveal>
         <p className="font-mono text-label uppercase text-amber">{AGENT.eyebrow}</p>
-        <h2 className="agent-title mt-3 font-display text-bone">{AGENT.title}</h2>
-        <p className="mt-4 text-lead text-bone/75">{AGENT.lede}</p>
+        <h2 className="agent-title mt-2 font-display text-bone">{AGENT.title}</h2>
         <p
-          className={`mt-5 inline-flex items-center gap-2 rounded-full border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] ${
+          className={`mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] ${
             agentConnected ? 'border-amber/50 bg-amber/10 text-amber' : 'border-line bg-ink-2 text-bone/70'
           }`}
         >
           <span className={`live-dot inline-block h-1.5 w-1.5 rounded-full ${agentConnected ? 'bg-amber' : 'bg-ember'}`} />
           {agentConnected ? 'Agent en direct — connecté' : AGENT.statusOffline}
         </p>
-        {!agentConnected && <p className="mt-3 max-w-xl text-sm text-mist">{AGENT.statusHint}</p>}
       </div>
 
-      <div className="mt-8 grid gap-4 sm:mt-10 sm:gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <div className="mt-5 grid gap-4 sm:mt-6 sm:gap-6 lg:grid-cols-[1fr_1.1fr]">
         {/* Live stage: VRM primary, Live2D secondary / fallback */}
         <div className="min-w-0" data-reveal>
           <div
@@ -608,6 +611,12 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
             </div>
           </div>
         </div>
+      </div>
+      {/* Intro text — below the stage, so it never pushes the model's
+          face below the fold on first view. */}
+      <div className="mt-8 max-w-3xl" data-reveal>
+        <p className="text-lead text-bone/75">{AGENT.lede}</p>
+        {!agentConnected && <p className="mt-3 max-w-xl text-sm text-mist">{AGENT.statusHint}</p>}
       </div>
     </section>
   )

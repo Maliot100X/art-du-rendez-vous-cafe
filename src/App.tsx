@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazyWithRetry } from './lib/lazyRetry'
 import Nav from './components/Nav'
 import Hero from './components/Hero'
 import MenuSection, { type OrderLine } from './components/MenuSection'
@@ -10,6 +11,49 @@ import { useReveal } from './lib/useReveal'
 import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
 import MenuVita, { MenuVitaPanel, MenuVitaStage, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
 import { MENU } from './content'
+
+// Below-fold / heavy scenes load in their own chunks so the first paint
+// stays lean. Each Suspense fallback reserves roughly the section's real
+// height so the document doesn't jump as chunks land. The retry wrapper
+// gives a dropped chunk one second chance; a persistent failure lands in
+// the panel ErrorBoundary below instead of black-screening the page.
+const Atmosphere = lazyWithRetry(() => import('./components/Atmosphere'))
+const MenuBook = lazyWithRetry(() => import('./components/MenuBook'))
+const Gallery = lazyWithRetry(() => import('./components/Gallery'))
+const Agent = lazyWithRetry(() => import('./components/Agent'))
+const FluidBackground = lazyWithRetry(() => import('./components/FluidBackground'))
+
+/** Visible loading state for a tab panel — never a blank dark area. */
+function PanelLoading({ label }: { label: string }) {
+  return (
+    <div className="mx-auto flex min-h-[60svh] max-w-[1400px] flex-col items-center justify-center px-4 py-24 text-center">
+      <span className="live-dot inline-block h-2.5 w-2.5 rounded-full bg-amber" aria-hidden="true" />
+      <p className="mt-5 font-mono text-[11px] uppercase tracking-[0.16em] text-bone/80">{label}</p>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-mist">
+        Le contenu arrive — le reste du site reste utilisable.
+      </p>
+    </div>
+  )
+}
+
+/** A tab panel that failed to load — keeps Nav + TabBar alive, offers a retry. */
+function PanelError({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className="mx-auto flex min-h-[60svh] max-w-[1400px] flex-col items-center justify-center px-4 py-24 text-center">
+      <p className="font-display text-3xl italic text-bone">Oups — {label} n'a pas pu se charger.</p>
+      <p className="mt-3 max-w-md text-sm leading-relaxed text-mist">
+        Le reste du site fonctionne. Réessayez — le plus souvent, c'est juste la connexion.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-6 min-h-11 rounded-full bg-bone px-7 py-3 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.03]"
+      >
+        Réessayer
+      </button>
+    </div>
+  )
+}
 
 /**
  * Tab shell — Minir's order: no more one long screen. Each tab shows
@@ -33,15 +77,6 @@ import { MENU } from './content'
  * the Ambiance tab: the panel is plain flow (no overflow-hidden
  * ancestor), and tab switching scrolls to the top of the panel.
  */
-
-// Below-fold / heavy scenes load in their own chunks so the first paint
-// stays lean. Each Suspense fallback reserves roughly the section's real
-// height so the document doesn't jump as chunks land.
-const Atmosphere = lazy(() => import('./components/Atmosphere'))
-const MenuBook = lazy(() => import('./components/MenuBook'))
-const Gallery = lazy(() => import('./components/Gallery'))
-const Agent = lazy(() => import('./components/Agent'))
-const FluidBackground = lazy(() => import('./components/FluidBackground'))
 
 /** Static gradient base layer — under everything, on every tab. */
 function FluidFallbackDiv() {
@@ -149,6 +184,9 @@ export default function App() {
   const [order, setOrder] = useState<OrderLine[]>([])
   const [activeTab, setActiveTab] = useState<TabId>(currentTab())
   const [bookTarget, setBookTarget] = useState<{ catId: string; nonce: number } | null>(null)
+  // Bumping this remounts the panel ErrorBoundaries (their hasError state
+  // is per-instance) — the "Réessayer" button's retry mechanism.
+  const [panelNonce, setPanelNonce] = useState(0)
   const reducedMotion = useReducedMotion()
 
   // One global rAF loop: Lenis + every scroll subscriber. Lenis is off
@@ -197,25 +235,45 @@ export default function App() {
         )}
         {activeTab === 'menu' && <MenuTab onAdd={addToOrder} onOpenBook={openBook} />}
         {activeTab === 'book' && (
-          <Suspense fallback={<div className="min-h-[113svh]" aria-hidden="true" />}>
-            <MenuBook goToCategory={bookTarget} />
-          </Suspense>
+          <ErrorBoundary
+            key={`book-${panelNonce}`}
+            fallback={<PanelError label="Le livre" onRetry={() => setPanelNonce((n) => n + 1)} />}
+          >
+            <Suspense fallback={<PanelLoading label="Le livre s'ouvre…" />}>
+              <MenuBook goToCategory={bookTarget} />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeTab === 'gallery' && (
-          <Suspense fallback={<div className="min-h-[175svh]" aria-hidden="true" />}>
-            <Gallery />
-          </Suspense>
+          <ErrorBoundary
+            key={`gallery-${panelNonce}`}
+            fallback={<PanelError label="La galerie" onRetry={() => setPanelNonce((n) => n + 1)} />}
+          >
+            <Suspense fallback={<PanelLoading label="La galerie se charge…" />}>
+              <Gallery />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeTab === 'ambiance' && (
-          <Suspense fallback={<div className="min-h-[420svh]" aria-hidden="true" />}>
-            <Atmosphere />
-          </Suspense>
+          <ErrorBoundary
+            key={`ambiance-${panelNonce}`}
+            fallback={<PanelError label="L'ambiance" onRetry={() => setPanelNonce((n) => n + 1)} />}
+          >
+            <Suspense fallback={<PanelLoading label="L'ambiance se prépare…" />}>
+              <Atmosphere />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeTab === 'visit' && <Visit />}
         {activeTab === 'agent' && (
-          <Suspense fallback={<div className="min-h-[245svh]" aria-hidden="true" />}>
-            <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
-          </Suspense>
+          <ErrorBoundary
+            key={`agent-${panelNonce}`}
+            fallback={<PanelError label="L'agent" onRetry={() => setPanelNonce((n) => n + 1)} />}
+          >
+            <Suspense fallback={<PanelLoading label="L'agent se prépare…" />}>
+              <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
+            </Suspense>
+          </ErrorBoundary>
         )}
       </main>
       <Footer />

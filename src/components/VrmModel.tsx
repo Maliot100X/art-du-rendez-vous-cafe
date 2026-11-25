@@ -583,11 +583,26 @@ export default function VrmModel({
             else mat?.dispose()
           }
         })
+        // Actually give the GL context back to the browser: dispose()
+        // alone does not free the context, and a page that keeps
+        // creating contexts (tab switches) eventually hits the browser's
+        // context limit — the next renderer creation then fails and the
+        // stage (or the page) goes black.
+        try {
+          three.renderer.forceContextLoss()
+        } catch {
+          // Context already lost — nothing to free.
+        }
         three.renderer.dispose()
         if (three.renderer.domElement.parentElement === containerRef.current) {
           containerRef.current?.removeChild(three.renderer.domElement)
         }
       } else if (renderer) {
+        try {
+          renderer.forceContextLoss()
+        } catch {
+          // Context already lost — nothing to free.
+        }
         renderer.dispose()
         if (renderer.domElement.parentElement === containerRef.current) {
           containerRef.current?.removeChild(renderer.domElement)
