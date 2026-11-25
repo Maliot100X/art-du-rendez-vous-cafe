@@ -37,7 +37,7 @@ import {
 
 const PAGE_W_UNITS = 1;
 const PAGE_H_UNITS = PAGE_H / PAGE_W;
-const MARGIN = 0.16;
+const MARGIN = 0.22;
 
 interface LeafRuntime {
   group: THREE.Group;
@@ -369,7 +369,7 @@ export default function MenuBook() {
     : `${(PAGE_W_UNITS * 2 + MARGIN).toFixed(2)} / ${(PAGE_H_UNITS + MARGIN).toFixed(2)}`;
 
   return (
-    <section id="livre" className="relative mx-auto max-w-[1400px] px-4 py-24 sm:px-6 md:py-36" aria-label="Le livre de la carte">
+    <section id="livre" className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36" aria-label="Le livre de la carte">
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between" data-reveal>
         <div>
           <p className="font-mono text-label uppercase text-amber">{BOOK.eyebrow}</p>

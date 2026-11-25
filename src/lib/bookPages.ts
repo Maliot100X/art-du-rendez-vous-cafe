@@ -109,7 +109,16 @@ function drawCover(ctx: CanvasRenderingContext2D) {
   ctx.font = '500 30px "Martian Mono", monospace';
   ctx.fillText('BRUXELLES · DEPUIS TOUJOURS', PAGE_W / 2, 300);
   ctx.fillStyle = BONE;
-  ctx.font = '700 150px "Bodoni Moda Variable", "Bodoni Moda", Georgia, serif';
+  // The title must fit the canvas: "RENDEZ-VOUS" at 150px Bodoni (or its
+  // Georgia fallback, which is wider) can exceed the 1024px page and clip
+  // at the edges — shrink the title until it fits with margin.
+  const titleFont = (size: number) => `700 ${size}px "Bodoni Moda Variable", "Bodoni Moda", Georgia, serif`;
+  let titleSize = 150;
+  ctx.font = titleFont(titleSize);
+  while (ctx.measureText('RENDEZ-VOUS').width > PAGE_W - 120 && titleSize > 90) {
+    titleSize -= 4;
+    ctx.font = titleFont(titleSize);
+  }
   ctx.fillText('ART DU', PAGE_W / 2, 520);
   ctx.fillText('RENDEZ-VOUS', PAGE_W / 2, 680);
   ctx.fillStyle = AMBER;
