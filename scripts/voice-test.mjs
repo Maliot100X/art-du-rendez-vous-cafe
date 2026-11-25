@@ -38,7 +38,7 @@ await p.waitForFunction(() => {
 await p.waitForTimeout(3000);
 const tStart = (Date.now() - T0) / 1000;
 const tokenRes = await p.evaluate(async () => {
-  const r = await fetch('/api/deepgram/token', {method: 'POST'});
+  const r = await fetch('/api/deepgram-token', {method: 'POST'});
   const j = await r.json();
   return {status: r.status, hasToken: !!j.access_token, tokenLength: (j.access_token || '').length, expires_in: j.expires_in};
 });

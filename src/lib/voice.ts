@@ -1,7 +1,7 @@
 /**
  * The café agent: Deepgram Voice Agent over
  * wss://agent.deepgram.com/v1/agent/converse, authenticated with a short-lived
- * token minted by our own server (/api/deepgram/token) — never the API key.
+ * token minted by our own server (/api/deepgram-token) — never the API key.
  * Voice mode: mic → linear16 @16 kHz up; agent audio linear16 @24 kHz down,
  * played via WebAudio, its loudness driving the avatar's mouth (lip-sync).
  * Text mode: typed messages go up as InjectUserMessage, replies come back as
@@ -39,7 +39,7 @@ function findDrink(q: string) {
 export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent> {
   const {onLevel, onState, onText} = opts;
   onState('connexion…');
-  const r = await fetch('/api/deepgram/token', {method: 'POST'});
+  const r = await fetch('/api/deepgram-token', {method: 'POST'});
   if (!r.ok) throw new Error('voice unavailable');
   const {access_token} = await r.json();
   const ws = new WebSocket('wss://agent.deepgram.com/v1/agent/converse', ['bearer', access_token]);

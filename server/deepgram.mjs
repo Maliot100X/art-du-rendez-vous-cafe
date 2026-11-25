@@ -1,11 +1,12 @@
 /**
  * Server-side Deepgram token broker (vite dev + preview middleware).
+ * Production uses api/deepgram-token.ts as a Vercel serverless function.
  * The API key is read from process.env.DEEPGRAM_API_KEY on the server only;
  * the browser gets a short-lived JWT from POST /v1/auth/grant, never the key.
  */
 export function deepgramTokenPlugin() {
   const handler = async (req, res, next) => {
-    if (!req.url?.startsWith('/api/deepgram/token')) return next();
+    if (!req.url?.startsWith('/api/deepgram-token')) return next();
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');
     const key = process.env.DEEPGRAM_API_KEY;

@@ -1,7 +1,9 @@
 node_modules
 dist
+.env
+.env.*
+!.env.example
+qa/rec-tmp
 qa/png
 *.log
-livre-raw.webm
-*.webm
 *.webm

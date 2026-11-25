@@ -53,6 +53,6 @@ Routes: `#/` Accueil · `#/carte` · `#/livre` · `#/galerie` · `#/commande` ·
 
 | Item | Status | Where | Proof |
 |---|---|---|---|
-| **Deepgram agent + grant token** | USED | `server/deepgram.mjs` (vite dev and preview middleware `POST /api/deepgram/token` → `api.deepgram.com/v1/auth/grant`, key from `process.env.DEEPGRAM_API_KEY`, never sent to the browser). `lib/voice.ts`: Voice Agent v1 websocket (nova-3 → gpt-4o-mini with the full carte → aura-2-agathe-fr), `add_to_order` function, KeepAlive, barge-in. Audio goes to Nori for lip-sync. Commande route, plus "Parler à l'hôte" in Livre. | `qa/voice-test.mp4`, `qa/voice-test.json` |
+| **Deepgram agent + grant token** | USED | `server/deepgram.mjs` (vite dev and preview middleware `POST /api/deepgram-token` → `api.deepgram.com/v1/auth/grant`, key from `process.env.DEEPGRAM_API_KEY`, never sent to the browser). `lib/voice.ts`: Voice Agent v1 websocket (nova-3 → gpt-4o-mini with the full carte → aura-2-agathe-fr), `add_to_order` function, KeepAlive, barge-in. Audio goes to Nori for lip-sync. Commande route, plus "Parler à l'hôte" in Livre. | `qa/voice-test.mp4`, `qa/voice-test.json` |
 | **QR** | USED | `Commande.tsx`: a `qrcode` canvas pointing to `…#/commande?agent=1`, which opens the agent on a phone (with a hint). | `qa/coverage/commande-qr-glow.png` |
 | **⌘K finder** | USED | `components/Finder.tsx` (⌘K / Ctrl+K, or the Nav button): tabs and all 59 drinks, accent-insensitive; Enter navigates or adds to the bag. | `qa/coverage/finder-cmdk.png` |
