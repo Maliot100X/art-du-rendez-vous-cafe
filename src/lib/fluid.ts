@@ -956,9 +956,17 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
   function multipleSplats(amount: number): void {
     for (let i = 0; i < amount; i++) {
       const color = generateColor()
-      color.r *= 6.0
-      color.g *= 6.0
-      color.b *= 6.0
+      // Was ×6.0: that undid generateColor's ×0.16 dimming and put
+      // near-full-brightness amber/gold/teal washes (radius 0.35, slow
+      // dissipation) right behind the hero intro — bone-cream text and
+      // the bone-cream primary button sat on near-white swirls, which
+      // is why the tagline/buttons read as "pale on white" and no
+      // text-side fix (full bone, drop-shadow) could help. ×1.5 keeps
+      // the opening field visible as a glow on near-black, the same
+      // dimness as pointer and ambient splats.
+      color.r *= 1.5
+      color.g *= 1.5
+      color.b *= 1.5
       const x = Math.random()
       const y = Math.random()
       const dx = 1000 * (Math.random() - 0.5)
