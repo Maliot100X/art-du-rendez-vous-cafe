@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import useDimensions from 'react-cool-dimensions'
 import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
+import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
 
@@ -30,6 +31,16 @@ import { useReducedMotion } from '../lib/scroll'
  * gate 0.04, cap 0.7), and this loop stages it into the VRM `aa`
  * expression. Idle motion: gentle breathing (chest) + sway. Nod: the
  * head dips when speaking starts.
+ *
+ * Hand book (menu tab, `withBook`): a small 3D book prop parented to
+ * her leftHand bone (src/lib/handBook.ts), visible at all times in the
+ * menu stage — closed in her hand at her side when idle. On a reading
+ * trigger (`readingTick` + `readingCategory`) the left arm raises it to
+ * chest height, the head dips toward it, the cover opens and the pages
+ * turn (~every 4 s) while she speaks; when she finishes, the arm eases
+ * back and the book closes. The book's world transform is re-aimed
+ * every frame from the hand's world position, so its pages stay
+ * camera-readable whatever the arm bones do.
  *
  * If anything fails (no WebGL on this device, model unreachable), the
  * stage falls back to a large clear portrait and reports it via
@@ -101,12 +112,21 @@ interface VrmDebug {
   headHeightPx: number
   /** Projected full-body height in stage pixels. */
   bodyHeightPx: number
+  /** Hand-book prop, when attached: world position + reading state. */
+  book: { world: [number, number, number]; reading: boolean; blend: number } | null
 }
 
 declare global {
   interface Window {
     __vrmDebug?: VrmDebug
   }
+}
+
+/** Bones the reading pose drives, with their rest-pose rotation.x. */
+interface ReadRig {
+  leftUpperArm: THREE.Object3D
+  leftLowerArm: THREE.Object3D
+  baseX: Map<THREE.Object3D, number>
 }
 
 interface ThreeStage {
@@ -122,6 +142,9 @@ interface ThreeStage {
   chestBaseRotationX: number
   headBaseRotationX: number
   walkRig: WalkRig | null
+  /** The small book in her left hand (menu tab only). */
+  handBook: HandBookRig | null
+  readRig: ReadRig | null
 }
 
 export default function VrmModel({
@@ -129,6 +152,11 @@ export default function VrmModel({
   onFailed,
   compact = false,
   walkTick = 0,
+  withBook = false,
+  readingTick = 0,
+  readingCategory,
+  readingSeconds = 10,
+  onReadingEnd,
 }: {
   bridge?: AvatarBridge
   onFailed?: () => void
@@ -145,6 +173,23 @@ export default function VrmModel({
    * loops — so the walk is bone-driven here, not a clip.
    */
   walkTick?: number
+  /**
+   * Hand book (menu tab only): attach the small book prop to her left
+   * hand. The agent tab leaves this off — Vita holds no book there.
+   */
+  withBook?: boolean
+  /**
+   * Reading trigger: every increment starts one reading of the hand
+   * book on `readingCategory` — she raises the book to chest height,
+   * opens it, and turns the pages while she speaks (or for
+   * `readingSeconds` when muted / speech is unavailable). The end is
+   * reported via `onReadingEnd` so the caller can open the big book
+   * tab once she has finished reading aloud.
+   */
+  readingTick?: number
+  readingCategory?: string
+  readingSeconds?: number
+  onReadingEnd?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const threeRef = useRef<ThreeStage | null>(null)
@@ -177,6 +222,70 @@ export default function VrmModel({
     }
   }, [walkTick, reducedMotion])
 
+  /* ---- Reading state machine (hand book). Time base is
+      performance.now so beginReading can run from any effect, even
+      before the render loop's clock exists. ---- */
+  interface ReadingState {
+    active: boolean
+    categoryId: string
+    startT: number
+    seconds: number
+    spread: number
+    flipT: number
+    lastFlipAt: number
+    quietSince: number
+    swapped: boolean
+    ended: boolean
+  }
+  const readingRef = useRef<ReadingState>({
+    active: false,
+    categoryId: '',
+    startT: 0,
+    seconds: 10,
+    spread: 0,
+    flipT: Infinity,
+    lastFlipAt: 0,
+    quietSince: -1,
+    swapped: false,
+    ended: true,
+  })
+  const readingBlendRef = useRef(0)
+  const pendingReadingRef = useRef<{ categoryId: string; seconds: number } | null>(null)
+  const onReadingEndRef = useRef(onReadingEnd)
+  onReadingEndRef.current = onReadingEnd
+
+  /**
+   * Start (or restart) a reading. If the model is still loading, the
+   * request waits in pendingReadingRef and init() picks it up once the
+   * book exists. Restarting mid-read supersedes the old one — the old
+   * reading never reports an end, so a pending big-book open is not
+   * fired twice.
+   */
+  const beginReading = useCallback((categoryId: string, seconds: number) => {
+    const r = readingRef.current
+    r.active = true
+    r.categoryId = categoryId
+    r.startT = performance.now() / 1000
+    r.seconds = Math.max(4, seconds || 10)
+    r.spread = 0
+    r.flipT = Infinity
+    r.lastFlipAt = 0
+    r.quietSince = -1
+    r.swapped = false
+    r.ended = false
+    const three = threeRef.current
+    if (three?.handBook) {
+      three.handBook.setSpreadsForCategory(categoryId)
+    } else {
+      pendingReadingRef.current = { categoryId, seconds }
+    }
+  }, [])
+
+  /* ---- Reading trigger: each increment starts one read. ---- */
+  useEffect(() => {
+    if (readingTick > 0 && readingCategory) beginReading(readingCategory, readingSeconds)
+  }, [readingTick, readingCategory, readingSeconds, beginReading])
+
   /* ---- Framing: measured box + stage size -> camera. ---- */
   const layout = useCallback(() => {
     const three = threeRef.current
@@ -200,9 +309,13 @@ export default function VrmModel({
       framedW = 0.55
     } else if (framingRef.current === 'half') {
       // Head to knees: the face stays ~2x larger than full-body on a
-      // phone, and the legs (and the walk) stay in frame.
-      targetY = eyePos.y - 0.28
-      framedH = 0.95
+      // phone, and the legs (and the walk) stay in frame. Window is
+      // 0.98 m tall, centred 0.31 m below the eyes — the extra 3 cm
+      // down keeps the hand-held book (hand at 0.93 m, book centre
+      // 0.85 m, measured — scripts/measure-hand-book.mjs) inside the
+      // frame at rest instead of clipping its bottom edge.
+      targetY = eyePos.y - 0.31
+      framedH = 0.98
       framedW = 0.6
     } else {
       targetY = centre.y
@@ -238,6 +351,7 @@ export default function VrmModel({
       eyeScreenPx: [Math.round(eyePx[0]), Math.round(eyePx[1])],
       headHeightPx: Math.round(chinPx - topPx),
       bodyHeightPx: Math.round(feetPx - topPx),
+      book: null,
     }
   }, [])
 
@@ -269,6 +383,7 @@ export default function VrmModel({
         eyeScreenPx: [0, 0],
         headHeightPx: 0,
         bodyHeightPx: 0,
+        book: null,
       }
       setStatus('failed')
       onFailed?.()
@@ -463,6 +578,42 @@ export default function VrmModel({
         // No walk rig — the model still renders, it just never walks.
       }
 
+      // Hand book (menu tab only): the small book parented to her LEFT
+      // HAND bone, plus the two arm bones the reading pose drives.
+      // Local transform measured from the file, not guessed —
+      // scripts/measure-hand-book.mjs: hand at (-0.212, 0.929, 0.002)
+      // in the posed VRM, book centre 8 cm below it and 3 cm forward,
+      // facing +Z (the camera). The render loop re-aims the book in
+      // world space every frame, so this is the attach pose, not the
+      // final facing — the loop is what keeps it camera-readable.
+      let handBook: HandBookRig | null = null
+      let readRig: ReadRig | null = null
+      if (withBook) {
+        try {
+          const hand = vrm.humanoid.getNormalizedBoneNode('leftHand')
+          if (hand) {
+            handBook = createHandBook()
+            handBook.group.position.set(-0.0744, -0.0336, 0.0321)
+            handBook.group.quaternion.set(-0.0576, -0.0901, -0.6058, 0.7884)
+            hand.add(handBook.group)
+          }
+        } catch {
+          handBook = null
+        }
+        try {
+          const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm')
+          const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm')
+          if (leftUpperArm && leftLowerArm) {
+            const baseX = new Map<THREE.Object3D, number>()
+            baseX.set(leftUpperArm, leftUpperArm.rotation.x)
+            baseX.set(leftLowerArm, leftLowerArm.rotation.x)
+            readRig = { leftUpperArm, leftLowerArm, baseX }
+          }
+        } catch {
+          readRig = null
+        }
+      }
+
       threeRef.current = {
         renderer,
         scene,
@@ -476,9 +627,16 @@ export default function VrmModel({
         chestBaseRotationX,
         headBaseRotationX,
         walkRig,
+        handBook,
+        readRig,
       }
       layout()
       setStatus('ready')
+
+      // A reading asked for before the model finished loading.
+      const pending = pendingReadingRef.current
+      pendingReadingRef.current = null
+      if (pending) beginReading(pending.categoryId, pending.seconds)
 
       // ---- Per-frame loop: VRM update, breathing, lip-sync, nod, blink.
       let happyWeight = 0
@@ -486,6 +644,16 @@ export default function VrmModel({
       let nodT = 1
       let nextBlinkAt = 2.5
       let blinkUntil = 0
+      // Reading scratch (allocated once, reused every frame).
+      const bookHandPos = new THREE.Vector3()
+      const bookHandQuat = new THREE.Quaternion()
+      const bookOff = new THREE.Vector3()
+      const bookOffRead = new THREE.Vector3()
+      const bookInv = new THREE.Quaternion()
+      const bookTilt = new THREE.Quaternion()
+      const bookWant = new THREE.Quaternion()
+      const bookWorld = new THREE.Vector3()
+      const xAxis = new THREE.Vector3(1, 0, 0)
       const loop = () => {
         if (cancelled) return
         raf = requestAnimationFrame(loop)
@@ -584,6 +752,128 @@ export default function VrmModel({
           }
           headNode.rotation.x = three.headBaseRotationX + nod
         }
+
+        // ---- Reading: Vita holds the book, raises it, opens it, and
+        // turns the pages while she speaks.
+        // End: the estimated seconds have passed AND she has been quiet
+        // for a second (speech over), or the hard cap (estimate + 8 s)
+        // — so a stuck utterance can never leave her reading forever.
+        // Muted / no-speech devices end on the estimate alone.
+        const read = readingRef.current
+        const hb = three.handBook
+        const rr = three.readRig
+        if (hb || rr) {
+          const now = performance.now() / 1000
+          const elapsed = read.active ? now - read.startT : 0
+          const speaking = bridge.isSpeaking()
+          if (read.active) {
+            if (speaking) read.quietSince = -1
+            else if (read.quietSince < 0) read.quietSince = elapsed
+            const quietFor = read.quietSince < 0 ? 0 : elapsed - read.quietSince
+            if ((elapsed > read.seconds && quietFor > 1) || elapsed > read.seconds + 8) {
+              read.active = false
+              if (!read.ended) {
+                read.ended = true
+                onReadingEndRef.current?.()
+              }
+            }
+          }
+          // Blend toward 1 while reading, 0 after (snapped when the
+          // visitor prefers reduced motion — no eased arm travel).
+          const target = read.active ? 1 : 0
+          readingBlendRef.current = reducedMotion
+            ? target
+            : readingBlendRef.current + (target - readingBlendRef.current) * Math.min(1, dt * 3)
+          const blend = readingBlendRef.current
+
+          // Arm + head, ADDITIVE on top of the walk's rotation.x (set
+          // above): the walk re-sets rotation.x from its base every
+          // frame, so this never accumulates. Upper arm forward -0.55
+          // and elbow -1.55 bring the hand from her side (0.93 m) up
+          // to chest/face height (~1.28 m, in front of her chest);
+          // the head dips 0.18 toward the book. Signs follow the
+          // walk's own convention (forward swing = negative x).
+          if (rr && blend > 0.001) {
+            rr.leftUpperArm.rotation.x += -0.55 * blend
+            rr.leftLowerArm.rotation.x += -1.55 * blend
+          }
+          if (headNode && blend > 0.001) {
+            headNode.rotation.x += 0.18 * blend
+          }
+
+          if (hb) {
+            const hand = hb.group.parent
+            if (hand) {
+              // Book world transform, glued to the hand in WORLD space:
+              // the offset from the hand blends from rest (at her side,
+              // below the hand, slightly forward) to reading (in front
+              // of her chest), and the facing stays camera-readable
+              // (group facing × a tilt back toward her face) whatever
+              // the arm bones do — parenting alone would roll the book
+              // with the hand and could hide the pages.
+              hand.getWorldPosition(bookHandPos)
+              hand.getWorldQuaternion(bookHandQuat)
+              bookOff.set(0.02, -0.08, 0.03)
+              bookOffRead.set(0.01, -0.03, 0.05)
+              bookOff.lerp(bookOffRead, blend)
+              bookInv.copy(bookHandQuat).invert()
+              hb.group.position.copy(bookOff).applyQuaternion(bookInv)
+              bookTilt.setFromAxisAngle(xAxis, -0.35 * blend)
+              bookWant.copy(three.group.quaternion).multiply(bookTilt)
+              hb.group.quaternion.copy(bookInv).multiply(bookWant)
+            }
+            // Cover opens once the arm is on its way up — swung BEHIND
+            // the book (+2.6), so the open spread stays readable.
+            const open = THREE.MathUtils.clamp((blend - 0.2) / 0.8, 0, 1)
+            hb.coverPivot.rotation.y = 2.6 * open
+
+            // Page turns: one flip every 4 s while she is speaking (or
+            // inside the estimated window when muted), until the last
+            // spread. The static right page swaps mid-flip, hidden by
+            // the turning leaf; the left page updates when it lands.
+            if (read.active && hb.spreadCount > 1 && read.spread < hb.spreadCount - 1) {
+              if (
+                read.flipT === Infinity &&
+                elapsed - read.lastFlipAt > 4 &&
+                (speaking || elapsed < read.seconds)
+              ) {
+                read.flipT = 0
+              }
+            }
+            if (read.flipT !== Infinity) {
+              read.flipT = Math.min(1, read.flipT + dt / 0.9)
+              const p = read.flipT
+              const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2
+              hb.flipPivot.rotation.y = -Math.PI * eased
+              if (p >= 0.5 && !read.swapped) {
+                read.swapped = true
+                hb.setRightPage(read.spread + 1)
+              }
+              if (p >= 1) {
+                hb.setLeftPage(read.spread + 1)
+                read.spread += 1
+                hb.showSpread(read.spread)
+                hb.flipPivot.rotation.y = 0
+                read.flipT = Infinity
+                read.swapped = false
+                read.lastFlipAt = elapsed
+              }
+            }
+
+            // Debug: book world position + reading state, for the
+            // cloud-browser pixel check (window.__vrmDebug).
+            const dbg = window.__vrmDebug
+            if (dbg) {
+              hb.group.getWorldPosition(bookWorld)
+              dbg.book = {
+                world: [bookWorld.x, bookWorld.y, bookWorld.z],
+                reading: read.active,
+                blend: Math.round(blend * 100) / 100,
+              }
+            }
+          }
+        }
+
         three.renderer.render(three.scene, three.camera)
       }
       raf = requestAnimationFrame(loop)
@@ -596,6 +886,10 @@ export default function VrmModel({
       const three = threeRef.current
       threeRef.current = null
       if (three) {
+        // Hand-book textures (canvas textures are not freed by the
+        // generic traverse below — it only disposes geometries and
+        // materials).
+        three.handBook?.dispose()
         three.scene.traverse((o) => {
           const mesh = o as THREE.Mesh
           if (mesh.isMesh) {
@@ -703,7 +997,7 @@ export default function VrmModel({
           </div>
           <p className="text-xs leading-relaxed text-mist">
             {compact
-              ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
+              ? 'Vita — elle prend son livre, marche vers la catégorie choisie et vous lit les prix à voix haute.'
               : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
           </p>
         </div>
@@ -711,7 +1005,7 @@ export default function VrmModel({
       {status !== 'ready' && (
         <p className="border-t border-line px-4 py-2.5 text-xs leading-relaxed text-mist sm:px-5 sm:py-3">
           {compact
-            ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
+            ? 'Vita — elle prend son livre, marche vers la catégorie choisie et vous lit les prix à voix haute.'
             : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
         </p>
       )}

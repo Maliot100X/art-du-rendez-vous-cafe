@@ -1,22 +1,29 @@
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide-react'
 import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
-import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
+import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
 
 const VrmModel = lazy(() => import('./VrmModel'))
 
 /**
  * Vita inside the Menu tab — the walking guide.
  *
- * - Category change → she walks (one procedural cycle via walkTick) and
- *   reads the category aloud (2–3 items + prices, from MENU data, never
- *   retyped). Item tap → she walks and speaks that item.
+ * - Category change → she walks (one procedural cycle via walkTick),
+ *   TAKES HER HAND BOOK and reads the category aloud (2–3 items +
+ *   prices, from MENU data, never retyped), the book opening on that
+ *   category and its pages turning as she speaks. Item tap → she walks,
+ *   reads the book on that item's category and speaks that item.
  * - Mini chat: the brain adapter (src/lib/brain.ts) — the LLM brain
  *   when a key is configured and the call succeeds, the offline
  *   rule-based brain otherwise. If the question names a category, she
- *   walks to it, OPENS THE BOOK on that category (onOpenBook → tab
- *   switch + flip) and speaks the reply.
+ *   walks to it and reads the hand book on it — and only once she has
+ *   finished reading aloud does the big book tab open on that category
+ *   (onReadingEnd → onOpenBook). Without the delay the menu tab would
+ *   unmount the moment she started reading and the read would never be
+ *   seen. The reply arrives asynchronously, so the reading starts on a
+ *   default estimate and is re-timed on the real spoken line once the
+ *   brain answers.
  * - Speaking is the browser's speechSynthesis (French voice when the
  *   device has one). Deepgram and freellm are both offline and are
  *   never claimed here.
@@ -63,10 +70,25 @@ function categoryLine(catId: string): string {
   return `${cat.label} — ${cat.blurb} Par exemple : ${picks.map((i) => `${i.name} ${i.price}`).join(', ')}.`
 }
 
+/** Rough spoken duration of a line, for the hand-book reading timer. */
+function estimateSeconds(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length
+  return Math.min(30, Math.max(6, Math.round(words / 2.4)))
+}
+
 export interface MenuVitaItemEvent {
   name: string
   price: string
   nonce: number
+}
+
+/** One hand-book reading: the asked category, a trigger nonce, and the
+    estimated spoken seconds (the VRM ends the read when the speech
+    ends, or at this estimate when muted / speech is unavailable). */
+export interface ReadingState {
+  categoryId: string
+  nonce: number
+  seconds: number
 }
 
 export interface VitaGuide {
@@ -84,6 +106,11 @@ export interface VitaGuide {
   /** True only after the LLM brain has actually answered once — the
       footnote below must not claim the brain is live before that. */
   brainLive: boolean
+  /** Current hand-book reading (null when she is not reading). */
+  reading: ReadingState | null
+  /** Called by the VRM when a reading ends — opens the big book tab if
+      a chat question is waiting on it. */
+  onReadingEnd: () => void
 }
 
 export function useVitaGuide({
@@ -101,12 +128,23 @@ export function useVitaGuide({
   const [muted, setMutedState] = useState(isSpeechMuted())
   const [collapsed, setCollapsed] = useState(false)
   const [brainLive, setBrainLive] = useState(false)
+  const [reading, setReading] = useState<ReadingState | null>(null)
   const firstCategoryRef = useRef(true)
+  /** Big-book tab switch waiting on a chat reading to finish. */
+  const pendingOpenRef = useRef<string | null>(null)
+  /** The brain's reply has arrived for the pending chat question. */
+  const replyArrivedRef = useRef(false)
 
   // Stop any speech when the menu tab unmounts.
-  useEffect(() => () => stopSpeaking(), [])
+  useEffect(
+    () => () => {
+      stopSpeaking()
+      pendingOpenRef.current = null
+    },
+    [],
+  )
 
-  // Category change → walk + speak the category (items + prices).
+  // Category change → walk + read the hand book + speak the category.
   useEffect(() => {
     if (firstCategoryRef.current) {
       // First mount: greet without walking — she is already there.
@@ -117,16 +155,23 @@ export function useVitaGuide({
     if (!text) return
     setWalkTick((t) => t + 1)
     setLine(text)
+    setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(text) })
+    // A manual category move cancels a waiting big-book open.
+    pendingOpenRef.current = null
     if (isSpeechSupported()) speak(text)
   }, [categoryId])
 
-  // Item tap (+ on a row) → walk + speak that item.
+  // Item tap (+ on a row) → walk + read the hand book + speak that item.
   useEffect(() => {
     if (!itemEvent || itemEvent.nonce === 0) return
     const text = `${itemEvent.name}, ${itemEvent.price} — ajouté à votre commande.`
     setWalkTick((t) => t + 1)
     setLine(text)
+    // The tapped row belongs to the active category.
+    setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(text) })
+    pendingOpenRef.current = null
     if (isSpeechSupported()) speak(text)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemEvent])
 
   const toggleMute = () => {
@@ -143,24 +188,48 @@ export function useVitaGuide({
   // (src/lib/brain.ts): LLM when a key is configured and the call
   // succeeds, the offline rule-based brain otherwise — same reply, so
   // Vita's walk + spoken line work identically either way. If the
-  // question names a category she walks to it and opens the book on it
-  // at once; the spoken answer lands when the brain answers.
+  // question names a category she walks to it and reads the hand book
+  // on it at once; the big book tab opens only once she has finished
+  // reading aloud (onReadingEnd), so the menu tab — and the VRM with
+  // it — is not unmounted mid-read. The reply arrives asynchronously:
+  // the reading starts on a default estimate and is re-timed on the
+  // real spoken line once the brain answers; if the estimate runs out
+  // before the reply lands, the end is held until the re-timed reading
+  // finishes.
   const ask = (e: FormEvent) => {
     e.preventDefault()
     const clean = input.trim()
     if (!clean) return
     setInput('')
     const catId = findCategoryForText(clean)
+    replyArrivedRef.current = false
     if (catId) {
       setWalkTick((t) => t + 1)
-      onOpenBook(catId)
+      setReading({ categoryId: catId, nonce: Date.now(), seconds: 12 })
+      pendingOpenRef.current = catId
     }
     void askBrain(clean).then(({ reply, source }) => {
       if (source === 'llm') setBrainLive(true)
       setLine(reply.text)
+      if (catId && pendingOpenRef.current === catId) {
+        replyArrivedRef.current = true
+        setReading({
+          categoryId: catId,
+          nonce: Date.now(),
+          seconds: estimateSeconds(shortenForSpeech(reply.text)),
+        })
+      }
       if (isSpeechSupported()) speak(reply.text)
     })
   }
+
+  const onReadingEnd = useCallback(() => {
+    const pending = pendingOpenRef.current
+    if (pending && replyArrivedRef.current) {
+      pendingOpenRef.current = null
+      onOpenBook(pending)
+    }
+  }, [onOpenBook])
 
   return {
     walkTick,
@@ -175,6 +244,8 @@ export function useVitaGuide({
     ask,
     openBook,
     brainLive,
+    reading,
+    onReadingEnd,
   }
 }
 
@@ -189,7 +260,15 @@ export function MenuVitaStage({ guide }: { guide: VitaGuide }) {
           </div>
         }
       >
-        <VrmModel compact walkTick={guide.walkTick} />
+        <VrmModel
+          compact
+          walkTick={guide.walkTick}
+          withBook
+          readingTick={guide.reading?.nonce ?? 0}
+          readingCategory={guide.reading?.categoryId}
+          readingSeconds={guide.reading?.seconds}
+          onReadingEnd={guide.onReadingEnd}
+        />
       </Suspense>
     </div>
   )
