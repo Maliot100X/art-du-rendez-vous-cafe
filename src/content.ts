@@ -398,7 +398,7 @@ export const AGENT = {
   qrTitle: 'Scannez pour discuter',
   qrText: 'Pointez votre téléphone vers ce code pour ouvrir le chat avec notre agent.',
   // TODO (Phase 9): replace with the real deployed site URL, e.g. https://<vercel-domain>/#agent
-  qrUrl: 'https://art-du-rendez-vous.cafe/#agent',
+  qrUrl: 'https://art-du-rendez-vous-cafe.vercel.app/#agent',
   guidance: [
     'Connaît toute la carte et les prix, ainsi que l’adresse du café.',
     'Propose des conseils selon vos goûts — café, bière, vin, apéritif.',
