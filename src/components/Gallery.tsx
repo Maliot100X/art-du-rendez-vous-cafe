@@ -140,6 +140,12 @@ export default function Gallery() {
         ))}
       </div>
 
+      {/* Real visitor photos from Google Maps — hidden while
+          mapsPhotos is empty (fix pass 10 removed the old listing's
+          photos; no replacements). Empty array maps fine, but the
+          heading + credit with no photos would be an empty section. */}
+      {GALLERY.mapsPhotos.length > 0 && (
+        <>
       {/* Real visitor photos from Google Maps. */}
       <div className="mt-16" data-reveal>
         <p className="font-mono text-label uppercase text-amber">{GALLERY.mapsTitle}</p>
@@ -182,6 +188,8 @@ export default function Gallery() {
       <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.14em] text-bone/50" data-reveal>
         {GALLERY.mapsCredit}
       </p>
+        </>
+      )}
 
       {/* The tall portrait poster — same code-built menu, vertical format. */}
       <figure className="gallery-item group relative mx-auto mt-4 w-full max-w-sm cursor-pointer overflow-hidden rounded-[1.5rem]">

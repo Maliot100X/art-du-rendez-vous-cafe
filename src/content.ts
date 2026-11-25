@@ -7,13 +7,17 @@ export const CAFE = {
   nameShort: 'Art du Rendez-Vous',
   suffix: 'CAFÉ',
   tagline: 'Café · Bar · Rendez-vous',
-  lede: "Un café de quartier ouvert presque jour et nuit — café le matin, apéritif le soir, et une carte de boissons qui ne s'arrête jamais.",
-  address: 'Rue des Artistes 1A, 1020 Bruxelles',
-  mapsUrl: 'https://maps.app.goo.gl/ZcxGx3xmSZzen3Zu7',
-  mapsNameNote: 'Sur Google Maps, le lieu est listé sous « Cafe Artistes ».',
-  rating: '4,8',
-  reviews: '45 avis',
-  // No phone and no website are listed for the café — never invent them.
+  lede: "Un café de quartier au cœur de Bruxelles — café le matin, apéritif le soir, et une carte de boissons à découvrir.",
+  address: 'Rue de Malines 21, 1000 Bruxelles, Belgium',
+  mapsUrl: 'https://maps.app.goo.gl/RcUuK3RTUZx5ndk66?g_st=ac',
+  mapsNameNote: 'Sur Google Maps, le lieu est listé sous « Casa da Santana ».',
+  rating: '3,5',
+  reviews: '2 avis',
+  // Phone is the number listed on the Google Maps listing for Casa da
+  // Santana — Minir has NOT confirmed it is his number. No website is
+  // listed for the café — never invent one.
+  phone: '+32 476 75 18 34',
+  phoneHref: 'tel:+32476751834',
   social: {
     // Facebook Page is being created — no URL yet. Do not invent one.
     facebookLabel: 'Facebook — page en cours de création',
@@ -34,7 +38,7 @@ export const NAV = {
 } as const;
 
 export const HERO = {
-  eyebrow: 'Bruxelles · Ouvert presque jour et nuit',
+  eyebrow: 'Bruxelles · Café · Bar',
   titleA: 'ART DU',
   titleB: 'RENDEZ-VOUS',
   titleC: 'CAFÉ',
@@ -43,7 +47,7 @@ export const HERO = {
   ctaPrimaryHash: '#carte',
   ctaSecondary: 'Parler à notre agent',
   ctaSecondaryHash: '#agent',
-  chips: ['Café dès 08:00', 'Apéritifs dès 18:00', 'Vendredi — dimanche : 24h/24'],
+  chips: ['Café · Bar · Rendez-vous', 'Cocktails à la menthe', 'Terrasse au soleil'],
   image: '/images/exterior.jpg',
   imageAlt: 'Le café à la tombée du jour, briques, auvents rouges et néons',
   // The pullable hero photo: the bar, not a face. The shader canvas shows
@@ -146,7 +150,7 @@ export const MENU: MenuCategory[] = [
   {
     id: 'aperitifs',
     label: 'Apéritifs',
-    blurb: 'L’heure de l’apéritif, de 18:00 jusqu’au bout de la nuit.',
+    blurb: 'L’heure de l’apéritif, du Spritz au Campari, jusqu’au bout de la nuit.',
     image: '/images/cocktails.jpg',
     imageAlt: 'Deux cocktails à la menthe sur la terrasse au soleil',
     items: [
@@ -286,78 +290,20 @@ export const GALLERY = {
   lightboxClose: 'Fermer l’image',
   lightboxPrev: 'Image précédente',
   lightboxNext: 'Image suivante',
-  // Real visitor photos from the café's Google Maps listing
-  // (downloaded from the listing's photo gallery, 2026-11-25).
+  // Maps visitor photos REMOVED 2026-11-25 (fix pass 10): the nine photos
+  // were from the old listing — the wrong place. No replacements fetched. The section stays hidden while mapsPhotos is
+  // empty (see Gallery.tsx); the keys below stay so the section can come
+  // back if real photos of the new place are ever added.
   mapsTitle: 'Photos des visiteurs — Google Maps',
-  mapsLede:
-    'Ce que les clients ont vraiment photographié : la façade au néon, le bar, la terrasse, les verres.',
-  mapsCredit:
-    'Photos des visiteurs — Google Maps. Sur Google Maps, le lieu est listé sous « Cafe Artistes ».',
-  mapsPhotos: [
-    {
-      src: '/images/maps/maps-01-neon-exterieur.jpg',
-      alt: 'Façade du café à la tombée du jour, enseignes néon rouges « Cafe Artistes »',
-      caption: 'La façade au néon, le soir',
-      video: false,
-      credit: 'Mariana Cudric — juin 2024',
-    },
-    {
-      src: '/images/maps/maps-02-cocktails-menthe.jpg',
-      alt: 'Deux cocktails verts à la menthe et au citron, sur la terrasse',
-      caption: 'Cocktails à la menthe, sur la terrasse',
-      video: false,
-      credit: 'Avril 2024',
-    },
-    {
-      src: '/images/maps/maps-03-bar-marilyn.jpg',
-      alt: 'Le bar en bois courbé, lumière bleue, portraits de Marilyn Monroe au mur',
-      caption: 'Le bar en bois, lumière bleue et Marilyn',
-      video: false,
-      credit: 'Mariana Cudric — juin 2026',
-    },
-    {
-      src: '/images/maps/maps-04-cafe-terrasse-neige.jpg',
-      alt: 'Café en couches dans un verre, posé sur une table de terrasse couverte de neige',
-      caption: 'Café en couches, sur la terrasse enneigée',
-      video: false,
-      credit: 'Avril 2024',
-    },
-    {
-      src: '/images/maps/maps-05-boisson-rose.jpg',
-      alt: 'Boisson rose dans un grand verre, lys jaunes en arrière-plan',
-      caption: 'Boisson rose, lys jaunes',
-      video: false,
-      credit: 'Avril 2024',
-    },
-    {
-      src: '/images/maps/maps-06-boissons-glacees.jpg',
-      alt: 'Quatre boissons glacées sombres avec tranches d’orange, sur le comptoir',
-      caption: 'Quatre boissons glacées, tranches d’orange',
-      video: false,
-      credit: 'Avril 2024',
-    },
-    {
-      src: '/images/maps/maps-07-video-rue.jpg',
-      alt: 'La rue devant le café au crépuscule, tonneaux en bois et néon rouge',
-      caption: 'La rue, au crépuscule',
-      video: true,
-      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
-    },
-    {
-      src: '/images/maps/maps-08-video-terrasse.jpg',
-      alt: 'La terrasse sous un grand parasol noir, clients attablés',
-      caption: 'La terrasse, sous le parasol',
-      video: true,
-      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
-    },
-    {
-      src: '/images/maps/maps-09-video-toast.jpg',
-      alt: 'Groupe de clients qui trinquent à l’intérieur, portraits encadrés au mur',
-      caption: 'On trinque, à l’intérieur',
-      video: true,
-      credit: 'Image de vidéo — Mariana Cudric, juin 2026',
-    },
-  ],
+  mapsLede: 'Ce que les clients ont vraiment photographié.',
+  mapsCredit: 'Photos des visiteurs — Google Maps.',
+  mapsPhotos: [] as {
+    src: string
+    alt: string
+    caption: string
+    video: boolean
+    credit: string
+  }[],
 } as const;
 
 export const VISIT = {
@@ -365,19 +311,20 @@ export const VISIT = {
   title: 'Trouver le café.',
   addressLabel: 'Adresse',
   hoursLabel: 'Horaires',
-  hours: [
-    { days: 'Lundi — Mercredi', time: '08:00 — 02:00' },
-    { days: 'Jeudi', time: '08:00 — 00:00' },
-    { days: 'Vendredi — Dimanche', time: '24h/24' },
-  ],
+  // No hours are listed on Google Maps for the new place — never invent
+  // them. The single row below is the à-confirmer placeholder the book
+  // back cover and the canvas back cover render; Visit.tsx shows the
+  // to-confirm note instead of an hours table.
+  hours: [{ days: 'Horaires', time: 'À confirmer' }],
+  hoursNote: 'Horaires — à confirmer. Google Maps n’en liste aucun pour ce lieu.',
   dayTimeline: [
-    { time: '08:00', label: 'Ouverture — premier café' },
-    { time: '12:00', label: 'Pause déjeuner, terrasse au soleil' },
-    { time: '18:00', label: 'Apéritif — Spritz, Kir, Campari' },
-    { time: '00:00', label: 'La nuit continue — vendredi à dimanche, 24h/24' },
+    { time: 'Matin', label: 'Premier café' },
+    { time: 'Midi', label: 'Pause déjeuner, terrasse au soleil' },
+    { time: 'Soir', label: 'Apéritif — Spritz, Kir, Campari' },
+    { time: 'Nuit', label: 'Dernier verre, en douceur' },
   ],
   mapsCta: 'Ouvrir dans Google Maps',
-  ratingLine: '4,8 sur 5 — 45 avis sur Google Maps',
+  ratingLine: '3,5 sur 5 — 2 avis sur Google Maps',
 } as const;
 
 /**
@@ -396,7 +343,7 @@ export const CHARACTER = {
   personality:
     'Chaleureuse, directe et concise — une à trois phrases par réponse, jamais de prix inventé, toujours le nom exact de la boisson tel qu’il figure sur la carte.',
   scenario:
-    'Elle accueille les visiteurs du site de l’Art du Rendez-Vous, un café-bar à Bruxelles, et les aide à choisir une boisson, à composer une commande et à trouver les horaires et l’adresse.',
+    'Elle accueille les visiteurs du site de l’Art du Rendez-Vous, un café-bar à Bruxelles, et les aide à choisir une boisson, à composer une commande et à trouver l’adresse du café.',
   greetings: {
     menu: 'Bonjour ! Choisissez une catégorie — je marche vers elle et je vous lis les prix.',
     agent:
@@ -407,10 +354,10 @@ export const CHARACTER = {
 export const AGENT = {
   eyebrow: 'Agent en direct',
   title: 'Parlez à Nekomi.',
-  lede: "Notre agent en direct connaît toute la carte, les horaires et le café. Demandez un conseil, composez votre commande — elle vous proposera même de vous appeler pour la confirmer.",
+  lede: "Notre agent en direct connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle vous proposera même de vous appeler pour la confirmer.",
   statusOffline: 'Agent en direct — connexion en cours de mise en place',
   statusHint:
-    'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et les horaires.',
+    'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
   chatPlaceholder: 'Écrivez ici… ex. « un café et un Aperol Spritz »',
   chatSend: 'Envoyer',
   chatWelcome:
@@ -451,7 +398,7 @@ export const AGENT = {
   // TODO (Phase 9): replace with the real deployed site URL, e.g. https://<vercel-domain>/#agent
   qrUrl: 'https://art-du-rendez-vous.cafe/#agent',
   guidance: [
-    'Connaît toute la carte et les prix, les horaires et l’adresse du café.',
+    'Connaît toute la carte et les prix, ainsi que l’adresse du café.',
     'Propose des conseils selon vos goûts — café, bière, vin, apéritif.',
     'Compose votre commande et propose de vous appeler pour la confirmer.',
   ],
@@ -482,7 +429,7 @@ export const FOOTER = {
     },
   ],
   legal: '© 2026 Art du Rendez-Vous — Café · Bruxelles',
-  mapsLine: 'Rue des Artistes 1A, 1020 Bruxelles',
+  mapsLine: 'Rue de Malines 21, 1000 Bruxelles, Belgium',
 } as const;
 
 // Live-agent connection config. Keys are read from environment variables only.
