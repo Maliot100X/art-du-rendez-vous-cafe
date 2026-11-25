@@ -109,6 +109,18 @@ html.lenis body {
     text-wrap: balance;
   }
 
+  /* Book cover title — fluid type with a rem term in the preferred
+     value, so "RENDEZ-VOUS" can never clip on a narrow screen (the old
+     150px fixed Bodoni title did) and still grows when the user zooms
+     (WCAG 1.4.4, responsive-typography). The canvas pages keep their
+     measure-and-shrink loop — the DOM equivalent of the same rule. */
+  .book-title {
+    font-size: clamp(2rem, 1.5rem + 6vw, 3.5rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
   /* Static fluid fallback — the same café palette as the WebGL sim,
      painted as layered radial glows on near-black. This is what visitors
      see when WebGL is unavailable, reduced motion is on, or the sim

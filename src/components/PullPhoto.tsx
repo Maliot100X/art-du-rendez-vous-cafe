@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { HERO } from '../content';
 import { useReducedMotion } from '../lib/scroll';
+import { pixelRatioCap } from '../lib/perf';
 import { EASE_SILK_CSS } from '../lib/motion';
 import { PullEngine } from '../lib/pullEngine';
 
@@ -57,7 +58,7 @@ export default function PullPhoto({ src, alt }: Props) {
       const w = wrap.offsetWidth;
       const h = wrap.offsetHeight;
       if (w === 0 || h === 0) return;
-      engine.resize(w, h, Math.min(window.devicePixelRatio || 1, 2));
+      engine.resize(w, h, Math.min(window.devicePixelRatio || 1, pixelRatioCap()));
       engine.setStage({ x: 0, y: 0, w, h });
     };
 

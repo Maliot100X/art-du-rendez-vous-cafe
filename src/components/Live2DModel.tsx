@@ -3,6 +3,7 @@ import type { Live2DModel as Live2DModelType } from 'pixi-live2d-display/cubism4
 import useDimensions from 'react-cool-dimensions'
 import { AGENT } from '../content'
 import { avatarBridge, EXPRESSION_PRESETS, type AvatarBridge } from '../lib/avatarBridge'
+import { pixelRatioCap } from '../lib/perf'
 
 /**
  * Nekomi — Live2D Cubism 3 model, rendered with pixi-live2d-display
@@ -146,7 +147,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           view: canvas,
           backgroundAlpha: 0,
           antialias: true,
-          resolution: Math.min(window.devicePixelRatio || 1, 2),
+          resolution: Math.min(window.devicePixelRatio || 1, pixelRatioCap()),
           autoDensity: true,
         })
 

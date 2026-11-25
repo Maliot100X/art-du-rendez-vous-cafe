@@ -1,82 +1,14 @@
-import { useEffect, useRef } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
-import * as THREE from 'three'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import ErrorBoundary from './ErrorBoundary'
+
+// The dust veil is its own chunk (three + fiber + postprocessing):
+// it loads with the hero, never with the first paint.
+const HeroDust = lazy(() => import('./HeroDust'))
 import { HERO } from '../content'
 import { onFrame, scrollToHash, useReducedMotion } from '../lib/scroll'
 import { clamp } from '../lib/math'
 import { gsap, GSAP_EASE_SILK } from '../lib/motion'
 import PullPhoto from './PullPhoto'
-
-/** Dust motes drifting over the hero — the selene dust veil, as real 3D. */
-function Dust() {
-  const ref = useRef<THREE.Points>(null!)
-  const count = 260
-  const positions = useRef<Float32Array | null>(null)
-  if (positions.current === null) {
-    const arr = new Float32Array(count * 3)
-    for (let i = 0; i < count; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 16
-      arr[i * 3 + 1] = (Math.random() - 0.5) * 9
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 4 - 1
-    }
-    positions.current = arr
-  }
-  const texture = useRef<THREE.Texture | null>(null)
-  if (texture.current === null) {
-    const canvas = document.createElement('canvas')
-    canvas.width = 64
-    canvas.height = 64
-    const ctx = canvas.getContext('2d')!
-    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-    g.addColorStop(0, 'rgba(232,163,61,1)')
-    g.addColorStop(0.4, 'rgba(232,163,61,0.45)')
-    g.addColorStop(1, 'rgba(232,163,61,0)')
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, 64, 64)
-    texture.current = new THREE.CanvasTexture(canvas)
-  }
-
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime()
-    ref.current.rotation.y = Math.sin(t * 0.05) * 0.08
-    ref.current.position.y = Math.sin(t * 0.12) * 0.25
-  })
-
-  return (
-    <points ref={ref}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions.current, 3]} />
-      </bufferGeometry>
-      <pointsMaterial
-        size={0.14}
-        map={texture.current}
-        transparent
-        opacity={0.75}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-        sizeAttenuation
-      />
-    </points>
-  )
-}
-
-function DustScene() {
-  return (
-    <Canvas
-      dpr={[1, 1.75]}
-      camera={{ position: [0, 0, 7], fov: 50 }}
-      gl={{ antialias: true, alpha: true }}
-      style={{ pointerEvents: 'none' }}
-    >
-      <Dust />
-      <EffectComposer>
-        <Bloom intensity={0.55} luminanceThreshold={0.55} luminanceSmoothing={0.2} mipmapBlur />
-      </EffectComposer>
-    </Canvas>
-  )
-}
 
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null)
@@ -140,14 +72,16 @@ export default function Hero() {
   }, [])
 
   return (
-    <section ref={sectionRef} id="top" className="relative overflow-clip pt-[86px] sm:pt-[104px]">
+    <section ref={sectionRef} id="top" className="relative overflow-clip pt-8 sm:pt-10">
       {/* 3D dust veil behind everything. Decorative only: if WebGL is
           unavailable (headless browsers, old devices) the boundary drops
           the canvas instead of letting R3F's renderer throw unmount the
           whole app. */}
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
         <ErrorBoundary fallback={null}>
-          <DustScene />
+          <Suspense fallback={null}>
+            <HeroDust />
+          </Suspense>
         </ErrorBoundary>
       </div>
       {/* Warm glow, low in the frame */}

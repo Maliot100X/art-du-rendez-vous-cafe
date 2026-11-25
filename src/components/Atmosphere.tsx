@@ -129,7 +129,7 @@ export default function Atmosphere() {
         ))}
 
         {/* Header copy — GSAP fades it away as the chapters take over */}
-        <div ref={headerRef} className="absolute inset-x-0 top-0 px-4 pt-[104px] will-change-transform sm:px-6">
+        <div ref={headerRef} className="absolute inset-x-0 top-0 px-4 pt-[140px] will-change-transform sm:px-6">
           <div className="mx-auto max-w-[1400px]">
             <p className="font-mono text-label uppercase text-amber">{ATMOSPHERE.eyebrow}</p>
             <h2 className="mt-3 max-w-xl font-display text-display text-bone">{ATMOSPHERE.title}</h2>

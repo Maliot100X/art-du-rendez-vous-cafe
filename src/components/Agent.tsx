@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   MessageSquareText,
@@ -20,9 +20,12 @@ import { onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
 import { DeepgramVoiceAgent, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
 import type { OrderLine } from './MenuSection'
-import Live2DModel from './Live2DModel'
-import VrmModel from './VrmModel'
 import { EASE_SILK, ScrollTrigger } from '../lib/motion'
+
+// The stages are their own chunks (three-vrm, pixi + cubism): they load
+// only when the Agent tab opens, never with the first paint.
+const VrmModel = lazy(() => import('./VrmModel'))
+const Live2DModel = lazy(() => import('./Live2DModel'))
 
 interface ChatMsg {
   role: 'user' | 'bot'
@@ -328,11 +331,19 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               </button>
             ))}
           </div>
-          {stage === 'vrm' ? (
-            <VrmModel bridge={avatarBridge} onFailed={handleVrmFailed} />
-          ) : (
-            <Live2DModel bridge={avatarBridge} />
-          )}
+          <Suspense
+            fallback={
+              <div className="flex h-[520px] items-center justify-center rounded-[1.75rem] border border-line bg-ink-2 sm:h-[540px] lg:h-[560px]">
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">Le modèle se prépare…</p>
+              </div>
+            }
+          >
+            {stage === 'vrm' ? (
+              <VrmModel bridge={avatarBridge} onFailed={handleVrmFailed} />
+            ) : (
+              <Live2DModel bridge={avatarBridge} />
+            )}
+          </Suspense>
           {/* Guidance — full list on desktop, collapsed on a phone so
               the agent section stays compact. */}
           <ul className="mt-6 hidden space-y-3 sm:block">

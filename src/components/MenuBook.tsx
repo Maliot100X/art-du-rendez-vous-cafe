@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import * as THREE from 'three';
+import { useDrag } from '@use-gesture/react';
+import useDimensions from 'react-cool-dimensions';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { BOOK, CAFE, MENU, VISIT } from '../content';
-import { gsap, GSAP_EASE_SILK } from '../lib/motion';
+import { gsap, GSAP_EASE_SILK, ScrollTrigger } from '../lib/motion';
 import { useReducedMotion } from '../lib/scroll';
+import { emitBookCategory } from '../lib/bookEvents';
+import { pixelRatioCap } from '../lib/perf';
 import {
   LEAF_COUNT,
   PAGE_H,
@@ -33,6 +37,24 @@ import {
  * prefers-reduced-motion (or no WebGL2) → the same spreads as static
  * DOM pages, same controls, no animation. The render loop only runs
  * while a flip is tweening or on resize — no idle rAF.
+ *
+ * Book v2:
+ * - Scroll opens it: a ScrollTrigger fires once when the stage scrolls
+ *   into view and turns the cover to the first category.
+ * - The flip lands on a category → emitBookCategory(catId), so the
+ *   agent (and the menu Vita) react — the end-to-end book → agent wire.
+ * - Sizing is measured (react-cool-dimensions, the react-pageflip
+ *   "stretch" pattern): the stage frames from its real rendered bounds,
+ *   never from an assumed width; single-page vs spread follows the
+ *   measured width, not window.innerWidth.
+ * - The swipe is useDrag with axis: 'lock' (use-gesture): once the
+ *   gesture commits to an axis it stays there, so a vertical swipe
+ *   scrolls the page (mobileScrollSupport in pageflip terms — the book
+ *   never eats the page scroll) and only a horizontal swipe turns a
+ *   leaf. touch-action: pan-y backs it up at the browser level.
+ * - The static DOM spreads use fluid type (clamp with a rem term) so
+ *   the cover title can never clip on a narrow screen — the canvas
+ *   pages keep their measure-and-shrink loop, the DOM equivalent.
  */
 
 const PAGE_W_UNITS = 1;
@@ -61,7 +83,21 @@ interface ThreeBook {
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-export default function MenuBook() {
+/** The category a flip state shows (1..7), or null for cover / back. */
+function categoryForFlip(flipped: number): (typeof MENU)[number] | null {
+  return flipped >= 1 && flipped <= MENU.length ? MENU[flipped - 1] : null
+}
+
+export default function MenuBook({
+  goToCategory,
+}: {
+  /**
+   * External flip request (the menu Vita's "Feuilleter le livre"):
+   * { catId, nonce } — the nonce makes repeat requests to the same
+   * category fire again.
+   */
+  goToCategory?: { catId: string; nonce: number } | null
+}) {
   const reducedMotion = useReducedMotion();
   const [flipped, setFlipped] = useState(0);
   const [webglFailed, setWebglFailed] = useState(false);
@@ -74,6 +110,18 @@ export default function MenuBook() {
   const threeRef = useRef<ThreeBook | null>(null);
   const singlePageRef = useRef(singlePage);
   singlePageRef.current = singlePage;
+  // Measured stage bounds (react-cool-dimensions / pageflip "stretch"):
+  // the Three.js layout frames from these, never from assumed math.
+  const { observe: observeStage, width: stageW, height: stageH } = useDimensions<HTMLDivElement>();
+  const stageSizeRef = useRef({ w: 0, h: 0 });
+
+  const setStageRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      stageRef.current = el;
+      if (el) observeStage(el);
+    },
+    [observeStage],
+  );
 
   const staticMode = reducedMotion || webglFailed;
 
@@ -81,8 +129,18 @@ export default function MenuBook() {
     (target: number) => {
       const next = Math.max(0, Math.min(LEAF_COUNT, target));
       setFlipped(next);
+      // The flip landed on a category: tell the agent + the menu Vita.
+      // In the animated path this fires on tween completion; in static
+      // mode the flip is instant, so it fires here.
+      const emit = () => {
+        const cat = categoryForFlip(next);
+        if (cat) emitBookCategory(cat.id);
+      };
       const three = threeRef.current;
-      if (!three || staticMode) return;
+      if (!three || staticMode) {
+        if (staticMode) emit();
+        return;
+      }
       const from = flipRef.current;
       if (from === next) return;
       tweenRef.current?.kill();
@@ -99,11 +157,43 @@ export default function MenuBook() {
         },
         onComplete: () => {
           flipRef.current = next;
+          emit();
         },
       });
     },
     [staticMode],
   );
+
+  /* ---- External flip request (menu Vita → book). ---- */
+  useEffect(() => {
+    if (!goToCategory) return;
+    const idx = MENU.findIndex((c) => c.id === goToCategory.catId);
+    if (idx >= 0) goTo(idx + 1);
+  }, [goToCategory, goTo]);
+
+  /* ---- Scroll opens the book: cover → first category, once. ---- */
+  useEffect(() => {
+    if (reducedMotion) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const trigger = ScrollTrigger.create({
+      trigger: stage,
+      start: 'top 78%',
+      once: true,
+      onEnter: () => {
+        if (flipRef.current === 0) goTo(1);
+      },
+    });
+    return () => {
+      trigger.kill();
+    };
+  }, [reducedMotion, goTo]);
+
+  /* ---- Re-layout from the measured stage bounds. ---- */
+  useEffect(() => {
+    stageSizeRef.current = { w: stageW, h: stageH };
+    if (stageW > 0 && stageH > 0) threeRef.current?.layout();
+  }, [stageW, stageH]);
 
   /* ---- Three.js book: built once, disposed on unmount. ---- */
   useEffect(() => {
@@ -113,7 +203,6 @@ export default function MenuBook() {
 
     let cancelled = false;
     let three: ThreeBook | null = null;
-    let ro: ResizeObserver | null = null;
 
     const init = async () => {
       // Wait for the brand fonts (or 2.5s, whichever first) so the canvas
@@ -160,7 +249,7 @@ export default function MenuBook() {
         if (!cancelled) setWebglFailed(true);
         return;
       }
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap()));
       renderer.setClearColor(0x000000, 0);
       stage.appendChild(renderer.domElement);
       renderer.domElement.setAttribute('aria-hidden', 'true');
@@ -250,8 +339,11 @@ export default function MenuBook() {
       };
 
       const layout = () => {
-        const w = stage.clientWidth;
-        const h = stage.clientHeight;
+        // Measured bounds first (useDimensions), clientWidth as the
+        // fallback for the first frame before the observer fires.
+        const measured = stageSizeRef.current;
+        const w = measured.w > 0 ? measured.w : stage.clientWidth;
+        const h = measured.h > 0 ? measured.h : stage.clientHeight;
         if (!w || !h) return;
         renderer.setSize(w, h, false);
         const single = w < 640;
@@ -277,7 +369,6 @@ export default function MenuBook() {
 
       const dispose = () => {
         tweenRef.current?.kill();
-        ro?.disconnect();
         leafRuntimes.forEach((leaf) => leaf.geometry.dispose());
         textures.forEach((tex) => tex.dispose());
         renderer.dispose();
@@ -309,8 +400,8 @@ export default function MenuBook() {
       );
 
       layout();
-      ro = new ResizeObserver(layout);
-      ro.observe(stage);
+      // Sizing changes arrive through the useDimensions effect above
+      // (stageSizeRef + layout), not a second ResizeObserver here.
     };
 
     void init();
@@ -321,32 +412,22 @@ export default function MenuBook() {
     };
   }, [reducedMotion]);
 
-  /* ---- Swipe with a directional lock (touch-action: pan-y). ---- */
-  const swipeRef = useRef<{ x: number; y: number; done: boolean } | null>(null);
-  const onPointerDown = (ev: ReactPointerEvent) => {
-    swipeRef.current = { x: ev.clientX, y: ev.clientY, done: false };
-  };
-  const onPointerMove = (ev: ReactPointerEvent) => {
-    const s = swipeRef.current;
-    if (!s || s.done) return;
-    const dx = ev.clientX - s.x;
-    const dy = ev.clientY - s.y;
-    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      s.done = true;
-      goTo(flipped + (dx < 0 ? 1 : -1));
-    }
-  };
-  const onPointerUp = (ev: ReactPointerEvent) => {
-    const s = swipeRef.current;
-    if (s && !s.done) {
-      const dx = ev.clientX - s.x;
-      const dy = ev.clientY - s.y;
-      if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-        goTo(flipped + (dx < 0 ? 1 : -1));
+  /* ---- Swipe with a directional lock (useDrag axis: 'lock'). ----
+     Once the gesture commits to an axis it stays there: a vertical
+     swipe scrolls the page (the book never eats page scroll — the
+     pageflip mobileScrollSupport trap), only a clearly horizontal
+     swipe (or a fast horizontal flick) turns a leaf. */
+  const bind = useDrag(
+    ({ swipe: [swipeX], movement: [mx], last }) => {
+      if (!last) return;
+      if (swipeX !== 0) {
+        goTo(flipped + (swipeX < 0 ? 1 : -1));
+        return;
       }
-    }
-    swipeRef.current = null;
-  };
+      if (Math.abs(mx) > 70) goTo(flipped + (mx < 0 ? 1 : -1));
+    },
+    { axis: 'lock', filterTaps: true },
+  );
   const onKeyDown = (ev: ReactKeyboardEvent) => {
     if (ev.key === 'ArrowRight') {
       ev.preventDefault();
@@ -382,17 +463,12 @@ export default function MenuBook() {
 
       {/* Stage — focusable region: arrows turn the pages. */}
       <div
-        ref={stageRef}
+        ref={setStageRef}
         tabIndex={0}
         role="region"
         aria-label="Livre de la carte — flèches gauche et droite pour tourner les pages"
         onKeyDown={onKeyDown}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={() => {
-          swipeRef.current = null;
-        }}
+        {...bind()}
         className="relative mx-auto mt-12 w-full touch-pan-y select-none overflow-hidden"
         style={{
           maxWidth: singlePage ? 480 : 960,
@@ -483,12 +559,12 @@ function StaticSpread({
       <div className="flex h-full items-center justify-center">
         <div className="flex h-full w-full max-w-md flex-col items-center justify-center rounded-[1.5rem] bg-ink-2 px-8 text-center ring-1 ring-line">
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-amber">Bruxelles · Depuis toujours</p>
-          <p className="mt-6 font-display text-5xl font-bold leading-none text-bone">
+          <p className="book-title mt-6 font-display font-bold text-bone">
             ART DU
             <br />
             RENDEZ-VOUS
           </p>
-          <p className="mt-2 font-display text-5xl italic text-amber">Café</p>
+          <p className="book-title mt-2 font-display italic text-amber">Café</p>
           <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-bone/70">La carte des boissons</p>
           <p className="mt-2 text-sm text-bone/60">Sept familles, des prix affichés, rien d’autre.</p>
         </div>
@@ -499,12 +575,12 @@ function StaticSpread({
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex h-full w-full max-w-md flex-col items-center justify-center rounded-[1.5rem] bg-ink-2 px-8 text-center ring-1 ring-line">
-          <p className="font-display text-4xl font-bold leading-tight text-bone">
+          <p className="book-title font-display font-bold leading-tight text-bone">
             ART DU
             <br />
             RENDEZ-VOUS
           </p>
-          <p className="mt-1 font-display text-4xl italic text-amber">Café</p>
+          <p className="book-title mt-1 font-display italic text-amber">Café</p>
           <p className="mt-6 text-body text-bone/75">{CAFE.address}</p>
           <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.16em] text-amber">Horaires</p>
           {VISIT.hours.map((h) => (

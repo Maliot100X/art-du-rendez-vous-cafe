@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Plus } from 'lucide-react'
 import { MENU } from '../content'
@@ -13,7 +13,8 @@ export default function MenuSection({
   onAdd,
   onActiveChange,
   onItemAdd,
-  barTopClass = 'top-[128px] sm:top-[136px]',
+  barTopClass = 'top-[124px] sm:top-[132px]',
+  betweenBarAndList,
 }: {
   onAdd: (line: OrderLine) => void
   /**
@@ -26,6 +27,12 @@ export default function MenuSection({
   onActiveChange?: (catId: string) => void
   onItemAdd?: (line: OrderLine) => void
   barTopClass?: string
+  /**
+   * Node rendered between the sticky category bar and the list — the
+   * tab shell puts the phone Vita stage + panel here, so the stage can
+   * stick under the category bar while the list scrolls beneath it.
+   */
+  betweenBarAndList?: ReactNode
 }) {
   const [active, setActive] = useState(MENU[0].id)
   const [added, setAdded] = useState<string | null>(null)
@@ -152,6 +159,8 @@ export default function MenuSection({
           ))}
         </div>
       </div>
+
+      {betweenBarAndList}
 
       {/* Tab content — Framer Motion owns the swap (mode="wait": the old
           category fades/slides out before the new one enters); GSAP owns
