@@ -19,7 +19,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(80, N * STEP + 60),
-    new THREE.MeshPhysicalMaterial({color: '#1c0d07', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.06, metalness: 0.1, envMapIntensity: 0.6}),
+    new THREE.MeshPhysicalMaterial({color: '#3a1408', roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08, metalness: 0, envMapIntensity: 0.12}),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.z = -(N * STEP) / 2;
@@ -110,14 +110,14 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     // station = fractional frame index; the camera stands 6.5 in front of it
     const f = u * (N - 1);
     const i = THREE.MathUtils.clamp(Math.round(f), 0, N - 1);
-    pos.set(Math.sin(f * Math.PI) * 0.5, 2.5 + Math.sin(f * 1.3) * 0.15, -f * STEP + 6.5);
+    pos.set(Math.sin(f * Math.PI) * 0.5, 2.5 + Math.sin(f * 1.3) * 0.15, -f * STEP + 7.6);
     const fr = frames[i];
     camera.position.copy(pos).add(new THREE.Vector3(mouse.x * 0.4, mouse.y * 0.25, 0));
     // look between the path ahead and the visited frame
     look.set(0, 2.6, pos.z - 8);
     const fp = new THREE.Vector3(fr.g.position.x, 3.1, fr.g.position.z);
     const near = 1 - Math.min(1, Math.abs(f - i) * 1.6);
-    look.lerp(fp, 0.35 + near * 0.4);
+    look.lerp(fp, 0.45 + near * 0.47);
     camera.lookAt(look);
     frames.forEach((F, j) => {
       const d = Math.max(0, 1 - Math.abs(f - j));

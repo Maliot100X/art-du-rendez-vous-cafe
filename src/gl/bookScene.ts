@@ -226,7 +226,7 @@ export function createBookScene(
   top.position.set(0, -0.2, 0.4);
   top.receiveShadow = true;
   scene.add(top);
-  const front = new THREE.Mesh(new THREE.BoxGeometry(16, 6, 0.3), new THREE.MeshPhysicalMaterial({color: '#1d140f', roughness: 0.35, clearcoat: 0.8}));
+  const front = new THREE.Mesh(new THREE.BoxGeometry(16, 6, 0.3), new THREE.MeshPhysicalMaterial({color: '#2a1009', roughness: 0.4, clearcoat: 0.6, envMapIntensity: 0.2}));
   front.position.set(0, -3.4, 2.85);
   scene.add(front);
   const brass = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 16, 16), new THREE.MeshPhysicalMaterial({color: '#d9a650', metalness: 1, roughness: 0.2}));
