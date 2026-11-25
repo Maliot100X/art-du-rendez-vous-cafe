@@ -29,10 +29,11 @@ export const L2DHost = forwardRef<L2DHandle, {className?: string; view?: 'bust' 
     <iframe
       ref={frame}
       title="Nori, l’hôte du café"
-      src={`/host-l2d/index.html?model=/host-l2d/nori.l2d&obs=1&saved=0&view=${view}&face=Happy`}
+      src={`/host-l2d/index.html?model=/host-l2d/nori.l2d&obs=1&bg=transparent&saved=0&view=${view}&face=Happy`}
       onLoad={() => setReady(true)}
       className={`pointer-events-none border-0 bg-transparent transition-opacity duration-1000 ${ready ? 'opacity-100' : 'opacity-0'} ${className}`}
-      style={{colorScheme: 'normal'}}
+      // the player sets color-scheme: dark; match it or Chromium paints the frame opaque
+      style={{colorScheme: 'dark', background: 'transparent'}}
       allow="autoplay"
       tabIndex={-1}
       data-host="layer2d"

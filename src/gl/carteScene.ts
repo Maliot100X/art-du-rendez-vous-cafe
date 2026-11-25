@@ -25,7 +25,7 @@ void main(){
   float a = 1.0 - smoothstep(0.0, 0.012, d - 0.03);
   vec3 col = c.rgb * mix(0.42, 1.06, uLit);
   float alpha = a;
-  if (uMirror > 0.5) { alpha *= smoothstep(0.35, 1.0, vUv.y) * 0.28; }
+  if (uMirror > 0.5) { alpha *= smoothstep(0.3, 1.0, vUv.y) * 0.45; }
   gl_FragColor = vec4(col, alpha);
   #include <colorspace_fragment>
 }`;

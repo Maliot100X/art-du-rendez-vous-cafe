@@ -112,7 +112,7 @@ export function Commande() {
   return (
     <section id="commande" aria-labelledby="commande-title" className="relative min-h-svh">
       <canvas ref={canvasRef} className="fixed inset-0 -z-0 size-full" aria-hidden="true" />
-      {!USE_VRM && <L2DHost ref={l2dRef} className="fixed bottom-[22svh] left-[8%] z-0 h-[70svh] w-[40vw] max-md:left-0 max-md:bottom-[40svh] max-md:h-[42svh] max-md:w-full" />}
+      {!USE_VRM && <L2DHost ref={l2dRef} className="fixed bottom-[35svh] left-[10%] z-0 h-[46svh] w-[32vw] max-md:left-0 max-md:bottom-[45svh] max-md:h-[34svh] max-md:w-full" />}
       <div className="relative z-10 mx-auto grid max-w-[1680px] gap-6 px-5 pt-24 pb-16 md:grid-cols-[1fr_minmax(0,26rem)] md:px-10 md:pt-28">
         <div className="flex flex-col justify-between gap-6">
           <div>

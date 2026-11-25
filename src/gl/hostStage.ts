@@ -16,7 +16,7 @@ export function createHostStage(canvas: HTMLCanvasElement, opts: {reduced: boole
   const top = new THREE.Mesh(new THREE.BoxGeometry(12, 0.3, 2.4), new THREE.MeshPhysicalMaterial({map: marble, roughness: 0.25, clearcoat: 1, envMapIntensity: 0.6}));
   top.position.set(0, 1.72, 1.2);
   top.receiveShadow = true;
-  const front = new THREE.Mesh(new THREE.BoxGeometry(12, 1.6, 0.2), new THREE.MeshPhysicalMaterial({color: '#1d140f', roughness: 0.35, clearcoat: 0.8}));
+  const front = new THREE.Mesh(new THREE.BoxGeometry(12, 1.6, 0.2), new THREE.MeshPhysicalMaterial({color: '#2a1009', roughness: 0.4, clearcoat: 0.6, envMapIntensity: 0.25}));
   front.position.set(0, 0.8, 2.35);
   scene.add(top, front);
   // back shelf with bottles

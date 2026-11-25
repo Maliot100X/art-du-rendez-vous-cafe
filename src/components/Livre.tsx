@@ -141,7 +141,7 @@ export function Livre() {
           </div>
         </div>
 
-        {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-0 left-[-4%] h-[78svh] w-[44vw] max-md:left-[-18%] max-md:h-[52svh] max-md:w-[90vw]" />}
+        {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-[10svh] left-[2%] h-[62svh] w-[34vw] max-md:left-[-10%] max-md:bottom-[30svh] max-md:h-[36svh] max-md:w-[80vw]" />}
 
         {/* host speech bubble */}
         <div

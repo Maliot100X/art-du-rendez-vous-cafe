@@ -30,7 +30,6 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
   const gold = new THREE.MeshPhysicalMaterial({color: '#d4a24c', metalness: 1, roughness: 0.25});
   const wood = new THREE.MeshPhysicalMaterial({color: '#3b2216', roughness: 0.5, clearcoat: 0.6});
   const frames: {g: THREE.Group; side: number; mat: THREE.MeshBasicMaterial; base: number}[] = [];
-  const pathPts: THREE.Vector3[] = [new THREE.Vector3(0, 2.4, 9)];
   opts.shots.forEach((s, i) => {
     const side = i % 2 ? 1 : -1;
     const z = -i * STEP;
@@ -73,10 +72,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     g.add(photo, back, rear);
     scene.add(g);
     frames.push({g, side, mat, base: -side * 0.55});
-    pathPts.push(new THREE.Vector3(-side * 0.5, 2.4 + Math.sin(i) * 0.2, z + 5.4));
   });
-  pathPts.push(new THREE.Vector3(0, 2.6, -(N - 1) * STEP - 4));
-  const path = new THREE.CatmullRomCurve3(pathPts, false, 'catmullrom', 0.3);
 
   // warm lamp that travels with the camera
   const lamp = new THREE.PointLight('#ffd6a0', 30, 16, 2);
@@ -111,17 +107,17 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     mouse.x += (mouse.tx - mouse.x) * 0.05;
     mouse.y += (mouse.ty - mouse.y) * 0.05;
     const u = THREE.MathUtils.clamp(k, 0, 1);
-    path.getPointAt(u, pos);
-    const f = u * N - 0.5;
+    // station = fractional frame index; the camera stands 6.5 in front of it
+    const f = u * (N - 1);
     const i = THREE.MathUtils.clamp(Math.round(f), 0, N - 1);
+    pos.set(Math.sin(f * Math.PI) * 0.5, 2.5 + Math.sin(f * 1.3) * 0.15, -f * STEP + 6.5);
     const fr = frames[i];
     camera.position.copy(pos).add(new THREE.Vector3(mouse.x * 0.4, mouse.y * 0.25, 0));
     // look between the path ahead and the visited frame
-    path.getPointAt(Math.min(1, u + 0.04), look);
-    look.y = 2.6;
+    look.set(0, 2.6, pos.z - 8);
     const fp = new THREE.Vector3(fr.g.position.x, 3.1, fr.g.position.z);
     const near = 1 - Math.min(1, Math.abs(f - i) * 1.6);
-    look.lerp(fp, 0.45 + near * 0.3);
+    look.lerp(fp, 0.35 + near * 0.4);
     camera.lookAt(look);
     frames.forEach((F, j) => {
       const d = Math.max(0, 1 - Math.abs(f - j));

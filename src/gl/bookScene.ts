@@ -393,9 +393,9 @@ export function createBookScene(
     // camera: dolly in on entry, parallax on the cursor
     const portrait = W / H < 0.8;
     const e = 1 - Math.pow(1 - THREE.MathUtils.clamp(enter, 0, 1), 3);
-    const dist = THREE.MathUtils.lerp(portrait ? 16 : 12.5, portrait ? 11.5 : 8.4, e);
-    camera.position.set((portrait ? 1.1 : 0.2) + mouse.x * 0.5, THREE.MathUtils.lerp(7.5, 5.6, e) + mouse.y * 0.3, dist);
-    camera.lookAt(portrait ? 1.15 : 0.5, portrait ? 0.4 : 0.55, 0.6);
+    const dist = THREE.MathUtils.lerp(portrait ? 16 : 12.5, portrait ? 11.5 : 9.6, e);
+    camera.position.set((portrait ? 1.1 : 0.4) + mouse.x * 0.5, THREE.MathUtils.lerp(7.5, 5.6, e) + mouse.y * 0.3, dist);
+    camera.lookAt(portrait ? 1.15 : 0.8, portrait ? 0.4 : 0.6, 0.6);
 
     if (host) {
       // look at the reader's cursor, or at the page while it turns

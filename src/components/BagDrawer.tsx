@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {drinks, formatPrice} from '../content';
 import {bagCount, bagStore, useBag, useBagOpen, useFlash} from '../lib/bag';
+import {navigate} from '../lib/router';
 
 /** Slide-in bag on the right, plus the small toast that confirms each add. */
 export function BagDrawer() {
@@ -41,8 +42,8 @@ export function BagDrawer() {
           <span className="text-[13px] whitespace-nowrap">
             <span className="text-cream/55">Ajouté</span> {toast}
           </span>
-          <button type="button" onClick={() => bagStore.setOpen(true)} className="label rounded-full bg-cream px-4 py-2 text-ink">
-            Voir
+          <button type="button" onClick={(e) => navigate('/commande', e)} className="label rounded-full bg-cream px-4 py-2 text-ink">
+            Commande
           </button>
         </div>
       </div>
@@ -124,11 +125,15 @@ export function BagDrawer() {
           <button
             type="button"
             disabled={!lines.length}
+            onClick={(e) => {
+              bagStore.setOpen(false);
+              navigate('/commande', e);
+            }}
             className="glint label mt-5 h-13 w-full rounded-full bg-gold py-4 text-ink transition-opacity disabled:opacity-30"
           >
             <span className="relative z-10">Commander au comptoir</span>
           </button>
-          <p className="mt-3 text-center text-[10.5px] text-cream/30">L’agent de commande vocal arrive à la prochaine étape.</p>
+          <p className="mt-3 text-center text-[10.5px] text-cream/30">Ou commandez de vive voix auprès de Nori, onglet Commande.</p>
         </div>
       </aside>
     </>
