@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {SplitTitle} from './SplitTitle';
 import QRCode from 'qrcode';
 import {categories, drinks, formatPrice} from '../content';
 import {bagCount, bagStore, useBag} from '../lib/bag';
@@ -8,6 +9,7 @@ import {createHostStage} from '../gl/hostStage';
 import type {Host} from '../gl/host';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {L2DHost, type L2DHandle} from './L2DHost';
+import {classify} from '../lib/emotion';
 
 const USE_VRM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('host') === 'vrm';
 
@@ -32,8 +34,10 @@ export function Commande() {
   const [msgs, setMsgs] = useState<Msg[]>([{role: 'assistant', text: 'Bonjour ! Je suis Nori. Dites-moi ce qui vous ferait plaisir, je l’ajoute à votre commande.'}]);
   const [text, setText] = useState('');
   const [sent, setSent] = useState<string | null>(null);
+  const fromQr = typeof location !== 'undefined' && /[?&]agent=1/.test(location.hash);
 
   useEffect(() => {
+    (window as unknown as {__voiceLog: unknown[]}).__voiceLog = [];
     let st: ReturnType<typeof createHostStage> | null = null;
     try {
       st = createHostStage(canvasRef.current!, {
@@ -64,11 +68,24 @@ export function Commande() {
   }, [msgs]);
 
   const handlers = {
-    onLevel: (v: number) => hostRef.current?.setMouth(v),
-    onStream: (s: MediaStream) => !USE_VRM && !!l2dRef.current?.attachVoice(s),
+    onLevel: (v: number) => {
+      hostRef.current?.setMouth(v);
+      const w = window as unknown as {__voicePeak?: number};
+      w.__voicePeak = Math.max(w.__voicePeak ?? 0, v);
+    },
+    onStream: (s: MediaStream) => {
+      const ok = !USE_VRM && !!l2dRef.current?.attachVoice(s);
+      (window as unknown as {__voiceLog?: unknown[]}).__voiceLog?.push({t: Date.now(), attachedToNori: ok});
+      return ok;
+    },
     onState: setState,
     onText: (role: 'user' | 'assistant', t: string) => {
-      if (role === 'assistant') setMsgs((m) => [...m, {role, text: t}]);
+      if (role === 'assistant') {
+        setMsgs((m) => [...m, {role, text: t}]);
+        const emo = classify(t);
+        l2dRef.current?.setEmotion(emo);
+        (window as unknown as {__voiceLog?: unknown[]}).__voiceLog?.push({t: Date.now(), reply: t, emotion: emo});
+      }
       else if (agentRef.current?.mic) setMsgs((m) => [...m, {role, text: t}]);
     },
   };
@@ -117,13 +134,11 @@ export function Commande() {
         <div className="flex flex-col justify-between gap-6">
           <div>
             <p className="label text-gold-light">Commande · au comptoir ou à table</p>
-            <h1 id="commande-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]">
-              Nori <em className="text-gold-light">prend votre commande</em>
-            </h1>
+            <SplitTitle as="h1" id="commande-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]" text="Nori" em="prend votre commande" />
           </div>
 
           {/* agent chat */}
-          <div className="mt-[34svh] w-full max-w-xl rounded-[22px] border border-cream/15 bg-ink/65 p-4 text-cream backdrop-blur-md md:mt-auto">
+          <div data-glow className="mt-[34svh] w-full max-w-xl rounded-[22px] border border-cream/15 bg-ink/65 p-4 text-cream backdrop-blur-md md:mt-auto">
             <div ref={logRef} className="max-h-48 space-y-2 overflow-y-auto pr-1 text-[14px]" aria-live="polite">
               {msgs.map((m, i) => (
                 <p key={i} className={m.role === 'user' ? 'ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-sm bg-gold/90 px-3 py-2 text-ink' : 'w-fit max-w-[85%] rounded-2xl rounded-bl-sm bg-cream/10 px-3 py-2'}>
@@ -147,11 +162,12 @@ export function Commande() {
               </button>
             </form>
             {state && <p className="label mt-2 text-cream/50">Agent : {state}</p>}
+            {fromQr && !state && <p className="label mt-2 text-gold-light">Touchez « Parler » pour commander à voix haute.</p>}
           </div>
         </div>
 
         {/* order */}
-        <aside className="rounded-[24px] border border-cream/15 bg-ink/70 p-5 text-cream backdrop-blur-md md:p-6" aria-label="Votre commande">
+        <aside data-glow className="rounded-[24px] border border-cream/15 bg-ink/70 p-5 text-cream backdrop-blur-md md:p-6" aria-label="Votre commande">
           <div className="flex items-baseline justify-between">
             <h2 className="display text-[30px]">Votre commande</h2>
             <span className="label text-cream/50">{count} boisson{count === 1 ? '' : 's'}</span>

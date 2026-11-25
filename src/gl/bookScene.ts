@@ -385,6 +385,15 @@ export function createBookScene(
       // stack: unturned sheets sit lower the later they are; turned ones the reverse
       m.uniforms.uLift.value = THREE.MathUtils.lerp((S - i) * 0.0035, i * 0.0035, t);
     });
+    // closed on the cover: nothing on the left. As the cover lands, the left board and
+    // a paper block appear; the blocks trade thickness as sheets move across.
+    const open = flip > 0.97;
+    boardL.visible = blockL.visible = open;
+    const across = THREE.MathUtils.clamp(flip / Math.max(1, S - 1), 0, 1);
+    blockL.scale.z = THREE.MathUtils.lerp(0.25, 1, across);
+    blockL.position.z = 0.03 * blockL.scale.z;
+    blockR.scale.z = THREE.MathUtils.lerp(1, 0.25, across);
+    blockR.position.z = 0.03 * blockR.scale.z;
     const spread = Math.round(flip);
     if (spread !== lastSpread) {
       lastSpread = spread;

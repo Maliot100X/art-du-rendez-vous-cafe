@@ -1,4 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
+import {StretchPhoto} from './StretchPhoto';
+import {SplitTitle} from './SplitTitle';
 import {categories, drinks, formatPrice} from '../content';
 import {sizeLabel, type Drink} from '../data/store.js';
 import {bagStore} from '../lib/bag';
@@ -93,9 +95,7 @@ export function CarteReel() {
 
         <div className="relative z-10 m-3 mt-[68px] max-w-[30rem] rounded-[22px] border border-cream/15 bg-ink/55 p-4 backdrop-blur-md md:absolute md:top-1/2 md:left-8 md:m-0 md:w-[26vw] md:-translate-y-1/2 md:p-7">
           <p className="label text-gold-light">La carte · {N} boissons · prix en euros</p>
-          <h2 id="carte-title" className="display mt-2 text-[clamp(26px,3.8vw,68px)] text-cream md:mt-3">
-            Du premier café <em className="text-gold-light">au dernier verre</em>
-          </h2>
+          <SplitTitle as="h2" id="carte-title" className="display mt-2 text-[clamp(26px,3.8vw,68px)] text-cream md:mt-3" text="Du premier café" em="au dernier verre" />
           <ul className="mt-5 flex flex-wrap gap-2 md:flex-col md:gap-1.5">
             {categories.map((c, i) => (
               <li key={c.id}>
@@ -130,6 +130,14 @@ export function CarteReel() {
           <a href="#/livre" onClick={go('/livre')} className="glint label mt-6 inline-block rounded-full bg-gold px-5 py-3 text-ink max-md:hidden">
             <span className="relative z-10">Feuilleter le livre →</span>
           </a>
+        </div>
+
+        {/* focused drink: its photo on Otis's taffy engine (grab and pull) */}
+        <div className="pointer-events-none absolute right-8 bottom-[11.5rem] z-10 w-[22rem] max-md:hidden">
+          <StretchPhoto key={d.id} src={d.img.l} alt={d.name.fr} className="pointer-events-auto ml-auto h-[17rem] w-[12.75rem] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.6)]" />
+          <p className="label mt-3 text-right text-cream/60" aria-hidden="true">
+            Attrapez la photo · étirez-la
+          </p>
         </div>
 
         {/* focused drink: glass detail card */}

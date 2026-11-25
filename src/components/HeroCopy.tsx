@@ -2,6 +2,20 @@ import {type Ref} from 'react';
 import {address, brand, formatPrice, hero, products} from '../content';
 import {openStatus} from '../data/store.js';
 import {go} from '../lib/router';
+import {scrollToY} from '../lib/scroll';
+
+/** Halcyon 'hold' swatches: pick what's in the cup → the film glides to that hold. */
+const SWATCHES = [
+  {label: 'Latte', color: 'radial-gradient(circle at 35% 35%, #f3e2c4, #b98a5a)', p: 0.33},
+  {label: 'Chocolat', color: 'radial-gradient(circle at 35% 35%, #8a4a2a, #3a1a0c)', p: 0.57},
+  {label: 'Irish', color: 'radial-gradient(circle at 35% 35%, #f5ead6 0 38%, #2a140a 40%)', p: 0.81},
+];
+const hold = (p: number) => {
+  const film = document.getElementById('film');
+  if (!film) return;
+  const top = film.getBoundingClientRect().top + window.scrollY;
+  scrollToY(top + p * (film.offsetHeight - window.innerHeight), false);
+};
 
 /**
  * The hero's DOM type, kept minimal (NAÏADE's HeroCopy layout): the café's
@@ -49,6 +63,11 @@ export function HeroCopy({ref}: {ref?: Ref<HTMLDivElement>}) {
             <p className="label text-cream/55">Dans la tasse · N°{latte.index}</p>
             <p className="mt-1.5 text-[14px] font-medium text-cream">{latte.name.join(' ')}</p>
             <p className="display mt-1 text-[24px] text-gold-light">{formatPrice(latte.price)}</p>
+            <div className="pointer-events-auto mt-3 flex justify-end gap-2" role="group" aria-label="Dans la tasse">
+              {SWATCHES.map((w) => (
+                <button key={w.label} type="button" onClick={() => hold(w.p)} title={w.label} aria-label={`Voir le ${w.label}`} className="size-7 rounded-full ring-1 ring-cream/40 transition-transform hover:scale-115 hover:ring-gold-light" style={{background: w.color}} />
+              ))}
+            </div>
           </div>
           <div className="size-[96px] overflow-hidden rounded-[22px] ring-1 ring-gold/30 shadow-[0_24px_60px_-18px_rgb(217_166_80/0.35)]">
             <img src={latte.image} alt="" className="h-full w-full object-cover" />

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="color-scheme" content="dark" />
+<title>Live2D host</title>
+<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden;color-scheme:dark}canvas{display:block;width:100%;height:100%;-webkit-mask-image:linear-gradient(#000 80%,transparent);mask-image:linear-gradient(#000 80%,transparent)}</style>
+<script>window.process = window.process || {env: {NODE_ENV: "production"}}; // the UMD build reads process.env</script>
+<script src="./live2dcubismcore.min.js"></script>
+<script src="./pixi.min.js"></script>
+<script src="./pixi-live2d-display.cubism4.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// pixi-live2d-display (MIT) + Live2D Cubism Core. Default model: "Nekomi" by FinfiWorks (supplied by the owner in inputs/live2d-model);
+// ?model=hiyori loads Live2D's Hiyori sample (Live2D Free Material License).
+// Same-origin API for the café site: attachVoice(stream) / detachVoice() / setEmotion(name) / focusAt(x,y).
+(async () => {
+  const canvas = document.getElementById('c');
+  const app = new PIXI.Application({view: canvas, resizeTo: window, backgroundAlpha: 0, antialias: true, autoDensity: true, resolution: Math.min(devicePixelRatio, 2)});
+  const MODELS = {nekomi: {url: './nekomi/Nekomi.model3.json', zoom: 1.75, top: 0.0}, hiyori: {url: './hiyori/Hiyori.model3.json', zoom: 3.4, top: 0.03}};
+  const pick = MODELS[new URLSearchParams(location.search).get('model')] || MODELS.nekomi;
+  const model = await PIXI.live2d.Live2DModel.from(pick.url, {autoHitTest: false, autoFocus: false});
+  app.stage.addChild(model);
+  const fit = () => {
+    const s = Math.min(window.innerWidth / model.internalModel.width, (window.innerHeight * pick.zoom) / model.internalModel.height);
+    model.scale.set(s);
+    model.anchor.set(0.5, 0);
+    model.x = window.innerWidth / 2;
+    model.y = window.innerHeight * pick.top;
+  };
+  fit();
+  addEventListener('resize', fit);
+
+  // emotion → parameter targets (smile / blush / brows), eased every frame
+  const EMO = {
+    joy: {form: 1, cheek: 0.4, brow: 0.3}, excited: {form: 1, cheek: 0.6, brow: 0.6, tap: 1},
+    love: {form: 1, cheek: 1, brow: 0.2}, proud: {form: 0.8, cheek: 0.3, brow: 0.5, tap: 1},
+    sad: {form: -1, cheek: 0, brow: -0.8}, surprised: {form: 0, cheek: 0.2, brow: 1},
+    curious: {form: 0.4, cheek: 0.2, brow: 0.4}, hungry: {form: 0.7, cheek: 0.5, brow: 0.2},
+    neutral: {form: 0.3, cheek: 0, brow: 0},
+  };
+  let want = EMO.neutral, cur = {form: 0.3, cheek: 0, brow: 0};
+  window.setEmotion = (name) => {
+    want = EMO[name] || EMO.neutral;
+    if (want.tap) model.motion('TapBody');
+  };
+
+  // lip-sync: RMS of the agent's reply audio → ParamMouthOpenY (attack fast, release slow)
+  let ac, an, buf, el, mouth = 0;
+  window.attachVoice = (stream) => {
+    ac = ac || new AudioContext();
+    ac.resume();
+    const src = ac.createMediaStreamSource(stream);
+    an = ac.createAnalyser();
+    an.fftSize = 1024;
+    buf = new Float32Array(an.fftSize);
+    src.connect(an);
+    el = new Audio();
+    el.srcObject = stream;
+    el.play().catch(() => {});
+    return true;
+  };
+  window.detachVoice = () => { an = null; if (el) { el.srcObject = null; el = null; } };
+  window.__level = 0;
+
+  let fx = 0, fy = 0, tx = 0, ty = 0;
+  window.focusAt = (x, y) => { tx = x; ty = y; };
+  const core = () => model.internalModel.coreModel;
+  model.internalModel.on('beforeModelUpdate', () => {
+    let lvl = 0;
+    if (an) {
+      an.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      lvl = Math.min(1, Math.sqrt(s / buf.length) * 6);
+    }
+    mouth += (lvl - mouth) * (lvl > mouth ? 0.6 : 0.18);
+    window.__level = mouth;
+    for (const k of ['form', 'cheek', 'brow']) cur[k] += (want[k] - cur[k]) * 0.08;
+    fx += (tx - fx) * 0.08; fy += (ty - fy) * 0.08;
+    const c = core();
+    c.setParameterValueById('ParamMouthOpenY', mouth);
+    c.setParameterValueById('ParamMouthForm', cur.form);
+    c.setParameterValueById('ParamCheek', cur.cheek);
+    c.setParameterValueById('ParamBrowLY', cur.brow);
+    c.setParameterValueById('ParamBrowRY', cur.brow);
+    c.setParameterValueById('ParamAngleX', fx * 30);
+    c.setParameterValueById('ParamAngleY', fy * 30);
+    c.setParameterValueById('ParamBodyAngleX', fx * 10);
+    c.setParameterValueById('ParamEyeBallX', fx);
+    c.setParameterValueById('ParamEyeBallY', fy);
+  });
+  window.__ready = true;
+})().catch((e) => { console.error('live2d host', e); });
+</script>
+</body>
+</html>

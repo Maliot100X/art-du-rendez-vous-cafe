@@ -1,0 +1,50 @@
+{
+ "Version": 3,
+ "FileReferences": {
+  "Moc": "Furry.moc3",
+  "Textures": [
+   "Furry.4096/texture_00.png",
+   "Furry.4096/texture_01.png"
+  ],
+  "Physics": "Furry.physics3.json",
+  "DisplayInfo": "Furry.cdi3.json",
+  "Motions": {
+   "Idle": [
+    {
+     "File": "Idle.motion3.json"
+    }
+   ],
+   "TapBody": [
+    {
+     "File": "Nodd.motion3.json"
+    }
+   ]
+  },
+  "Expressions": [
+   {
+    "Name": "Henshin",
+    "File": "Henshin.exp3.json"
+   }
+  ]
+ },
+ "Groups": [
+  {
+   "Target": "Parameter",
+   "Name": "LipSync",
+   "Ids": [
+    "ParamMouthForm",
+    "ParamMouthOpenY"
+   ]
+  },
+  {
+   "Target": "Parameter",
+   "Name": "EyeBlink",
+   "Ids": [
+    "ParamEyeLOpen",
+    "ParamEyeLSmile",
+    "ParamEyeROpen",
+    "ParamEyeRSmile"
+   ]
+  }
+ ]
+}

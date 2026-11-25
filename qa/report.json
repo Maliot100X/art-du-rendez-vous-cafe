@@ -4,5 +4,11 @@
     "[desktop] warning: Fluid background unavailable ReferenceError: Cannot access 'Ee' before initialization\n    at z (http://127.0.0.1:4317/assets/fluid-D6HwZhGy.js:435:10907)\n    at de (http://127.0.0.1:4317/assets/fluid-D6HwZhGy.js:435:8816)\n    at De (http://127.0.0.1:4317/assets/fluid-D6HwZhGy.js:435:4222)\n    at Rt "
   ],
   "fpsDesktop": 1.5,
-  "carteItems": 59
+  "carteItems": 59,
+  "fpsVideo": 1.950152207001522,
+  "video": {
+    "file": "qa/hero.mp4",
+    "rawDuration": 44.08,
+    "trimmedFrom": 29.58
+  }
 }

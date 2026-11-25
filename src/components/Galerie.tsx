@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {SplitTitle} from './SplitTitle';
 import {scene as sceneImg} from '../data/store.js';
 import {createGalleryScene} from '../gl/galleryScene';
 import {pinProgress, range} from '../lib/math';
@@ -63,9 +64,7 @@ export function Galerie() {
         <canvas ref={canvasRef} className="absolute inset-0 size-full" aria-hidden="true" />
         <div className="pointer-events-none absolute inset-x-0 top-0 px-5 pt-20 md:px-10 md:pt-24">
           <p className="label text-gold-light">Galerie · {SHOTS.length} vues du café</p>
-          <h1 id="galerie-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]">
-            Une promenade <em className="text-gold-light">au Rendez-Vous</em>
-          </h1>
+          <SplitTitle as="h1" id="galerie-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]" text="Une promenade" em="au Rendez-Vous" />
         </div>
         <div className="pointer-events-none absolute bottom-8 left-5 max-w-sm rounded-[20px] border border-cream/15 bg-ink/60 px-5 py-4 text-cream backdrop-blur-md md:bottom-12 md:left-10" aria-live="polite">
           <p className="label text-gold-light">

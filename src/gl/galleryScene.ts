@@ -7,6 +7,26 @@
 import * as THREE from 'three';
 import {disposeScene, makeRenderer, makeStudio} from './kit';
 
+// Balaji Tech Labs' "lando reveal" lens (MIT), moved into the 3D frames: every
+// photo shows as a warm two-tone engraving, and a lens following the cursor
+// reveals the real colour photograph through it, edged with a thin gold ring.
+const lensVert = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`;
+const lensFrag = `uniform sampler2D uMap; uniform float uLit; uniform vec2 uMouse; uniform float uR; uniform float uOn; varying vec2 vUv;
+void main(){
+  vec3 c = texture2D(uMap, vUv).rgb;
+  float l = dot(c, vec3(0.299,0.587,0.114));
+  float hatch = 0.5 + 0.5*sin((vUv.x + vUv.y) * 900.0);
+  float ink = smoothstep(0.15, 0.85, l + (hatch - 0.5) * 0.18);
+  vec3 duo = mix(vec3(0.16,0.06,0.035), vec3(0.98,0.86,0.68), ink);
+  float d = distance(gl_FragCoord.xy, uMouse);
+  float m = (1.0 - smoothstep(uR - 2.0, uR + 2.0, d)) * uOn;
+  float ring = (smoothstep(uR - 4.0, uR - 1.0, d) - smoothstep(uR + 1.0, uR + 4.0, d)) * uOn;
+  vec3 col = mix(duo, c, m) * mix(0.6, 1.08, uLit);
+  col = mix(col, vec3(0.89,0.74,0.46), ring * 0.9);
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
 export type Shot = {src: string; w: number; h: number};
 
 export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: boolean; shots: Shot[]}) {
@@ -29,7 +49,8 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
   const loader = new THREE.TextureLoader();
   const gold = new THREE.MeshPhysicalMaterial({color: '#d4a24c', metalness: 1, roughness: 0.25});
   const wood = new THREE.MeshPhysicalMaterial({color: '#3b2216', roughness: 0.5, clearcoat: 0.6});
-  const frames: {g: THREE.Group; side: number; mat: THREE.MeshBasicMaterial; base: number}[] = [];
+  const frames: {g: THREE.Group; side: number; mat: THREE.ShaderMaterial; base: number}[] = [];
+  const lensU = {uMouse: {value: new THREE.Vector2(-999, -999)}, uR: {value: 150}, uOn: {value: 0}};
   opts.shots.forEach((s, i) => {
     const side = i % 2 ? 1 : -1;
     const z = -i * STEP;
@@ -42,7 +63,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     const tex = loader.load(s.src);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
-    const mat = new THREE.MeshBasicMaterial({map: tex, color: new THREE.Color(0.6, 0.6, 0.6)});
+    const mat = new THREE.ShaderMaterial({vertexShader: lensVert, fragmentShader: lensFrag, uniforms: {uMap: {value: tex}, uLit: {value: 0}, ...lensU}});
     const photo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat);
     photo.position.set(0, 3.1, 0.06);
     const t = 0.14;
@@ -92,9 +113,19 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
   const mouse = {x: 0, y: 0, tx: 0, ty: 0};
+  const lens = {x: -999, y: -999, tx: -999, ty: -999};
   const onMove = (e: PointerEvent) => {
     mouse.tx = (e.clientX / innerWidth) * 2 - 1;
     mouse.ty = -((e.clientY / innerHeight) * 2 - 1);
+    const r = canvas.getBoundingClientRect();
+    const dpr = renderer.getPixelRatio();
+    lens.tx = (e.clientX - r.left) * dpr;
+    lens.ty = (r.bottom - e.clientY) * dpr;
+    if (lens.x < -900) {
+      lens.x = lens.tx;
+      lens.y = lens.ty;
+    }
+    lensU.uOn.value = 1;
   };
   window.addEventListener('pointermove', onMove, {passive: true});
 
@@ -122,9 +153,12 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     frames.forEach((F, j) => {
       const d = Math.max(0, 1 - Math.abs(f - j));
       F.g.rotation.y = F.base * (1 - d * 0.55) + Math.sin(time * 0.6 + j) * 0.01;
-      const c = 0.55 + d * 0.5;
-      F.mat.color.setRGB(c, c, c);
+      F.mat.uniforms.uLit.value = d;
     });
+    lens.x += (lens.tx - lens.x) * 0.15;
+    lens.y += (lens.ty - lens.y) * 0.15;
+    lensU.uMouse.value.set(lens.x, lens.y);
+    lensU.uR.value = 150 * renderer.getPixelRatio();
     lamp.position.set(pos.x, 5, pos.z - 2.5);
     key.position.set(pos.x - 5, 9, pos.z + 6);
     key.target.position.set(pos.x, 0, pos.z - 4);

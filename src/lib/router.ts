@@ -61,6 +61,23 @@ export function navigate(path: RoutePath, e?: {clientX: number; clientY: number}
     emit();
     return;
   }
+  // Halcyon's transitions.js: native View Transitions when the browser has them
+  // (circular reveal from the click point + the active-tab underline morphs),
+  // otherwise the ink curtain below.
+  const doc = document as Document & {startViewTransition?: (cb: () => Promise<void>) => unknown};
+  if (doc.startViewTransition && !document.documentElement.dataset.noVt) {
+    document.documentElement.style.setProperty('--vt-x', `${e ? e.clientX : innerWidth / 2}px`);
+    document.documentElement.style.setProperty('--vt-y', `${e ? e.clientY : innerHeight / 2}px`);
+    doc.startViewTransition(
+      () =>
+        new Promise<void>((res) => {
+          swap();
+          emit();
+          requestAnimationFrame(() => requestAnimationFrame(() => res()));
+        }),
+    );
+    return;
+  }
   curtain = {phase: 'closing', x: e ? (e.clientX / innerWidth) * 100 : 50, y: e ? (e.clientY / innerHeight) * 100 : 50, label};
   emit();
   setTimeout(() => {

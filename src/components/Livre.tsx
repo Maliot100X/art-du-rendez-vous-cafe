@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
+import {SplitTitle} from './SplitTitle';
 import {categories, drinks, formatPrice} from '../content';
 import {sizeLabel} from '../data/store.js';
 import {createBookScene, paginate} from '../gl/bookScene';
@@ -7,7 +8,8 @@ import {clamp, pinProgress} from '../lib/math';
 import {onFrame} from '../lib/scroll';
 import {startAgent, type Agent} from '../lib/voice';
 import {useReducedMotion} from '../hooks/useReducedMotion';
-import {L2DHost, type L2DHandle} from './L2DHost';
+import {L2DHost, LIVE2D, type L2DHandle} from './L2DHost';
+import {classify} from '../lib/emotion';
 
 const USE_VRM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('host') === 'vrm';
 
@@ -61,6 +63,7 @@ export function Livre() {
           setSpread(s);
           const line = lineFor(s);
           setSay(line);
+          l2dRef.current?.setEmotion(classify(line));
           if (!voiceRef.current) hostRef.current?.speak(Math.min(3, 0.9 + line.length * 0.035));
         },
       });
@@ -119,7 +122,10 @@ export function Livre() {
       return;
     }
     try {
-      voiceRef.current = await startAgent({mic: true, onLevel: (v) => hostRef.current?.setMouth(v), onState: setVoice, onText: (_r, t) => setSay(t), onStream: (st) => !USE_VRM && !!l2dRef.current?.attachVoice(st)});
+      voiceRef.current = await startAgent({mic: true, onLevel: (v) => hostRef.current?.setMouth(v), onState: setVoice, onText: (r, t) => {
+          setSay(t);
+          if (r === 'assistant') l2dRef.current?.setEmotion(classify(t));
+        }, onStream: (st) => !USE_VRM && !!l2dRef.current?.attachVoice(st)});
     } catch {
       setVoice('voix indisponible');
     }
@@ -135,20 +141,32 @@ export function Livre() {
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-5 pt-20 md:px-10 md:pt-24">
           <div className="on-sky text-cream">
             <p className="label text-gold-light">Le livre · {drinks.length} boissons · 7 rubriques</p>
-            <h2 id="livre-title" className="display mt-2 text-[clamp(34px,4.2vw,72px)]">
-              La carte, <em className="text-gold-light">page à page</em>
-            </h2>
+            <SplitTitle as="h2" id="livre-title" className="display mt-2 text-[clamp(34px,4.2vw,72px)]" text="La carte," em="page à page" />
           </div>
         </div>
 
         {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-[10svh] left-[2%] h-[62svh] w-[34vw] max-md:left-[-6%] max-md:bottom-[44svh] max-md:h-[30svh] max-md:w-[64vw]" />}
+
+        {/* spylt's spinning circle-text badge, on the reel's circular reveal */}
+        <svg viewBox="0 0 200 200" className="spin-badge pointer-events-none absolute top-24 right-6 size-28 text-gold-light md:top-28 md:right-12 md:size-36" aria-hidden="true">
+          <defs>
+            <path id="badge-circle" d="M100,100 m-78,0 a78,78 0 1,1 156,0 a78,78 0 1,1 -156,0" />
+          </defs>
+          <circle cx="100" cy="100" r="96" fill="rgb(42 16 9 / 0.55)" />
+          <text fill="currentColor" style={{font: '500 15px "IBM Plex Mono", monospace', letterSpacing: '0.32em'}}>
+            <textPath href="#badge-circle">LA CARTE · 59 BOISSONS · 7 RUBRIQUES · </textPath>
+          </text>
+          <text x="100" y="112" textAnchor="middle" fill="#fff6ea" style={{font: 'italic 300 38px Fraunces, Georgia, serif'}}>
+            RdV
+          </text>
+        </svg>
 
         {/* host speech bubble */}
         <div
           className={`pointer-events-none absolute top-[24%] left-[4%] max-w-[17rem] rounded-[18px] rounded-bl-[4px] border border-cream/20 bg-ink/65 px-4 py-3 text-[14px] text-cream backdrop-blur-md transition-opacity duration-500 md:top-[30%] md:left-[8%] ${say && ready ? 'opacity-100' : 'opacity-0'}`}
           aria-live="polite"
         >
-          <span className="label mb-1 block text-gold-light">Nori · votre hôte</span>
+          <span className="label mb-1 block text-gold-light">{LIVE2D ? 'Nekomi · votre hôtesse' : 'Nori · votre hôte'}</span>
           {say}
         </div>
 

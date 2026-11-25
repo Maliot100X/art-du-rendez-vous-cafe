@@ -38,12 +38,16 @@ export function Nav() {
               className="group relative text-[13px] tracking-[0.02em] text-[#fff6ea]/75 transition-colors hover:text-white aria-[current=page]:text-white"
             >
               {r.label}
-              <span className="absolute -bottom-1.5 left-0 h-[1.5px] w-full origin-right scale-x-0 bg-gold-light transition-transform duration-500 ease-silk group-hover:origin-left group-hover:scale-x-100 group-aria-[current=page]:scale-x-100" />
+              <span className={`absolute -bottom-1.5 left-0 h-[1.5px] w-full origin-right scale-x-0 bg-gold-light transition-transform duration-500 ease-silk group-hover:origin-left group-hover:scale-x-100 group-aria-[current=page]:scale-x-100 ${route === r.path ? 'vt-underline' : ''}`} />
             </a>
           ))}
         </nav>
 
         <div className="flex items-center gap-4">
+          <button type="button" onClick={() => window.dispatchEvent(new Event('finder:open'))} className="label flex items-center gap-2 rounded-full border border-[#fff6ea]/20 px-3 py-2 text-[#fff6ea]/75 transition hover:text-white max-lg:hidden" aria-label="Rechercher (⌘K)">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="7" cy="7" r="5" /><path d="m11 11 3.5 3.5" /></svg>
+            ⌘K
+          </button>
           <a
             href="#/commande"
             onClick={go('/commande')}

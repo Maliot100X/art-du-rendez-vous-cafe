@@ -9,7 +9,7 @@ await p.goto(BASE + '#/venir', {waitUntil: 'load'});
 await p.waitForSelector('[data-preloader]', {state: 'detached', timeout: 90000});
 await p.waitForTimeout(6000);
 await p.click('nav[aria-label="Principal"] a[href="#/carte"]');
-await p.waitForTimeout(700);
+await p.waitForTimeout(+(process.env.AT || 150));
 await p.screenshot({path: 'qa/tabs/transition-curtain.png', timeout: 180000});
 await p.waitForTimeout(9000);
 console.log(JSON.stringify({route: await p.evaluate(() => location.hash), errs}));

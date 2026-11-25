@@ -1,0 +1,5 @@
+- pixi.min.js: PixiJS 7.4.3, MIT.
+- pixi-live2d-display.cubism4.min.js: pixi-live2d-display 0.5.0-beta (guansss), MIT.
+- live2dcubismcore.min.js: Live2D Cubism Core, Live2D Proprietary Software License (redistributable file).
+- hiyori/: Live2D sample model "Hiyori Momose", Live2D Free Material License Agreement.
+- nekomi/: "Nekomi Vtuber Transform" by FinfiWorks, supplied by the site owner (inputs/live2d-model). Model3 JSON re-written here only to register its own Idle/Nodd motions and Henshin expression. Confirm FinfiWorks' terms before public use.

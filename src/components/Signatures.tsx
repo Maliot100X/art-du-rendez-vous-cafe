@@ -1,9 +1,10 @@
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
+import {SplitTitle} from './SplitTitle';
 import {formatPrice, signatures} from '../content';
 import {createSignaturesScene} from '../gl/signaturesScene';
 import {createRemap} from '../lib/timeRemap';
 import {clamp, pinProgress} from '../lib/math';
-import {onFrame} from '../lib/scroll';
+import {onFrame, scrollToY} from '../lib/scroll';
 import {bagStore} from '../lib/bag';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 
@@ -30,6 +31,8 @@ export function Signatures() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const countRef = useRef<HTMLSpanElement>(null);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [cur, setCur] = useState(0);
 
   useEffect(() => {
     const section = root.current!;
@@ -64,6 +67,7 @@ export function Signatures() {
       if (c !== lastCount && countRef.current) {
         lastCount = c;
         countRef.current.textContent = `0${c + 1}`;
+        setCur(c);
       }
     });
     return () => {
@@ -72,6 +76,16 @@ export function Signatures() {
     };
   }, [reduced]);
 
+  /** mojito's tabbed slider: tabs + arrows glide the scroll to a station's hold. */
+  const STOPS = [0.04, 0.3, 0.56, 0.88];
+  const goTo = (i: number) => {
+    const el = root.current;
+    if (!el) return;
+    const j = (i + 4) % 4;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    scrollToY(top + STOPS[j] * (el.offsetHeight - window.innerHeight), false);
+  };
+
   return (
     <section ref={root} id="signatures" aria-labelledby="sig-title" className="relative h-[520svh] bg-ink">
       <div className="sticky top-0 h-svh overflow-clip">
@@ -79,15 +93,38 @@ export function Signatures() {
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_60%,rgb(20_8_4/0.45))]" />
         <div className="pointer-events-none absolute top-0 left-0 px-5 pt-[clamp(84px,12vh,120px)] md:px-10">
           <p className="label text-gold-light">Signatures · au comptoir</p>
-          <h2 id="sig-title" className="display mt-3 text-[clamp(40px,4.6vw,80px)] text-cream">
-            Quatre verres <em className="text-gold-light">de la maison</em>
-          </h2>
+          <SplitTitle as="h2" id="sig-title" className="display mt-3 text-[clamp(40px,4.6vw,80px)] text-cream" text="Quatre verres" em="de la maison" />
           <p className="label mt-4 text-cream/50">
             <span ref={countRef} className="text-cream">
               01
             </span>{' '}
             / 04 · scroll pour passer au suivant
           </p>
+        </div>
+        <div className="absolute inset-x-0 bottom-6 z-20 flex items-center justify-center gap-2 px-4 md:bottom-10" role="tablist" aria-label="Signatures">
+          <button type="button" onClick={() => goTo(cur - 1)} aria-label="Signature précédente" className="grid size-11 shrink-0 place-items-center rounded-full border border-cream/25 bg-ink/50 text-cream backdrop-blur">
+            ←
+          </button>
+          <div className="relative flex gap-1 overflow-x-auto rounded-full border border-cream/15 bg-ink/50 p-1 backdrop-blur-md">
+            {signatures.map((d, i) => (
+              <button
+                key={d.id}
+                ref={(el) => {
+                  tabRefs.current[i] = el;
+                }}
+                type="button"
+                role="tab"
+                aria-selected={cur === i}
+                onClick={() => goTo(i)}
+                className="relative rounded-full px-3 py-2 text-[12.5px] whitespace-nowrap text-cream/65 transition-colors aria-selected:bg-cream aria-selected:text-ink md:px-4"
+              >
+                {d.name.fr}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => goTo(cur + 1)} aria-label="Signature suivante" className="grid size-11 shrink-0 place-items-center rounded-full border border-cream/25 bg-ink/50 text-cream backdrop-blur">
+            →
+          </button>
         </div>
         {signatures.map((d, i) => (
           <div

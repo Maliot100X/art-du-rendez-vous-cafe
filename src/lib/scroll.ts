@@ -1,4 +1,5 @@
 import Lenis from 'lenis';
+import {ScrollTrigger} from './motion';
 
 /**
  * One rAF loop for the whole page. Lenis advances first, then every
@@ -14,6 +15,7 @@ let lenis: Lenis | null = null;
 export function startScroll(reducedMotion: boolean): () => void {
   if (!reducedMotion) {
     lenis = new Lenis({lerp: 0.09, smoothWheel: true, wheelMultiplier: 0.9});
+    lenis.on('scroll', ScrollTrigger.update);
   }
 
   let raf = 0;

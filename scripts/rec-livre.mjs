@@ -28,6 +28,7 @@ for (let i = 0; i < 20; i++) {
   await p.mouse.move(640 + Math.cos(i / 3) * 300, 380 + Math.sin(i / 3) * 140);
   await p.waitForTimeout(150);
 }
+const tClick = (Date.now() - T0) / 1000;
 for (let k = 0; k < 2; k++) {
   await p.click('button[aria-label="Page suivante"]');
   await p.waitForTimeout(3500);
@@ -45,11 +46,15 @@ await p.waitForTimeout(4000);
 await lab();
 await p.click('button[aria-label="Page précédente"]');
 await p.waitForTimeout(2500);
+const tEnd = (Date.now() - T0) / 1000;
 await ctx.close();
 await b.close();
 const webm = readdirSync('qa/rec-tmp').find((f) => f.endsWith('.webm'));
 renameSync(`qa/rec-tmp/${webm}`, 'qa/phase2/livre-raw.webm');
 rmSync('qa/rec-tmp', {recursive: true, force: true});
-execSync(`ffmpeg -y -loglevel error -ss ${start.toFixed(2)} -i qa/phase2/livre-raw.webm -t 15 -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart qa/phase2/livre-flip.mp4`);
+// the flips: from the first click to the end, time-compressed into ≤15 s if the box was slow
+const D = tEnd - tClick + 1;
+const k = Math.min(1, 15 / D);
+execSync(`ffmpeg -y -loglevel error -ss ${(tClick - 1).toFixed(2)} -i qa/phase2/livre-raw.webm -t ${D.toFixed(2)} -vf "setpts=${k.toFixed(4)}*PTS" -r 25 -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart qa/phase2/livre-flip.mp4`);
 execSync(`ffmpeg -y -loglevel error -ss ${start.toFixed(2)} -i qa/phase2/livre-raw.webm -t 10 -vf "crop=480:560:0:180" -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart qa/avatar/host-idle.mp4`);
-console.log(JSON.stringify({start, labels, errs}));
+console.log(JSON.stringify({start, tClick, tEnd, labels, errs}));

@@ -3,6 +3,8 @@ import {address, brand, cafe, footer} from '../content';
 import {useFitText} from '../hooks/useFitText';
 import {useReveals} from '../hooks/useReveals';
 import {useReducedMotion} from '../hooks/useReducedMotion';
+import {TrailImages} from './TrailImages';
+import {clipTitles} from '../lib/motion';
 
 /**
  * "Venir" + footer. NAÏADE's footer skeleton (reveal columns, fit-to-width
@@ -14,6 +16,8 @@ export function Footer() {
   const word = useFitText<HTMLSpanElement>();
   const fluidRef = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion();
+
+  useEffect(() => clipTitles(document.querySelector('#venir') ?? document), []);
 
   useEffect(() => {
     if (reduced) return;
@@ -75,6 +79,7 @@ export function Footer() {
   return (
     <footer ref={ref} id="venir" className="relative overflow-hidden bg-ink px-5 pt-[clamp(80px,14vh,160px)] pb-8 text-cream md:px-10">
       <canvas ref={fluidRef} aria-hidden className="absolute inset-0 h-full w-full opacity-90" />
+      <TrailImages hostSelector="#venir" />
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(42_16_9/0.85),rgb(42_16_9/0.25)_45%,rgb(42_16_9/0.7))]" />
       <div className="pointer-events-none relative mx-auto max-w-[1680px] [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
         <div className="grid gap-12 md:grid-cols-12">
@@ -119,7 +124,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-[clamp(56px,10vh,120px)]" aria-hidden>
+        <div data-clip className="mt-[clamp(56px,10vh,120px)]" aria-hidden>
           <span ref={word} className="display inline-block leading-[0.8] whitespace-nowrap text-cream">
             Rendez-<em className="text-gold-light">Vous</em>
           </span>

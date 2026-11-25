@@ -1,4 +1,5 @@
 import {useEffect, useRef} from 'react';
+import {SplitTitle} from './SplitTitle';
 import {address, cafe, footer} from '../content';
 import {openStatus} from '../data/store.js';
 import {createMapScene} from '../gl/mapScene';
@@ -42,12 +43,10 @@ export function Venir() {
         <div className="relative z-10 mx-auto flex h-full max-w-[1680px] flex-col justify-between px-5 pt-24 pb-8 md:px-10 md:pt-28 md:pb-12">
           <div>
             <p className="label text-gold-light">Venir · Laeken, Bruxelles</p>
-            <h1 id="venir-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]">
-              Rue des Artistes <em className="text-gold-light">1A</em>
-            </h1>
+            <SplitTitle as="h1" id="venir-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]" text="Rue des Artistes" em="1A" />
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
+          <div className="-mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-1 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 [&>div]:w-[82vw] [&>div]:shrink-0 [&>div]:snap-center md:[&>div]:w-auto">
+            <div data-glow className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
               <p className="label text-gold-light">Adresse</p>
               <p className="mt-2 text-[16px]">{address.line}</p>
               <p className="text-[14px] text-cream/60">{address.city}</p>
@@ -60,7 +59,7 @@ export function Venir() {
                 </a>
               </div>
             </div>
-            <div className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
+            <div data-glow className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
               <p className="label flex items-center gap-2 text-gold-light">
                 <span className={`size-1.5 rounded-full ${s.open ? 'bg-[#7fd18b]' : 'bg-cream/40'}`} /> Horaires · {s.open ? 'ouvert' : 'fermé'}
               </p>
@@ -73,7 +72,7 @@ export function Venir() {
                 ))}
               </dl>
             </div>
-            <div className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
+            <div data-glow className="rounded-[20px] border border-cream/15 bg-ink/65 p-5 text-cream backdrop-blur-md">
               <p className="label text-gold-light">Transports</p>
               <ul className="mt-2 space-y-1 text-[14px] text-cream/80">
                 {footer.transit.map((t) => (

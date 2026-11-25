@@ -18,10 +18,23 @@ const prompt = () => {
   const lines = categories.map(
     (c) =>
       `${c.title.fr}: ` +
-      c.drinks.map((d) => `${d.name.fr} [id ${d.id}] ${d.priceList.map((p) => (p.key ? p.key + ' ' : '') + p.value.toFixed(2).replace('.', ',') + ' €').join(' / ')}`).join('; '),
+      c.drinks.map((d) => `${d.name.fr} [${d.id}] ${d.priceList.map((p) => (p.key ? p.key + ' ' : '') + p.value.toFixed(2).replace('.', ',') + ' €').join(' / ')}`).join('; '),
   );
-  return `Tu es Nori, l'hôte du café "Art du Rendez-Vous", Rue des Artistes 1A, 1020 Laeken, Bruxelles (à côté de la gare de Bockstael). Horaires: lun-mer 8h-2h, jeu 8h-minuit, ven-dim 24h/24. Réponds dans la langue du client (français par défaut), en une ou deux phrases chaleureuses. Quand le client veut commander, appelle add_to_order avec l'id exact. N'invente jamais de boisson ni de prix. Carte complète (${drinks.length} boissons):\n${lines.join('\n')}`;
+  return `Tu es Nori, l'hôte du café "Art du Rendez-Vous", Rue des Artistes 1A, 1020 Laeken, Bruxelles (à côté de la gare de Bockstael). Horaires: lun-mer 8h-2h, jeu 8h-minuit, ven-dim 24h/24. Réponds dans la langue du client (français par défaut), en une ou deux phrases chaleureuses. Quand le client veut commander, appelle add_to_order avec l'id exact (le texte entre crochets, ex. orval ou cafe-latte). N'invente jamais de boisson ni de prix. Carte complète (${drinks.length} boissons):\n${lines.join('\n')}`;
 };
+
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/** exact id first, then accent/space-insensitive id or name match */
+function findDrink(q: string) {
+  q = q.trim().replace(/^\[?\s*id[\s:]+/i, '').replace(/\]$/, '');
+  const f = fold(q);
+  const exact = drinks.find((x) => x.id === q) ?? drinks.find((x) => fold(x.id) === f || fold(x.name.fr) === f);
+  if (exact || !f) return exact;
+  // loose: the longest drink name contained in the query (so "café latte" beats "café")
+  return drinks
+    .filter((x) => f.includes(fold(x.name.fr)) || fold(x.name.fr).includes(f))
+    .sort((a, b) => fold(b.name.fr).length - fold(a.name.fr).length)[0];
+}
 
 export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent> {
   const {onLevel, onState, onText} = opts;
@@ -117,10 +130,11 @@ export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent
       }
       if (m.type === 'FunctionCallRequest') {
         for (const f of m.functions ?? []) {
-          let content = 'inconnu';
+          let content = 'inconnu: utilise un id exact de la carte';
           try {
-            const a = JSON.parse(f.arguments || '{}');
-            const d = drinks.find((x) => x.id === a.drink_id);
+            const a = typeof f.arguments === 'string' ? JSON.parse(f.arguments || '{}') : f.arguments || {};
+            const d = findDrink(String(a.drink_id ?? a.id ?? a.name ?? ''));
+            (window as unknown as {__voiceLog?: unknown[]}).__voiceLog?.push({t: Date.now(), functionCall: f.name, args: a, resolved: d?.id ?? null});
             if (d) {
               bagStore.add(d.id, Math.max(1, a.quantity | 0 || 1));
               bagStore.flash(d.id);
