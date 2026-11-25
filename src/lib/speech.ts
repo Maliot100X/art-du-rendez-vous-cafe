@@ -86,7 +86,7 @@ export function shortenForSpeech(text: string, maxChars = 200): string {
   if (clean.length <= maxChars) return clean
   const cut = clean.slice(0, maxChars)
   const sentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
-  return (sentenceEnd > 60 ? cut.slice(0, sentenceEnd + 1) : `${cut}…`).trim()
+  return (sentenceEnd > 60 ? cut.slice(0, sentenceEnd + 1) : `${cut.slice(0, maxChars - 1)}…`).trim()
 }
 
 export function speak(text: string): void {
