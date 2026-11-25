@@ -24,9 +24,9 @@ export function ProductCard({product, side, ref}: Props) {
   return (
     <aside
       ref={ref}
-      aria-label={`${product.name.join(' ')} — add to bag`}
+      aria-label={`${product.name.join(' ')} — ajouter à la commande`}
       style={{visibility: 'hidden'}}
-      className={`absolute z-30 flex flex-col bg-bone text-ink will-change-transform
+      className={`absolute z-30 flex flex-col bg-paper text-ink will-change-transform
         max-md:inset-x-0 max-md:bottom-0 max-md:h-[68svh] max-md:rounded-t-[26px] max-md:px-5 max-md:pt-5 max-md:pb-5
         md:inset-y-0 md:w-[clamp(420px,41vw,640px)] md:px-[clamp(28px,3vw,52px)] md:pt-24 md:pb-[clamp(20px,3vh,36px)]
         ${side === 'left' ? 'md:left-0' : 'md:right-0'}`}
@@ -40,7 +40,7 @@ export function ProductCard({product, side, ref}: Props) {
 
       <div className="mt-[clamp(10px,2.4vh,26px)] max-md:flex max-md:items-end max-md:gap-4">
         <div className="min-w-0 flex-1">
-          <p data-k className="label text-paraiba-deep">
+          <p data-k className="label text-gold-deep">
             {product.eyebrow}
           </p>
           <h3 data-k className="display mt-2 text-[clamp(40px,4.3vw,78px)] max-md:text-[40px]">
@@ -58,15 +58,15 @@ export function ProductCard({product, side, ref}: Props) {
 
       <figure
         data-k
-        className="relative mt-[clamp(12px,2.4vh,24px)] min-h-0 flex-1 overflow-hidden rounded-[22px] bg-[radial-gradient(70%_70%_at_50%_45%,#e2ded9,#cbc6c1)]"
+        className="relative mt-[clamp(12px,2.4vh,24px)] min-h-0 flex-1 overflow-hidden rounded-[22px] bg-ink-2"
       >
         <img
           src={product.image}
           alt={`${product.name.join(' ')}, ${product.material}`}
-          className="absolute inset-0 m-auto h-full w-full object-contain [mask-image:radial-gradient(closest-side,black_72%,transparent)]"
+          className="absolute inset-0 h-full w-full object-cover"
         />
-        <figcaption className="label absolute bottom-3 left-4 text-ink/40">Paraíba · Brazil</figcaption>
-        <span className="label absolute top-3 right-4 text-ink/40">{product.index}</span>
+        <figcaption className="label absolute bottom-3 left-4 text-cream/80">Rue des Artistes 1A</figcaption>
+        <span className="label absolute top-3 right-4 text-cream/80">{product.index}</span>
       </figure>
 
       <dl data-k className="mt-4 grid grid-cols-3 gap-3 border-t border-ink/10 pt-3">
@@ -82,26 +82,26 @@ export function ProductCard({product, side, ref}: Props) {
         <button
           type="button"
           onClick={add}
-          className="glint label h-12 flex-1 rounded-full bg-ink px-5 text-bone transition-colors duration-500 hover:bg-graphite"
+          className="glint label h-12 flex-1 rounded-full bg-ink px-5 text-cream transition-colors duration-500 hover:bg-graphite"
         >
           <span className="relative z-10 inline-flex items-center gap-2">
             {added ? (
               <>
-                <span className="inline-block size-1.5 rounded-full bg-paraiba" /> Added to bag
+                <span className="inline-block size-1.5 rounded-full bg-gold" /> Ajouté
               </>
             ) : (
-              'Add to bag'
+              'Ajouter à la commande'
             )}
           </span>
         </button>
         <div className="label flex h-12 items-center rounded-full border border-ink/15 text-ink/70">
-          <button type="button" aria-label="Decrease quantity" className="h-full px-3.5" onClick={() => setQty((q) => Math.max(1, q - 1))}>
+          <button type="button" aria-label="Moins" className="h-full px-3.5" onClick={() => setQty((q) => Math.max(1, q - 1))}>
             −
           </button>
           <span className="w-4 text-center tabular-nums" aria-live="polite">
             {qty}
           </span>
-          <button type="button" aria-label="Increase quantity" className="h-full px-3.5" onClick={() => setQty((q) => Math.min(9, q + 1))}>
+          <button type="button" aria-label="Plus" className="h-full px-3.5" onClick={() => setQty((q) => Math.min(9, q + 1))}>
             +
           </button>
         </div>

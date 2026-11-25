@@ -1,0 +1,25 @@
+export type Drink = {
+  id: string;
+  name: {fr: string; en: string};
+  price?: number;
+  prices?: Record<string, number>;
+  uncertain?: boolean;
+  category: string;
+  categoryIndex: number;
+  index: number;
+  img: {s: string; l: string; w: number; h: number};
+  priceList: {key: string | null; value: number}[];
+  fromPrice: number;
+};
+export type Category = {id: string; title: {fr: string; en: string}; index: number; count: number; from: number; drinks: Drink[]; scene: string};
+export const menu: {currency: string; sizeLabels: Record<string, {fr: string; en: string}>};
+export const cafe: any;
+export const drinks: Drink[];
+export const categories: Category[];
+export function formatPrice(n: number, lang?: 'fr' | 'en'): string;
+export function getDrink(id: string): Drink | null;
+export function sizeLabel(key: string | null, lang?: 'fr' | 'en'): string;
+export function scene(name: string): {s: string; l: string; w: number; h: number};
+export function openStatus(date?: Date): {open: boolean; until?: string; allNight?: boolean};
+export const DAYS_ORDER: string[];
+export function hoursFor(day: string): {days: string[]; open: string; close: string; note?: string} | undefined;

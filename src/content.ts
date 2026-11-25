@@ -1,24 +1,36 @@
 /**
- * All copy lives here. NAÏADE is a placeholder concept brand for this demo —
- * the pieces, prices and specs are invented.
+ * All copy lives here (NAÏADE's content.ts shape). Every price comes from
+ * src/data/menu.json through store.js — never typed by hand.
  */
+import {cafe, categories, drinks, formatPrice as fmt, getDrink, type Drink} from './data/store.js';
+
+export {cafe, categories, drinks};
+export const formatPrice = (n: number) => fmt(n, 'fr');
 
 export const brand = {
-  name: 'NAÏADE',
-  collection: 'The Deep End',
-  tagline: 'Fine jewellery for after hours',
+  name: 'Art du Rendez-Vous',
+  short: 'Rendez-Vous',
+  collection: 'Café · Bar',
+  tagline: 'Le café de la rue des Artistes',
 };
 
-export const nav = ['Collections', 'Atelier', 'The Deep End', 'Journal'];
+export const address = {
+  line: `${cafe.address.street}, ${cafe.address.postcode} ${cafe.address.district}`,
+  city: 'Bruxelles',
+  phone: cafe.phone as string,
+  phoneDisplay: cafe.phoneDisplay as string,
+  maps: cafe.mapsUrl as string,
+};
+
+export const nav = [
+  ['La carte', '#carte'],
+  ['Signatures', '#signatures'],
+  ['Venir', '#venir'],
+] as const;
 
 export const hero = {
-  // Headline lines: roman parts render as capitals, italic parts stay lower-case.
-  headline: [
-    [{t: 'Born', i: true}, {t: ' in'}],
-    [{t: 'still water.'}],
-    [{t: 'Worn '}, {t: 'after', i: true}, {t: ' dark.'}],
-  ],
-  line: 'Pear-cut Paraíba tourmaline, set in 18K white gold.',
+  kicker: 'Rue des Artistes 1A · Laeken · Bruxelles',
+  line: 'Café, bières belges et apéros depuis le coin de la rue. Ouvert dès 8 h, 24 h sur 24 le week-end.',
 };
 
 export type Product = {
@@ -33,79 +45,52 @@ export type Product = {
   price: number;
 };
 
-const media = (f: string) => `${import.meta.env.BASE_URL}media/${f}`;
+const need = (id: string): Drink => {
+  const d = getDrink(id);
+  if (!d) throw new Error(`menu.json is missing ${id}`);
+  return d;
+};
+const split = (s: string): [string, string] => {
+  const i = s.lastIndexOf(' ');
+  return i > 0 ? [s.slice(0, i), s.slice(i + 1)] : [s, ''];
+};
 
-export const products: Product[] = [
-  {
-    id: 'undertow-drops',
-    index: '01',
-    eyebrow: 'Fine earrings',
-    name: ['Undertow', 'Drops'],
-    material: '18K white gold & Paraíba tourmaline',
-    description:
-      'A pair of pear-cut Paraíba drops hung from round brilliant studs on a hidden articulated link, so they move a half-beat after you do.',
-    image: media('earrings.webp'),
-    specs: [
-      ['Paraíba', '2 × 2.05 ct'],
-      ['Diamonds', '0.42 ct, D–F'],
-      ['Drop', '28 mm'],
-    ],
-    price: 12400,
-  },
-  {
-    id: 'deep-end-pendant',
-    index: '02',
-    eyebrow: 'Pendant necklace',
-    name: ['Deep End', 'Pendant'],
-    material: '18K white gold & Paraíba tourmaline',
-    description:
-      'One 3.1 ct pear in a four-claw basket, a single diamond at the bail and a chain fine enough to disappear against the skin.',
-    image: media('pendant.webp'),
-    specs: [
-      ['Paraíba', '3.10 ct'],
-      ['Chain', '42 + 3 cm'],
-      ['Metal', '18K white gold'],
-    ],
-    price: 9600,
-  },
-  {
-    id: 'night-swim-ring',
-    index: '03',
-    eyebrow: 'Cocktail ring',
-    name: ['Night Swim', 'Ring'],
-    material: '18K white gold, Paraíba & pavé halo',
-    description:
-      'A pear-cut Paraíba ringed in a halo of hand-set micro-pavé, raised on a slim knife-edge band that sits flush with the finger beside it.',
-    image: media('ring.webp'),
-    specs: [
-      ['Paraíba', '3.40 ct'],
-      ['Halo', '28 × 0.01 ct'],
-      ['Band', '1.8 mm'],
-    ],
-    price: 16200,
-  },
+/** The three drinks the camera lands on in the film (same order as the beats). */
+const film: [string, string, string, [string, string][]][] = [
+  ['cafe-latte', 'Boisson chaude', 'Double shot, lait vapeur micro-mousse, cœur tiré à la main sur la crème.', [['Tasse', '25 cl'], ['Shot', 'Double'], ['Lait', 'Entier']]],
+  ['chocolat-chaud', 'Boisson chaude', 'Cacao fondu au lait chaud, une spirale de crème et une pluie de cacao.', [['Cacao', 'Belge'], ['Tasse', '25 cl'], ['Crème', 'Spirale']]],
+  ['irish-coffee', 'Le classique du soir', 'Café chaud, whiskey irlandais, sucre roux et une couronne de crème fouettée.', [['Whiskey', 'Irlandais'], ['Crème', 'Fouettée'], ['Servi', 'Chaud']]],
 ];
 
+export const products: Product[] = film.map(([id, eyebrow, description, specs], i) => {
+  const d = need(id);
+  return {
+    id,
+    index: String(i + 1).padStart(2, '0'),
+    eyebrow,
+    name: split(d.name.fr),
+    material: d.name.en,
+    description,
+    image: d.img.l,
+    specs,
+    price: d.price ?? d.fromPrice,
+  };
+});
+
 export const outro = {
-  line1: 'Three pieces.',
-  line2: ['One ', 'night swim.'],
+  line1: 'Un café.',
+  line2: ['Un ', 'rendez-vous.'],
 };
 
-export const closing = {
-  eyebrow: 'The complete set',
-  title: ['Take the whole', 'deep end'],
-  body: 'Earrings, pendant and ring, cut from stones of the same parcel so their colour matches under any light. Delivered in one case, hand-finished in our atelier.',
-  setNote: 'Set of three',
-};
+/** The four drinks you can grab and stretch (Otis engine). */
+export const signatures = ['cappuccino-chantilly', 'aperol-spritz', 'orval', 'kir-royal'].map(need);
 
 export const footer = {
-  columns: [
-    ['Shop', ['The Deep End', 'Earrings', 'Necklaces', 'Rings']],
-    ['Atelier', ['Our stones', 'Bespoke', 'Care & repairs', 'Book a viewing']],
-    ['House', ['Journal', 'Stockists', 'Contact', 'Careers']],
-  ] as [string, string[]][],
-  concept: 'NAÏADE is a concept brand made for a design study. Pieces, prices and imagery are fictional.',
+  hours: [
+    ['Lun – Mer', '08:00 – 02:00'],
+    ['Jeudi', '08:00 – 00:00'],
+    ['Ven – Dim', '24 h / 24'],
+  ] as [string, string][],
+  transit: cafe.transit as string[],
+  note: 'Horaires et téléphone repris de la fiche publique — à confirmer avec le café.',
 };
-
-export const formatPrice = (n: number) =>
-  new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 0}).format(n);

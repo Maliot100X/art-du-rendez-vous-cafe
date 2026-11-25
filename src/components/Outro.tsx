@@ -11,12 +11,12 @@ export function Outro({ref}: {ref?: Ref<HTMLDivElement>}) {
     >
       <p className="display text-[clamp(52px,10.5vw,190px)]">
         <span className="block overflow-hidden pb-[0.08em]">
-          <span data-line className="block uppercase text-bone [transform:translate3d(0,110%,0)]">
+          <span data-line className="block uppercase text-cream [transform:translate3d(0,110%,0)]">
             {outro.line1}
           </span>
         </span>
         <span className="block overflow-hidden pb-[0.12em]">
-          <span data-line className="block text-paraiba [transform:translate3d(0,110%,0)]">
+          <span data-line className="block text-gold [transform:translate3d(0,110%,0)]">
             <em>{outro.line2[0]}</em>
             <span className="uppercase">{outro.line2[1]}</span>
           </span>

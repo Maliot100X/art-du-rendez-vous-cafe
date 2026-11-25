@@ -3,7 +3,8 @@ import {startScroll} from './lib/scroll';
 import {useReducedMotion} from './hooks/useReducedMotion';
 import {Nav} from './components/Nav';
 import {Stage} from './components/Stage';
-import {Closing} from './components/Closing';
+import {Signatures} from './components/Signatures';
+import {CarteReel} from './components/CarteReel';
 import {Footer} from './components/Footer';
 import {BagDrawer} from './components/BagDrawer';
 import {Preloader} from './components/Preloader';
@@ -21,7 +22,8 @@ export default function App() {
       <Nav />
       <main>
         <Stage onProgress={onProgress} />
-        <Closing />
+        <Signatures />
+        <CarteReel />
       </main>
       <Footer />
       <BagDrawer />

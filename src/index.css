@@ -1,23 +1,25 @@
 @import 'tailwindcss';
 
-/* Colours sampled from the renders: the Paraíba stone, the aqua pool light,
-   the bone of the product backdrop. Everything else stays near-black. */
+/* Art du Rendez-Vous palette: bottle-green room, cream porcelain, brass/gold,
+   espresso. Token names follow NAÏADE's (ink / cream / gold) so its classes carry over. */
 @theme {
-  --color-ink: #060809;
-  --color-ink-2: #0d1112;
-  --color-ink-3: #161b1d;
-  --color-bone: #ece8e2;
-  --color-bone-2: #e3ded7;
-  --color-stone: #d6d1cb;
-  --color-mist: #8d9696;
-  --color-graphite: #2a2f31;
-  --color-paraiba: #2bf0ee;
-  --color-paraiba-deep: #07b9cf;
-  --color-pool: #9ff2f6;
+  --color-ink: #0f241b;
+  --color-ink-2: #16352a;
+  --color-ink-3: #1d4234;
+  --color-cream: #efe3c8;
+  --color-cream-2: #e6d8b9;
+  --color-paper: #f6eedd;
+  --color-stone: #d9cdb2;
+  --color-mist: #9fb0a5;
+  --color-graphite: #2a1d17;
+  --color-espresso: #2a1d17;
+  --color-gold: #b98a3e;
+  --color-gold-deep: #8f6424;
+  --color-gold-light: #e2bd76;
 
-  --font-display: 'Bodoni Moda', 'Didot', 'Bodoni 72', serif;
-  --font-sans: 'Albert Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Martian Mono', ui-monospace, monospace;
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
   --text-micro: 0.625rem;
   --text-micro--line-height: 1.5;
@@ -44,7 +46,7 @@ html.lenis body {
 
 html {
   background: var(--color-ink);
-  color: var(--color-bone);
+  color: var(--color-cream);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -55,14 +57,14 @@ body {
   overflow-x: clip;
 }
 ::selection {
-  background: var(--color-paraiba);
+  background: var(--color-gold);
   color: var(--color-ink);
 }
 
-/* Bodoni at display sizes: high optical size, tight, swashy italics. */
+/* Fraunces at display sizes: high optical size, soft, swashy italics. */
 .display {
   font-family: var(--font-display);
-  font-variation-settings: 'opsz' 96;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50;
   font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 0.86;
@@ -128,7 +130,7 @@ body {
   position: absolute;
   inset: 0 auto 0 0;
   width: 35%;
-  background: linear-gradient(90deg, transparent, rgb(43 240 238 / 0.35), transparent);
+  background: linear-gradient(90deg, transparent, rgb(217 166 80 / 0.35), transparent);
   transform: translateX(-120%) skewX(-18deg);
   pointer-events: none;
 }
@@ -153,3 +155,14 @@ body {
   .grain { animation: none; }
   [data-reveal] { transition: none; opacity: 1; transform: none; filter: none; }
 }
+
+/* No-WebGL fallback: the stage shows a still of the café instead of the live scene. */
+#film.no-webgl .sticky { background: url('/media/scenes/h1p-espresso-1600.webp') center/cover; }
+
+/* Cursor-grab affordance on the Otis stretch canvases */
+.stretch { cursor: grab; touch-action: pan-y; }
+.stretch:active { cursor: grabbing; }
+
+/* Visor hotspot: the leader line draws itself */
+.hotspot-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-line 1.4s 1.8s var(--ease-silk) forwards; }
+@keyframes draw-line { to { stroke-dashoffset: 0; } }
