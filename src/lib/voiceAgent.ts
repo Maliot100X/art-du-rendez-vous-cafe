@@ -34,10 +34,19 @@
  *       from the browser (POST https://api.deepgram.com/v1/auth/grant).
  *       That branch is dev-only and is stripped from production
  *       builds. A production build must NOT set VITE_DEEPGRAM_API_KEY.
- * When no token can be obtained, start() fails with reason 'no-token'
- * and the UI shows the honest offline state; the text chat keeps
- * working. Voice stays OFFLINE until the grant server runs with a
- * valid key — never claim otherwise.
+ * When no token can be obtained, start() fails with the real reason:
+ * a GrantError (network / timeout / HTTP status / empty body) with
+ * the attempt count, reported as reason 'grant-network' /
+ * 'grant-timeout' / 'grant-http' / 'grant-empty' with the detail, so
+ * the UI says what actually happened instead of the generic
+ * "Deepgram n'a pas fourni de jeton d'appel". The plain 'no-token'
+ * reason survives only for the dev-only fallback (no VITE key
+ * configured). The same-origin fetch retries transient failures
+ * (3 attempts, 10 s each, 1 s then 2 s backoff — see
+ * GRANT_FETCH_ATTEMPTS below), because one tunnel/proxy flake used
+ * to kill the whole call. The text chat keeps working. Voice stays
+ * OFFLINE until the grant server runs with a valid key — never claim
+ * otherwise.
  *
  * THINK — Inception mercury-3 (fix pass 14, group E):
  * The agent's brain is Inception's mercury-3, reached as a Deepgram
@@ -108,10 +117,80 @@ const AGENT_SOCKET_URL = 'wss://agent.deepgram.com/v1/agent/converse'
 const GRANT_URL = 'https://api.deepgram.com/v1/auth/grant'
 const TTS_SAMPLE_RATE = 24000
 
+// Fix pass 16, group 4: the same-origin grant fetch is the single point
+// of failure for voice — the fix-15 cloud check showed one transient
+// tunnel flake killing the whole call, because the fetch ran once with
+// no timeout and no retry. So it now runs up to 3 attempts: each
+// attempt gets a generous 10 s budget (a healthy tunnel POST takes
+// ~1–2 s; the observed flake was a connection failure, not slowness),
+// with 1 s then 2 s of backoff between attempts. Worst case the user
+// sees "Connexion…" for ~33 s before the honest failure; the common
+// case (first attempt works) is unchanged at ~1–2 s. Retried:
+// network failures, timeouts, and HTTP 5xx (proxy/tunnel/upstream
+// blips). NOT retried: HTTP 4xx (config/auth — the same request would
+// fail again) and HTTP 200 with no token (server-side shape problem).
+const GRANT_FETCH_ATTEMPTS = 3
+const GRANT_FETCH_TIMEOUT_MS = 10_000
+const GRANT_FETCH_BACKOFF_MS = [1000, 2000]
+
+/** A grant fetch that gave up, carrying the real reason for the UI. */
+class GrantError extends Error {
+  readonly kind: GrantFailureKind
+  readonly attempts: number
+  readonly status?: number
+
+  constructor(kind: GrantFailureKind, attempts: number, status?: number) {
+    super(`grant-${kind} after ${attempts} attempt(s)${status ? ` (HTTP ${status})` : ''}`)
+    this.name = 'GrantError'
+    this.kind = kind
+    this.attempts = attempts
+    this.status = status
+  }
+
+  toDetail(): GrantFailureDetail {
+    return { kind: this.kind, attempts: this.attempts, status: this.status }
+  }
+}
+
+function grantReasonFor(kind: GrantFailureKind): VoiceErrorReason {
+  switch (kind) {
+    case 'network':
+      return 'grant-network'
+    case 'timeout':
+      return 'grant-timeout'
+    case 'http':
+      return 'grant-http'
+    case 'empty':
+      return 'grant-empty'
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'ended'
+
+/**
+ * Why the grant fetch gave up, for the honest offline message.
+ * 'network' — fetch itself rejected (tunnel/proxy down, DNS, reset);
+ * 'timeout' — the endpoint did not answer within one attempt's budget;
+ * 'http' — the endpoint answered with an error status (see `status`);
+ * 'empty' — HTTP 200 but no usable token in the body.
+ * `attempts` is how many POSTs were made before giving up.
+ */
+export type GrantFailureKind = 'network' | 'timeout' | 'http' | 'empty'
+
+export interface GrantFailureDetail {
+  kind: GrantFailureKind
+  attempts: number
+  status?: number
+}
 
 export type VoiceErrorReason =
   | 'no-token'
+  | 'grant-network'
+  | 'grant-timeout'
+  | 'grant-http'
+  | 'grant-empty'
   | 'mic-denied'
   | 'mic-missing'
   | 'worklet-unsupported'
@@ -124,7 +203,7 @@ export interface VoiceOrderLine {
 }
 
 export interface VoiceAgentCallbacks {
-  onStatus: (status: VoiceStatus, error?: VoiceErrorReason) => void
+  onStatus: (status: VoiceStatus, error?: VoiceErrorReason, grantDetail?: GrantFailureDetail) => void
   onTranscript: (role: 'user' | 'assistant', text: string) => void
   onOrderAdded: (line: VoiceOrderLine) => void
 }
@@ -257,27 +336,67 @@ interface GrantResponse {
 
 /**
  * Mint a short-lived JWT. Same-origin grant endpoint first
- * (server/grant.mjs locally, api/deepgram/grant.ts on Vercel);
+ * (server/grant.mjs locally, api/deepgram/grant.ts on Vercel), retried
+ * up to GRANT_FETCH_ATTEMPTS times with backoff (see the constants
+ * above — one transient tunnel/proxy flake must not kill the call);
  * dev-only API-key grant second; otherwise throw, so the caller can
- * show the honest offline state.
+ * show the honest offline state. A same-origin failure throws a
+ * GrantError carrying the real kind (network/timeout/http/empty), the
+ * attempt count, and the HTTP status when there is one — the caller
+ * reports that instead of the generic 'no-token'.
  */
 async function fetchGrantToken(): Promise<string> {
-  try {
-    const res = await fetch('/api/deepgram/grant', { method: 'POST' })
-    if (res.ok) {
-      const body = (await res.json()) as GrantResponse
-      const token = body.access_token ?? body.token
-      if (typeof token === 'string' && token.length > 0) return token
+  let lastError: GrantError | null = null
+  for (let attempt = 1; attempt <= GRANT_FETCH_ATTEMPTS; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), GRANT_FETCH_TIMEOUT_MS)
+    try {
+      const res = await fetch('/api/deepgram/grant', { method: 'POST', signal: controller.signal })
+      if (res.ok) {
+        let body: GrantResponse
+        try {
+          body = (await res.json()) as GrantResponse
+        } catch {
+          // 200 with an unreadable body is a server-side shape problem,
+          // not a transient failure — no retry.
+          throw new GrantError('empty', attempt)
+        }
+        const token = body.access_token ?? body.token
+        if (typeof token === 'string' && token.length > 0) return token
+        throw new GrantError('empty', attempt)
+      }
+      // 5xx from the proxy/tunnel/upstream is transient — retry.
+      // 4xx is a config/auth problem — the same request would fail
+      // again, so give up now with the real status.
+      if (res.status >= 500) {
+        lastError = new GrantError('http', attempt, res.status)
+      } else {
+        throw new GrantError('http', attempt, res.status)
+      }
+    } catch (err) {
+      if (err instanceof GrantError) throw err
+      // fetch rejected: an abort from our own timeout is 'timeout',
+      // anything else (tunnel down, DNS, connection reset) is
+      // 'network'. Both are transient — retry while attempts remain.
+      const kind: GrantFailureKind =
+        err instanceof DOMException && err.name === 'AbortError' ? 'timeout' : 'network'
+      lastError = new GrantError(kind, attempt)
+    } finally {
+      clearTimeout(timer)
     }
-  } catch {
-    // No backend yet — fall through to the dev-only path below.
+    if (attempt < GRANT_FETCH_ATTEMPTS) {
+      await sleep(GRANT_FETCH_BACKOFF_MS[attempt - 1] ?? 1000)
+    }
   }
-
+  // Same-origin retries exhausted. In dev only, fall back to the
+  // direct grant with the dev key (as before — the same-origin path
+  // may simply not exist yet in a bare dev setup). In production
+  // there is no fallback: report the real same-origin failure.
   if (import.meta.env.DEV) {
     // DEV ONLY: the raw key is used here solely to mint a short-lived
     // grant token, never as socket auth. Stripped from production builds.
     const key = import.meta.env.VITE_DEEPGRAM_API_KEY as string | undefined
-    if (!key) throw new Error('no-token')
+    if (!key) throw lastError ?? new GrantError('network', GRANT_FETCH_ATTEMPTS)
     const res = await fetch(GRANT_URL, {
       method: 'POST',
       headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
@@ -290,7 +409,7 @@ async function fetchGrantToken(): Promise<string> {
     throw new Error('no-token')
   }
 
-  throw new Error('no-token')
+  throw lastError ?? new GrantError('network', GRANT_FETCH_ATTEMPTS)
 }
 
 function findMenuItem(name: string): VoiceOrderLine | null {
@@ -370,8 +489,13 @@ export class DeepgramVoiceAgent {
     this.callbacks.onStatus('connecting')
 
     // 1. Short-lived JWT FIRST (see the token note at the top of this
-    //    file). If the grant endpoint is unreachable or the server
-    //    has no valid key, this fails with 'no-token' — and it must
+    //    file). The same-origin grant fetch retries transient failures
+    //    (fix pass 16, group 4), so a single tunnel/proxy flake no
+    //    longer kills the call. If it still fails, the GrantError
+    //    carries the real reason (network/timeout/HTTP status/empty)
+    //    and the attempt count, and that — not the generic 'no-token'
+    //    — is what the UI shows. A plain Error('no-token') still
+    //    means the dev-only fallback had no key configured. This must
     //    fail BEFORE the microphone is touched, so a mic-less or
     //    denying browser never reports a mic error for what is really
     //    a missing token. No mic stream exists yet at this point, so
@@ -380,9 +504,13 @@ export class DeepgramVoiceAgent {
     let token: string
     try {
       token = await fetchGrantToken()
-    } catch {
+    } catch (err) {
       this.cleanupMic()
-      this.callbacks.onStatus('ended', 'no-token')
+      if (err instanceof GrantError) {
+        this.callbacks.onStatus('ended', grantReasonFor(err.kind), err.toDetail())
+      } else {
+        this.callbacks.onStatus('ended', 'no-token')
+      }
       return
     }
 

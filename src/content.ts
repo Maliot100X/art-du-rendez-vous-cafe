@@ -379,6 +379,18 @@ export const AGENT = {
   // connect until a working key is re-entered — the UI says so plainly.
   voiceNoToken:
     'La voix en direct n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
+  // Fix pass 16, group 4: the grant fetch reports the REAL failure
+  // instead of the generic line above. These are the sentence heads —
+  // Agent.tsx appends the HTTP status when there is one and the
+  // attempt count, e.g. "…n’a pas répondu (3 tentatives)".
+  voiceGrantNetwork:
+    'La voix en direct n’est pas connectée : le serveur de jetons n’a pas répondu',
+  voiceGrantTimeout:
+    'La voix en direct n’est pas connectée : le serveur de jetons a mis trop de temps à répondre',
+  voiceGrantHttp:
+    'La voix en direct n’est pas connectée : le serveur de jetons a renvoyé une erreur',
+  voiceGrantEmpty:
+    'La voix en direct n’est pas connectée : le serveur de jetons a renvoyé une réponse vide',
   voiceWorklet:
     'Votre navigateur ne permet pas la capture audio en direct — le chat texte reste disponible.',
   voiceSocketError:

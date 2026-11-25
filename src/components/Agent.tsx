@@ -19,7 +19,7 @@ import { askBrain } from '../lib/brain'
 import { avatarBridge } from '../lib/avatarBridge'
 import { getLastBookCategory, onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
-import { DeepgramVoiceAgent, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
+import { DeepgramVoiceAgent, type GrantFailureDetail, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
 import type { OrderLine } from './MenuSection'
 import { EASE_SILK, ScrollTrigger } from '../lib/motion'
 import { lazyWithRetry } from '../lib/lazyRetry'
@@ -99,7 +99,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const [answering, setAnswering] = useState(false)
   const [qr, setQr] = useState<string | null>(null)
   const [qrFailed, setQrFailed] = useState(false)
-  const [voiceState, setVoiceState] = useState<{ status: VoiceStatus; error?: VoiceErrorReason }>({
+  const [voiceState, setVoiceState] = useState<{
+    status: VoiceStatus
+    error?: VoiceErrorReason
+    grantDetail?: GrantFailureDetail
+  }>({
     status: 'idle',
   })
   const [agentSpeaking, setAgentSpeaking] = useState(false)
@@ -281,14 +285,15 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   // mic worklet and TTS playback; this component only renders its
   // status, feeds its transcript into the chat, and lets its
   // add_to_order function calls land in the order panel. When no
-  // token can be obtained the client reports 'no-token' and the UI
-  // shows the honest offline state below — voice is offline until a
-  // working Deepgram key is re-entered.
+  // token can be obtained the client reports the real grant failure
+  // ('grant-network' / 'grant-timeout' / 'grant-http' / 'grant-empty',
+  // with attempt count and HTTP status) and the UI shows it below —
+  // the plain 'no-token' survives only for the dev-only fallback.
   const startVoice = () => {
     const agent = new DeepgramVoiceAgent(
       {
-        onStatus: (status, error) => {
-          setVoiceState({ status, error })
+        onStatus: (status, error, grantDetail) => {
+          setVoiceState({ status, error, grantDetail })
           if (status === 'idle' || status === 'ended') {
             voiceAgentRef.current = null
             if (levelRef.current) levelRef.current.style.transform = 'scaleX(0.04)'
@@ -338,6 +343,25 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     return () => cancelAnimationFrame(raf)
   }, [voiceState.status])
 
+  // Fix pass 16, group 4: a failed grant fetch shows the REAL reason
+  // (network / timeout / HTTP status / empty body) with the attempt
+  // count, from the detail the voice client passes with the status —
+  // not the generic "Deepgram n'a pas fourni de jeton d'appel".
+  const grantStatusText = (error: VoiceErrorReason, detail?: GrantFailureDetail): string => {
+    const base =
+      error === 'grant-timeout'
+        ? AGENT.voiceGrantTimeout
+        : error === 'grant-http'
+          ? AGENT.voiceGrantHttp
+          : error === 'grant-empty'
+            ? AGENT.voiceGrantEmpty
+            : AGENT.voiceGrantNetwork
+    const attempts = detail?.attempts ?? 0
+    const http = detail?.status ? ` HTTP ${detail.status}` : ''
+    const tries = attempts > 0 ? ` (${attempts} tentative${attempts > 1 ? 's' : ''})` : ''
+    return `${base}${http}${tries}. Le chat texte ci-dessus fonctionne normalement.`
+  }
+
   const voiceStatusText = () => {
     switch (voiceState.status) {
       case 'connecting':
@@ -348,6 +372,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         switch (voiceState.error) {
           case 'no-token':
             return AGENT.voiceNoToken
+          case 'grant-network':
+          case 'grant-timeout':
+          case 'grant-http':
+          case 'grant-empty':
+            return grantStatusText(voiceState.error, voiceState.grantDetail)
           case 'mic-denied':
             return AGENT.voiceDenied
           case 'mic-missing':
