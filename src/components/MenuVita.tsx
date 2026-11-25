@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide-react'
 import { MENU } from '../content'
-import { botReply } from '../lib/agentBrain'
+import { askBrain } from '../lib/brain'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
 
 const VrmModel = lazy(() => import('./VrmModel'))
@@ -12,9 +12,11 @@ const VrmModel = lazy(() => import('./VrmModel'))
  * - Category change → she walks (one procedural cycle via walkTick) and
  *   reads the category aloud (2–3 items + prices, from MENU data, never
  *   retyped). Item tap → she walks and speaks that item.
- * - Mini chat: the same rule-based brain as the agent (agentBrain). If
- *   the question names a category, she walks to it, OPENS THE BOOK on
- *   that category (onOpenBook → tab switch + flip) and speaks the reply.
+ * - Mini chat: the brain adapter (src/lib/brain.ts) — the LLM brain
+ *   when a key is configured and the call succeeds, the offline
+ *   rule-based brain otherwise. If the question names a category, she
+ *   walks to it, OPENS THE BOOK on that category (onOpenBook → tab
+ *   switch + flip) and speaks the reply.
  * - Speaking is the browser's speechSynthesis (French voice when the
  *   device has one). Deepgram and freellm are both offline and are
  *   never claimed here.
@@ -79,6 +81,9 @@ export interface VitaGuide {
   categoryId: string
   ask: (e: FormEvent) => void
   openBook: () => void
+  /** True only after the LLM brain has actually answered once — the
+      footnote below must not claim the brain is live before that. */
+  brainLive: boolean
 }
 
 export function useVitaGuide({
@@ -95,6 +100,7 @@ export function useVitaGuide({
   const [input, setInput] = useState('')
   const [muted, setMutedState] = useState(isSpeechMuted())
   const [collapsed, setCollapsed] = useState(false)
+  const [brainLive, setBrainLive] = useState(false)
   const firstCategoryRef = useRef(true)
 
   // Stop any speech when the menu tab unmounts.
@@ -133,22 +139,27 @@ export function useVitaGuide({
 
   const openBook = () => onOpenBook(categoryId)
 
+  // Mini chat goes through the same brain adapter as the Agent tab
+  // (src/lib/brain.ts): LLM when a key is configured and the call
+  // succeeds, the offline rule-based brain otherwise — same reply, so
+  // Vita's walk + spoken line work identically either way. If the
+  // question names a category she walks to it and opens the book on it
+  // at once; the spoken answer lands when the brain answers.
   const ask = (e: FormEvent) => {
     e.preventDefault()
     const clean = input.trim()
     if (!clean) return
     setInput('')
-    const reply = botReply(clean)
     const catId = findCategoryForText(clean)
-    setLine(reply.text)
     if (catId) {
-      // She walks to the category and opens the book on it.
       setWalkTick((t) => t + 1)
-      if (isSpeechSupported()) speak(reply.text)
       onOpenBook(catId)
-    } else if (isSpeechSupported()) {
-      speak(reply.text)
     }
+    void askBrain(clean).then(({ reply, source }) => {
+      if (source === 'llm') setBrainLive(true)
+      setLine(reply.text)
+      if (isSpeechSupported()) speak(reply.text)
+    })
   }
 
   return {
@@ -163,6 +174,7 @@ export function useVitaGuide({
     categoryId,
     ask,
     openBook,
+    brainLive,
   }
 }
 
@@ -246,7 +258,11 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
             <Send size={16} />
           </button>
         </form>
-        <p className="mt-2.5 text-xs text-mist">Voix du navigateur — Deepgram et le cerveau LLM sont hors ligne.</p>
+        <p className="mt-2.5 text-xs text-mist">
+          {guide.brainLive
+            ? 'Cerveau LLM en ligne — Vita répond avec le cerveau du café.'
+            : 'Voix du navigateur — Deepgram et le cerveau LLM sont hors ligne.'}
+        </p>
       </div>
     </div>
   )

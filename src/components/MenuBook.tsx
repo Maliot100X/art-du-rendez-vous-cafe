@@ -646,7 +646,7 @@ function StaticSpread({
       {/* Left page — the category intro. */}
       <div className="overflow-hidden rounded-[1.5rem] bg-bone text-ink">
         <div className="relative h-44 sm:h-56">
-          <img src={category.image} alt={category.imageAlt} className="h-full w-full object-cover" loading="lazy" />
+          <img src={category.image} alt={category.imageAlt} className="h-full w-full object-cover" loading="lazy" decoding="async" />
           <div
             className="absolute inset-0"
             aria-hidden

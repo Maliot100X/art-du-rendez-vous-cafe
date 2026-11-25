@@ -13,8 +13,9 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { AGENT, agentConnected, MENU } from '../content'
-import { botReply, expressionForReply, orderTotal, type BotAction } from '../lib/agentBrain'
+import { AGENT, MENU } from '../content'
+import { expressionForReply, orderTotal, type BotAction } from '../lib/agentBrain'
+import { askBrain } from '../lib/brain'
 import { avatarBridge } from '../lib/avatarBridge'
 import { getLastBookCategory, onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
@@ -66,6 +67,11 @@ interface AgentProps {
 export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([{ role: 'bot', text: AGENT.chatWelcome }])
   const [input, setInput] = useState('')
+  // True only after the LLM brain has actually answered once (see
+  // src/lib/brain.ts): a configured key alone never flips this — the
+  // status pill must not claim "connecté" while the brain is offline.
+  const [brainLive, setBrainLive] = useState(false)
+  const [answering, setAnswering] = useState(false)
   const [qr, setQr] = useState<string | null>(null)
   const [qrFailed, setQrFailed] = useState(false)
   const [voiceState, setVoiceState] = useState<{ status: VoiceStatus; error?: VoiceErrorReason }>({
@@ -140,15 +146,29 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     setSpeechMuted(next)
   }
 
+  // Text chat goes through the brain adapter (src/lib/brain.ts): the
+  // LLM brain when a key is configured and the call succeeds, the
+  // offline rule-based brain otherwise — same reply shape either way,
+  // so the avatar expression + spoken reply work identically. The user
+  // message posts at once; the reply lands when the brain answers.
   const send = (text: string) => {
     const clean = text.trim()
-    if (!clean) return
-    const reply = botReply(clean)
-    avatarBridge.setExpression(reply.expression ?? 'neutral')
-    setMessages((prev) => [...prev, { role: 'user', text: clean }, { role: 'bot', text: reply.text, actions: reply.actions }])
+    if (!clean || answering) return
+    setAnswering(true)
+    setMessages((prev) => [...prev, { role: 'user', text: clean }])
     setInput('')
-    // Live speaking: the reply is spoken (short, French voice) unless muted.
-    if (isSpeechSupported()) speak(reply.text)
+    const history = messages
+      .slice(-6)
+      .map((m) => ({ role: m.role, text: m.text }) as { role: 'user' | 'assistant'; text: string })
+    void askBrain(clean, history)
+      .then(({ reply, source }) => {
+        if (source === 'llm') setBrainLive(true)
+        avatarBridge.setExpression(reply.expression ?? 'neutral')
+        setMessages((prev) => [...prev, { role: 'bot', text: reply.text, actions: reply.actions }])
+        // Live speaking: the reply is spoken (short, French voice) unless muted.
+        if (isSpeechSupported()) speak(reply.text)
+      })
+      .finally(() => setAnswering(false))
   }
 
   // ---- Book reaction (bookEvents): the model describes the category
@@ -305,11 +325,11 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         <h2 className="agent-title mt-2 font-display text-bone">{AGENT.title}</h2>
         <p
           className={`mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] ${
-            agentConnected ? 'border-amber/50 bg-amber/10 text-amber' : 'border-line bg-ink-2 text-bone/70'
+            brainLive ? 'border-amber/50 bg-amber/10 text-amber' : 'border-line bg-ink-2 text-bone/70'
           }`}
         >
-          <span className={`live-dot inline-block h-1.5 w-1.5 rounded-full ${agentConnected ? 'bg-amber' : 'bg-ember'}`} />
-          {agentConnected ? 'Agent en direct — connecté' : AGENT.statusOffline}
+          <span className={`live-dot inline-block h-1.5 w-1.5 rounded-full ${brainLive ? 'bg-amber' : 'bg-ember'}`} />
+          {brainLive ? 'Agent en direct — cerveau connecté' : AGENT.statusOffline}
         </p>
       </div>
 
@@ -434,6 +454,18 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
                   </div>
                 </div>
               ))}
+              {answering && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-3xl rounded-bl-md bg-ink-3 px-4 py-3 text-[15px] leading-relaxed text-bone">
+                    <span className="flex items-center gap-1.5" aria-label="Nekomi réfléchit…">
+                      <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />
+                      <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" style={{ animationDelay: '0.25s' }} />
+                      <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" style={{ animationDelay: '0.5s' }} />
+                      <span className="ml-1 text-sm text-mist">Nekomi réfléchit…</span>
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2 px-4 pb-3">
@@ -465,11 +497,13 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={AGENT.chatPlaceholder}
-                className="min-w-0 flex-1 bg-transparent px-3 text-base text-bone placeholder:text-mist focus:outline-none"
+                disabled={answering}
+                className="min-w-0 flex-1 bg-transparent px-3 text-base text-bone placeholder:text-mist focus:outline-none disabled:opacity-50"
               />
               <button
                 type="submit"
-                className="min-h-11 shrink-0 rounded-full bg-bone px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.04]"
+                disabled={answering}
+                className="min-h-11 shrink-0 rounded-full bg-bone px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.04] disabled:opacity-50"
               >
                 {AGENT.chatSend}
               </button>
@@ -616,7 +650,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           face below the fold on first view. */}
       <div className="mt-8 max-w-3xl" data-reveal>
         <p className="text-lead text-bone/75">{AGENT.lede}</p>
-        {!agentConnected && <p className="mt-3 max-w-xl text-sm text-mist">{AGENT.statusHint}</p>}
+        {!brainLive && <p className="mt-3 max-w-xl text-sm text-mist">{AGENT.statusHint}</p>}
       </div>
     </section>
   )

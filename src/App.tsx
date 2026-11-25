@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { BookOpen, Bot, Coffee, Home, Images, MapPin, Sparkles } from 'lucide-react'
 import { lazyWithRetry } from './lib/lazyRetry'
 import Nav from './components/Nav'
@@ -10,6 +10,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { scrollToTop, startScroll, useReducedMotion } from './lib/scroll'
 import { useReveal } from './lib/useReveal'
 import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
+import { TAB_THEMES } from './lib/tabThemes'
 import MenuVita, { MenuVitaPanel, MenuVitaStage, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
 import { MENU } from './content'
 
@@ -178,6 +179,40 @@ function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => 
 }
 
 /**
+ * Per-tab identity wrapper — one room per tab (see src/lib/tabThemes.ts).
+ * A hairline + mono ribbon (index, tab name, tagline) tops the panel,
+ * the panel gets its own glow position + accent, and inside the wrapper
+ * `text-amber` takes the tab's accent (eyebrows, italic accent words,
+ * prices, icons). The tab shell, sticky tab bar and mobile bottom bar
+ * are untouched; each tab keeps its own content and layout.
+ */
+function TabSurface({ tab, children }: { tab: TabId; children: ReactNode }) {
+  const theme = TAB_THEMES[tab]
+  const label = TABS.find((t) => t.id === tab)?.label ?? tab
+  return (
+    <div
+      className={`tab-surface tab-${tab}`}
+      style={
+        {
+          '--tab-accent': theme.accent,
+          '--tab-glow': theme.glow,
+          '--tab-glow-pos': theme.glowPosition,
+        } as CSSProperties
+      }
+    >
+      <div className="tab-ribbon mx-auto max-w-[1400px] px-4 sm:px-6" aria-hidden="true">
+        <span className="tab-ribbon-dot" />
+        <span>
+          {theme.index} / {label}
+        </span>
+        <span className="tab-ribbon-tag">{theme.tagline}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/**
  * Menu tab: the menu + Vita walking beside it.
  *
  * Desktop (lg+): two columns — the menu on the left, Vita in a sticky
@@ -282,7 +317,7 @@ export default function App() {
       <main className="relative z-10 pt-[64px] sm:pt-[72px]">
         <TabBar active={activeTab} onSelect={setTab} />
         {activeTab === 'home' && (
-          <>
+          <TabSurface tab="home">
             {/* Fluid sim behind the hero (z-0); main sits above it.
                 The boundary keeps a WebGL failure from blanking the page. */}
             <Suspense fallback={null}>
@@ -291,49 +326,65 @@ export default function App() {
               </ErrorBoundary>
             </Suspense>
             <Hero />
-          </>
+          </TabSurface>
         )}
-        {activeTab === 'menu' && <MenuTab onAdd={addToOrder} onOpenBook={openBook} />}
+        {activeTab === 'menu' && (
+          <TabSurface tab="menu">
+            <MenuTab onAdd={addToOrder} onOpenBook={openBook} />
+          </TabSurface>
+        )}
         {activeTab === 'book' && (
-          <ErrorBoundary
-            key={`book-${panelNonce}`}
-            fallback={<PanelError label="Le livre" onRetry={() => setPanelNonce((n) => n + 1)} />}
-          >
-            <Suspense fallback={<PanelLoading label="Le livre s'ouvre…" />}>
-              <MenuBook goToCategory={bookTarget} />
-            </Suspense>
-          </ErrorBoundary>
+          <TabSurface tab="book">
+            <ErrorBoundary
+              key={`book-${panelNonce}`}
+              fallback={<PanelError label="Le livre" onRetry={() => setPanelNonce((n) => n + 1)} />}
+            >
+              <Suspense fallback={<PanelLoading label="Le livre s'ouvre…" />}>
+                <MenuBook goToCategory={bookTarget} />
+              </Suspense>
+            </ErrorBoundary>
+          </TabSurface>
         )}
         {activeTab === 'gallery' && (
-          <ErrorBoundary
-            key={`gallery-${panelNonce}`}
-            fallback={<PanelError label="La galerie" onRetry={() => setPanelNonce((n) => n + 1)} />}
-          >
-            <Suspense fallback={<PanelLoading label="La galerie se charge…" />}>
-              <Gallery />
-            </Suspense>
-          </ErrorBoundary>
+          <TabSurface tab="gallery">
+            <ErrorBoundary
+              key={`gallery-${panelNonce}`}
+              fallback={<PanelError label="La galerie" onRetry={() => setPanelNonce((n) => n + 1)} />}
+            >
+              <Suspense fallback={<PanelLoading label="La galerie se charge…" />}>
+                <Gallery />
+              </Suspense>
+            </ErrorBoundary>
+          </TabSurface>
         )}
         {activeTab === 'ambiance' && (
-          <ErrorBoundary
-            key={`ambiance-${panelNonce}`}
-            fallback={<PanelError label="L'ambiance" onRetry={() => setPanelNonce((n) => n + 1)} />}
-          >
-            <Suspense fallback={<PanelLoading label="L'ambiance se prépare…" />}>
-              <Atmosphere />
-            </Suspense>
-          </ErrorBoundary>
+          <TabSurface tab="ambiance">
+            <ErrorBoundary
+              key={`ambiance-${panelNonce}`}
+              fallback={<PanelError label="L'ambiance" onRetry={() => setPanelNonce((n) => n + 1)} />}
+            >
+              <Suspense fallback={<PanelLoading label="L'ambiance se prépare…" />}>
+                <Atmosphere />
+              </Suspense>
+            </ErrorBoundary>
+          </TabSurface>
         )}
-        {activeTab === 'visit' && <Visit />}
+        {activeTab === 'visit' && (
+          <TabSurface tab="visit">
+            <Visit />
+          </TabSurface>
+        )}
         {activeTab === 'agent' && (
-          <ErrorBoundary
-            key={`agent-${panelNonce}`}
-            fallback={<PanelError label="L'agent" onRetry={() => setPanelNonce((n) => n + 1)} />}
-          >
-            <Suspense fallback={<PanelLoading label="L'agent se prépare…" />}>
-              <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
-            </Suspense>
-          </ErrorBoundary>
+          <TabSurface tab="agent">
+            <ErrorBoundary
+              key={`agent-${panelNonce}`}
+              fallback={<PanelError label="L'agent" onRetry={() => setPanelNonce((n) => n + 1)} />}
+            >
+              <Suspense fallback={<PanelLoading label="L'agent se prépare…" />}>
+                <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
+              </Suspense>
+            </ErrorBoundary>
+          </TabSurface>
         )}
       </main>
       <Footer />

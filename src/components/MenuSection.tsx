@@ -222,6 +222,7 @@ export default function MenuSection({
               alt={category.imageAlt}
               className="h-48 w-full object-cover sm:h-56 lg:h-full"
               loading="lazy"
+              decoding="async"
             />
             <div
               className="absolute inset-0"

@@ -117,7 +117,8 @@ export default function Atmosphere() {
             <img
               src={chapter.image}
               alt={chapter.imageAlt}
-              loading="eager"
+              loading={i === 0 ? 'eager' : 'lazy'}
+              decoding="async"
               className="h-full w-full object-cover will-change-transform"
             />
             <div

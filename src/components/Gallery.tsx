@@ -94,6 +94,7 @@ export default function Gallery() {
             src={GALLERY.poster.src}
             alt={GALLERY.poster.alt}
             loading="lazy"
+            decoding="async"
             className="aspect-[16/9] w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.2,0.7,0.1,1)] group-hover:scale-[1.02] sm:aspect-[21/9]"
           />
           <span className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/40 text-white backdrop-blur transition-colors duration-300 group-hover:border-amber group-hover:text-amber">
@@ -120,6 +121,7 @@ export default function Gallery() {
                 src={item.src}
                 alt={item.alt}
                 loading="lazy"
+                decoding="async"
                 className="aspect-[4/3] w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.2,0.7,0.1,1)] group-hover:scale-[1.05]"
               />
               <span className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/40 text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
@@ -145,6 +147,7 @@ export default function Gallery() {
             src={GALLERY.posterTall.src}
             alt={GALLERY.posterTall.alt}
             loading="lazy"
+            decoding="async"
             className="aspect-[9/16] w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.2,0.7,0.1,1)] group-hover:scale-[1.02]"
           />
           <span className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/40 text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
