@@ -16,7 +16,7 @@ import {
 import { AGENT, agentConnected, MENU } from '../content'
 import { botReply, expressionForReply, orderTotal, type BotAction } from '../lib/agentBrain'
 import { avatarBridge } from '../lib/avatarBridge'
-import { onBookCategory } from '../lib/bookEvents'
+import { getLastBookCategory, onBookCategory } from '../lib/bookEvents'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking } from '../lib/speech'
 import { DeepgramVoiceAgent, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
 import type { OrderLine } from './MenuSection'
@@ -179,6 +179,12 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
       }, 400)
     }
     const unsubscribe = onBookCategory(handleCategory)
+    // The tab shell unmounts the Agent while the book flips, so a flip
+    // that happened on the Book tab would otherwise be lost: on mount,
+    // react to the latest flip the same way (the dedupe above keeps it
+    // to one message).
+    const last = getLastBookCategory()
+    if (last) handleCategory(last)
     return () => {
       unsubscribe()
       if (bookTimerRef.current !== null) window.clearTimeout(bookTimerRef.current)

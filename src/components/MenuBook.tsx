@@ -105,9 +105,15 @@ export default function MenuBook({
     () => typeof window !== 'undefined' && window.innerWidth < 640,
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  // Logical flip state (mirrors `flipped`) — updated by goTo even when
+  // the Three.js scene is not ready yet, so a flip requested before
+  // the scene mounts is not lost and the scroll-open guard reads the
+  // truth. `visualRef` is the animated value the tween drives.
   const flipRef = useRef(0);
+  const visualRef = useRef(0);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
   const threeRef = useRef<ThreeBook | null>(null);
+  const [threeReady, setThreeReady] = useState(false);
   const singlePageRef = useRef(singlePage);
   singlePageRef.current = singlePage;
   // Measured stage bounds (react-cool-dimensions / pageflip "stretch"):
@@ -125,13 +131,20 @@ export default function MenuBook({
 
   const staticMode = reducedMotion || webglFailed;
 
+  // The external target, as a ref, so the scroll-open trigger (created
+  // once) can see whether the book was opened ON a category.
+  const goToCategoryRef = useRef(goToCategory);
+  goToCategoryRef.current = goToCategory;
+
   const goTo = useCallback(
     (target: number) => {
       const next = Math.max(0, Math.min(LEAF_COUNT, target));
       setFlipped(next);
+      flipRef.current = next;
       // The flip landed on a category: tell the agent + the menu Vita.
       // In the animated path this fires on tween completion; in static
-      // mode the flip is instant, so it fires here.
+      // mode (or before the scene exists) the flip is instant, so it
+      // fires here.
       const emit = () => {
         const cat = categoryForFlip(next);
         if (cat) emitBookCategory(cat.id);
@@ -139,10 +152,15 @@ export default function MenuBook({
       const three = threeRef.current;
       if (!three || staticMode) {
         if (staticMode) emit();
+        // Scene not ready yet: layout() applies flipRef.current when it
+        // mounts, so the requested leaf is what renders.
         return;
       }
-      const from = flipRef.current;
-      if (from === next) return;
+      const from = visualRef.current;
+      if (from === next) {
+        emit();
+        return;
+      }
       tweenRef.current?.kill();
       const proxy = { v: from };
       tweenRef.current = gsap.to(proxy, {
@@ -151,12 +169,12 @@ export default function MenuBook({
         ease: GSAP_EASE_SILK,
         overwrite: true,
         onUpdate: () => {
-          flipRef.current = proxy.v;
+          visualRef.current = proxy.v;
           three.applyFlip(proxy.v);
           three.render();
         },
         onComplete: () => {
-          flipRef.current = next;
+          visualRef.current = next;
           emit();
         },
       });
@@ -164,14 +182,20 @@ export default function MenuBook({
     [staticMode],
   );
 
-  /* ---- External flip request (menu Vita → book). ---- */
+  /* ---- External flip request (menu Vita → book). ----
+     Re-runs when the scene becomes ready: a request that arrived
+     before the Three.js init finished (three was null) is replayed
+     once the scene exists, so it lands on the requested category
+     instead of being silently dropped. */
   useEffect(() => {
     if (!goToCategory) return;
     const idx = MENU.findIndex((c) => c.id === goToCategory.catId);
     if (idx >= 0) goTo(idx + 1);
-  }, [goToCategory, goTo]);
+  }, [goToCategory, goTo, threeReady]);
 
-  /* ---- Scroll opens the book: cover → first category, once. ---- */
+  /* ---- Scroll opens the book: cover → first category, once. ----
+     Skipped when the book was opened ON a category (menu Vita): the
+     scroll-open must never override the requested leaf. */
   useEffect(() => {
     if (reducedMotion) return;
     const stage = stageRef.current;
@@ -181,7 +205,7 @@ export default function MenuBook({
       start: 'top 78%',
       once: true,
       onEnter: () => {
-        if (flipRef.current === 0) goTo(1);
+        if (flipRef.current === 0 && !goToCategoryRef.current) goTo(1);
       },
     });
     return () => {
@@ -400,6 +424,10 @@ export default function MenuBook({
       );
 
       layout();
+      // Scene ready: layout() applied flipRef.current, so a flip
+      // requested before the scene existed now renders. Signal the
+      // external-target effect to replay its request through the tween.
+      if (!cancelled) setThreeReady(true);
       // Sizing changes arrive through the useDimensions effect above
       // (stageSizeRef + layout), not a second ResizeObserver here.
     };
