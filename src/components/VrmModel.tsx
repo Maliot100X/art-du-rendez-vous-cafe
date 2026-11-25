@@ -40,6 +40,26 @@ import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
  * framing, applied here too.
  */
 
+/**
+ * Rotate a bone by a WORLD-space axis/angle. THREE's
+ * Object3D.rotateOnWorldAxis assumes no rotated parent — the VRM's bone
+ * chain (and the group's faceFront rotation) breaks that assumption and
+ * the arms rotated UP instead of down. Doing the parent-space conversion
+ * explicitly is correct regardless of the hierarchy:
+ * q' = P^-1 * Q * P * q.
+ */
+function rotateBoneWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: number): void {
+  const parentQ = new THREE.Quaternion()
+  bone.parent?.getWorldQuaternion(parentQ)
+  const qWorld = new THREE.Quaternion().setFromAxisAngle(axis, angle)
+  const delta = parentQ
+    .clone()
+    .invert()
+    .multiply(qWorld)
+    .multiply(parentQ)
+  bone.quaternion.premultiply(delta)
+}
+
 const MODEL_URL = '/vrm/vita.vrm'
 const FOV = 30
 
@@ -293,7 +313,7 @@ export default function VrmModel({
           if (axis.lengthSq() > 1e-6) {
             axis.normalize()
             const angle = Math.acos(THREE.MathUtils.clamp(dir.dot(target), -1, 1))
-            upper.rotateOnWorldAxis(axis, angle)
+            rotateBoneWorld(upper, axis, angle)
           }
           group.updateMatrixWorld(true)
           const armDir = lower
@@ -303,12 +323,18 @@ export default function VrmModel({
           const bendAxis = new THREE.Vector3().crossVectors(armDir, faceDir)
           if (bendAxis.lengthSq() > 1e-6) {
             bendAxis.normalize()
-            lower.rotateOnWorldAxis(bendAxis, 0.22)
+            rotateBoneWorld(lower, bendAxis, 0.22)
           }
         }
       } catch {
         // Arms stay in the file pose — framing still uses the measured box.
       }
+      // Propagate the rig pose to the skinned bones: getNormalizedBoneNode
+      // returns three-vrm's NORMALIZED rig nodes, and only vrm.update()
+      // copies their rotations onto the original bones the skinning uses.
+      // Without this, the rendered arms stay in T-pose and the bounds
+      // below still measure the T-pose.
+      vrm.update(0)
       group.updateMatrixWorld(true)
 
       // POSED bounds: SkinnedMesh.computeBoundingBox applies the current
@@ -319,6 +345,10 @@ export default function VrmModel({
         if (obj.name.startsWith('VRMC_springBone_collider')) return
         const mesh = obj as THREE.SkinnedMesh
         if (mesh.isSkinnedMesh) {
+          // boneMatrices go stale when bones are rotated directly — the
+          // renderer refreshes them every frame, but this one-off bounds
+          // computation must refresh them explicitly first.
+          mesh.skeleton?.update()
           mesh.computeBoundingBox()
           if (mesh.boundingBox) {
             childBox.copy(mesh.boundingBox).applyMatrix4(obj.matrixWorld)
@@ -352,9 +382,6 @@ export default function VrmModel({
         : headNode
           ? headNode.getWorldPosition(new THREE.Vector3())
           : centre.clone()
-      // Eye bones sit slightly behind the face plane; pull the point to the
-      // head's front so the projection matches what the camera sees.
-      eyePos.z = box.max.z
 
       const chestNode = vrm.humanoid?.getNormalizedBoneNode('chest')
       const chestBaseRotationX = chestNode ? chestNode.rotation.x : 0
