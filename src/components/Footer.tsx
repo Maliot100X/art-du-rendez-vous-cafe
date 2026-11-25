@@ -43,7 +43,7 @@ export default function Footer() {
   const swapTransition = { duration: reducedMotion ? 0 : 0.4, ease: EASE_SILK }
 
   return (
-    <footer className="relative border-t border-line bg-ink-2">
+    <footer className="relative z-10 border-t border-line bg-ink-2">
       <div className="mx-auto max-w-[1400px] px-4 pb-10 pt-20 sm:px-6">
         <div className="grid gap-12 md:grid-cols-[1.2fr_1fr_1fr]">
           <div data-reveal>

@@ -96,7 +96,7 @@ export default function Visit() {
             style={{ transform: 'scaleX(0)' }}
           />
         </div>
-        <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid gap-6 xs:grid-cols-2 lg:grid-cols-4">
           {VISIT.dayTimeline.map((stop, i) => (
             <div key={stop.time} className="visit-stop border-l border-line pl-4">
               <p className="font-mono text-sm tabular-nums text-amber">{stop.time}</p>

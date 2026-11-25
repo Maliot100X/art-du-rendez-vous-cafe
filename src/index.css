@@ -22,6 +22,10 @@ html.lenis body {
             paper of the printed menu, amber is the Edison-bulb glow.
    ------------------------------------------------------------------ */
 @theme {
+  /* xs breakpoint (475px) — large phones in portrait; fills the gap
+     between the base single-column layout and sm (640px). */
+  --breakpoint-xs: 475px;
+
   --font-display: "Bodoni Moda", Georgia, serif;
   --font-sans: "Albert Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Martian Mono", ui-monospace, Menlo, monospace;
@@ -99,6 +103,20 @@ html.lenis body {
     line-height: 1.05;
     letter-spacing: -0.01em;
     text-wrap: balance;
+  }
+
+  /* Static fluid fallback — the same café palette as the WebGL sim,
+     painted as layered radial glows on near-black. This is what visitors
+     see when WebGL is unavailable, reduced motion is on, or the sim
+     fails; it also sits under the live canvas so there is never a
+     black flash while the sim warms up. */
+  .fluid-fallback {
+    background:
+      radial-gradient(55% 42% at 18% 12%, rgba(232, 163, 61, 0.16), transparent 70%),
+      radial-gradient(48% 40% at 85% 30%, rgba(46, 125, 107, 0.14), transparent 70%),
+      radial-gradient(60% 50% at 70% 88%, rgba(217, 93, 57, 0.12), transparent 70%),
+      radial-gradient(45% 38% at 30% 82%, rgba(63, 125, 78, 0.1), transparent 70%),
+      #0d0a08;
   }
 
   /* HUD corner brackets (selene grammar). */

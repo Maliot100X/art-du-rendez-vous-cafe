@@ -67,7 +67,7 @@ export default function Nav() {
             <button
               type="button"
               onClick={() => setOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-bone md:hidden"
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-bone md:hidden"
               aria-label="Ouvrir le menu"
               aria-expanded={open}
             >
@@ -94,7 +94,7 @@ export default function Nav() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-bone"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-bone"
                 aria-label="Fermer le menu"
               >
                 <X size={18} />

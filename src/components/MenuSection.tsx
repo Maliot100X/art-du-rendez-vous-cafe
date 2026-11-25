@@ -117,7 +117,7 @@ export default function MenuSection({ onAdd }: { onAdd: (line: OrderLine) => voi
               role="tab"
               aria-selected={active === cat.id}
               onClick={() => setActive(cat.id)}
-              className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
+              className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                 active === cat.id
                   ? 'border-bone bg-bone text-ink'
                   : 'border-line bg-transparent text-bone/70 hover:border-bone/50 hover:text-bone'
@@ -164,7 +164,7 @@ export default function MenuSection({ onAdd }: { onAdd: (line: OrderLine) => voi
                     type="button"
                     onClick={() => add(item.name, item.price)}
                     aria-label={`Ajouter ${item.name} à la commande`}
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
+                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                       added === item.name
                         ? 'border-amber bg-amber text-ink'
                         : 'border-line text-bone/70 hover:scale-110 hover:border-amber hover:text-amber'
