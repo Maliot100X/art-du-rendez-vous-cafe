@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { MapPin, Star } from 'lucide-react'
+import { MapPin, Phone, Star } from 'lucide-react'
 import { CAFE, VISIT } from '../content'
 import { useReducedMotion } from '../lib/scroll'
 import { gsap, GSAP_EASE_SILK } from '../lib/motion'
 
 /**
- * Visit: address, hours, map link, and a day-timeline drawn by scroll.
- * The draw + the stops' stagger are GSAP ScrollTrigger (scrub / once);
- * nothing here uses the rAF path any more. Reduced motion: the line is
- * drawn full and the stops stay visible, no animation.
+ * Visit: address, phone, map link, and a day-timeline drawn by scroll.
+ * Hours are NOT listed: Google Maps shows no hours for this place, so
+ * the section shows an à-confirmer note instead of a hours table (the
+ * old hours belonged to the previous listing and were removed in fix
+ * pass 10). The draw + the stops' stagger are GSAP ScrollTrigger (scrub
+ * / once); nothing here uses the rAF path any more. Reduced motion: the
+ * line is drawn full and the stops stay visible, no animation.
  */
 export default function Visit() {
   const sectionRef = useRef<HTMLElement>(null)
@@ -69,6 +72,12 @@ export default function Visit() {
           </p>
           <p className="mt-2 text-sm text-mist">{CAFE.mapsNameNote}</p>
           <a
+            href={CAFE.phoneHref}
+            className="mt-3 flex items-center gap-2 text-body text-bone/70 transition-colors duration-300 hover:text-amber"
+          >
+            <Phone size={15} className="text-amber" /> {CAFE.phone}
+          </a>
+          <a
             href={CAFE.mapsUrl}
             target="_blank"
             rel="noreferrer"
@@ -80,15 +89,8 @@ export default function Visit() {
 
         <div data-reveal style={{ ['--d' as string]: '120ms' }}>
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">{VISIT.hoursLabel}</p>
-          <ul className="mt-3">
-            {VISIT.hours.map((row) => (
-              <li key={row.days} className="flex items-baseline justify-between gap-3 border-b border-line py-4">
-                <span className="font-display text-xl text-bone">{row.days}</span>
-                <span className="hidden flex-1 border-b border-dotted border-bone/25 sm:block" aria-hidden="true" />
-                <span className="font-mono text-sm tabular-nums text-amber">{row.time}</span>
-              </li>
-            ))}
-          </ul>
+          <p className="mt-3 font-display text-2xl leading-tight text-bone">À confirmer</p>
+          <p className="mt-2 max-w-sm text-body text-bone/70">{VISIT.hoursNote}</p>
         </div>
       </div>
 

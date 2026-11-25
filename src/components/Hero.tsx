@@ -177,7 +177,7 @@ export default function Hero() {
             ref={badgeRef}
             className="absolute left-4 top-4 rounded-full border border-white/25 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/90 backdrop-blur will-change-transform sm:left-6 sm:top-6"
           >
-            Bruxelles — 1020
+            Bruxelles — 1000
           </div>
         </div>
 

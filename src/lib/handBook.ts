@@ -195,7 +195,7 @@ function drawClosingPage(ctx: CanvasRenderingContext2D, page: Extract<HandPage, 
   ctx.fillText('Café', TEX_W / 2, 452)
   ctx.fillStyle = 'rgba(23,18,16,0.75)'
   ctx.font = '400 23px "Albert Sans Variable", "Albert Sans", sans-serif'
-  ctx.fillText('Rue des Artistes 1A, 1020 Bruxelles', TEX_W / 2, 540)
+  ctx.fillText('Rue de Malines 21, 1000 Bruxelles, Belgium', TEX_W / 2, 540)
   ctx.fillStyle = AMBER_DARK
   ctx.font = '500 21px "Martian Mono", monospace'
   ctx.fillText('MERCI — À BIENTÔT', TEX_W / 2, 620)

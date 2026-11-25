@@ -52,7 +52,7 @@
  * a French voice is confirmed against the live model list.
  */
 
-import { CAFE, MENU, VISIT } from '../content'
+import { CAFE, MENU } from '../content'
 import { avatarBridge, rmsOf, shapeMouthOpen, VISEME, type AvatarBridge } from './avatarBridge'
 
 const AGENT_SOCKET_URL = 'wss://agent.deepgram.com/v1/agent/converse'
@@ -86,21 +86,17 @@ function menuSummary(): string {
   ).join('\n')
 }
 
-function hoursSummary(): string {
-  return VISIT.hours.map((h) => `${h.days} ${h.time}`).join(', ')
-}
-
 function agentPrompt(): string {
   return [
     'Tu es Nekomi, l\u2019agent en direct de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.',
     'Tu parles français, avec chaleur et concision — une ou deux phrases par réponse.',
-    `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Cafe Artistes »).`,
-    `Horaires : ${hoursSummary()}.`,
+    `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
+    'Horaires : à confirmer — aucun horaire n’est listé sur Google Maps pour ce lieu.',
     'La carte (noms et prix exacts, ne jamais inventer un prix) :',
     menuSummary(),
     'Tu conseilles selon les goûts, tu composes la commande avec la fonction add_to_order,',
     'et tu proposes de rappeler le client pour confirmer sa commande.',
-    'Tu ne connais ni numéro de téléphone ni site web du café : ne jamais en inventer.',
+    `Téléphone (listé sur Google Maps, à confirmer) : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
   ].join('\n')
 }
 

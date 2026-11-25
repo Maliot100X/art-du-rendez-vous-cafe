@@ -1,4 +1,4 @@
-import { CAFE, CHARACTER, MENU, VISIT } from '../content'
+import { CAFE, CHARACTER, MENU } from '../content'
 import { botReply, expressionForReply, type BotReply } from './agentBrain'
 
 /**
@@ -94,10 +94,6 @@ function menuSummary(): string {
   ).join('\n')
 }
 
-function hoursSummary(): string {
-  return VISIT.hours.map((h) => `${h.days} ${h.time}`).join(', ')
-}
-
 /** System prompt — built from the site's own data, never retyped. The
     persona comes from the character card (src/content.ts CHARACTER):
     Vita in 3D, Nekomi in Live2D — one and the same barmaid. */
@@ -106,13 +102,13 @@ export function brainSystemPrompt(): string {
     `Tu es ${CHARACTER.name}, ${CHARACTER.role}, un café-bar à Bruxelles. En forme Live2D, on t’appelle ${CHARACTER.live2dName} — c’est la même personne.`,
     CHARACTER.personality,
     CHARACTER.scenario,
-    `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Cafe Artistes »).`,
-    `Horaires : ${hoursSummary()}.`,
+    `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
+    'Horaires : à confirmer — aucun horaire n’est listé sur Google Maps pour ce lieu.',
     'La carte (noms et prix exacts, ne jamais inventer un prix) :',
     menuSummary(),
     'Tu conseilles selon les goûts du client. Quand tu proposes une boisson, cite son nom exact tel qu\u2019il figure sur la carte, avec son prix.',
     'Si le client veut commander, confirme les boissons et leurs prix, puis propose de préparer la commande : l\u2019interface affiche des boutons « Ajouter » à côté de ta réponse.',
-    'Tu ne connais ni numéro de téléphone ni site web du café : ne jamais en inventer.',
+    `Téléphone (listé sur Google Maps, à confirmer) : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
   ].join('\n')
 }
 

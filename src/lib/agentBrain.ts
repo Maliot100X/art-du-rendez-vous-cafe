@@ -1,4 +1,4 @@
-import { AGENT, MENU, VISIT, CAFE } from '../content'
+import { AGENT, MENU, CAFE } from '../content'
 import type { AvatarExpression } from './avatarBridge'
 
 /**
@@ -69,7 +69,7 @@ function botReplyInner(message: string): BotReply {
 
   if (/(bonjour|salut|coucou|hello|hey|bonsoir)/.test(n)) {
     return {
-      text: "Bonjour ! Bienvenue à l’Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir, ou demandez-moi les horaires et l’adresse.",
+      text: "Bonjour ! Bienvenue à l’Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir, ou demandez-moi l’adresse.",
     }
   }
   if (/(merci)/.test(n)) {
@@ -77,12 +77,12 @@ function botReplyInner(message: string): BotReply {
   }
   if (/(horaire|ouvert|ferme|heure|quand.*ouvert|jusqu.*quelle)/.test(n)) {
     return {
-      text: `Nos horaires : lundi — mercredi 08:00–02:00, jeudi 08:00–00:00, et vendredi — dimanche 24h/24. Vous êtes les bienvenus presque jour et nuit.`,
+      text: `Nos horaires ne sont pas listés sur Google Maps pour ce lieu — ils sont encore à confirmer. En attendant, je peux vous donner l’adresse ou vous aider à choisir une boisson.`,
     }
   }
   if (/(adresse|ou etes|ou se trouve|venir|plan|itineraire|rue)/.test(n)) {
     return {
-      text: `Nous sommes au ${CAFE.address}. Sur Google Maps, le lieu est listé sous « Cafe Artistes ». Le bouton « Ouvrir dans Google Maps » dans la section Venir vous y mène.`,
+      text: `Nous sommes au ${CAFE.address}. Sur Google Maps, le lieu est listé sous « Casa da Santana ». Le bouton « Ouvrir dans Google Maps » dans la section Venir vous y mène. Vous pouvez aussi nous joindre au ${CAFE.phone}.`,
     }
   }
   if (/(conseil|recommand|que.*boire|quoi.*boire|specialite|meilleur)/.test(n)) {
@@ -161,5 +161,5 @@ export function orderTotal(lines: { price: string }[]): string {
   return `${sum.toFixed(2).replace('.', ',')} €`
 }
 
-export const HOURS_TEXT = VISIT.hours.map((h) => `${h.days} ${h.time}`).join(' · ')
+export const HOURS_TEXT = 'Horaires — à confirmer'
 export const AGENT_WELCOME = AGENT.chatWelcome

@@ -33,7 +33,7 @@ export interface TabTheme {
 export const TAB_THEMES: Record<TabId, TabTheme> = {
   home: {
     index: '01',
-    tagline: 'Bruxelles · Ouvert presque jour et nuit',
+    tagline: 'Bruxelles · Café · Bar',
     accent: '#e8a33d',
     glow: 'rgba(232, 163, 61, 0.20)',
     glowPosition: '50% 0%',
@@ -68,7 +68,7 @@ export const TAB_THEMES: Record<TabId, TabTheme> = {
   },
   visit: {
     index: '06',
-    tagline: 'Rue des Artistes 1A · 1020 Bruxelles',
+    tagline: 'Rue de Malines 21 · 1000 Bruxelles',
     accent: '#6f9e5a',
     glow: 'rgba(111, 158, 90, 0.18)',
     glowPosition: '15% 8%',
