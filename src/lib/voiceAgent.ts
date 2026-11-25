@@ -24,26 +24,72 @@
  *   (a) it first tries a same-origin POST /api/deepgram/grant endpoint
  *       — a TODO for the deploy phase. No such backend exists yet, so
  *       it 404s today and the voice button stays in its offline state.
- *   (b) it NEVER sends the raw API key to the agent socket and NEVER
- *       embeds it in the shipped bundle as socket auth. The only other
- *       path is local development: when import.meta.env.DEV is true,
- *       VITE_DEEPGRAM_API_KEY may be used to request a grant from the
- *       browser (POST https://api.deepgram.com/v1/auth/grant). That
- *       branch is dev-only and is stripped from production builds.
- *       A production build must NOT set VITE_DEEPGRAM_API_KEY.
+ *   (b) it NEVER sends the raw Deepgram API key to the agent socket
+ *       and NEVER embeds it in the shipped bundle as socket auth. The
+ *       only other path is local development: when import.meta.env.DEV
+ *       is true, VITE_DEEPGRAM_API_KEY may be used to request a grant
+ *       from the browser (POST https://api.deepgram.com/v1/auth/grant).
+ *       That branch is dev-only and is stripped from production
+ *       builds. A production build must NOT set VITE_DEEPGRAM_API_KEY.
  * When no token can be obtained, start() fails with reason 'no-token'
  * and the UI shows the honest offline state; the text chat keeps
  * working. The stored Deepgram key is currently rejected (401), so
  * voice is OFFLINE until Minir re-enters a working key — never claim
  * otherwise.
  *
- * The agent's brain is the Deepgram-managed LLM (gpt-4o-mini) with a
- * French prompt built from the site's own data (menu, hours, address —
- * never invented). Two client-side functions run in this client:
- * add_to_order (deferred until end-of-turn: an order is a side effect)
- * and get_menu. The freellm gateway is NOT wired here: Deepgram's
- * think endpoint can point at an OpenAI-compatible URL later, once the
- * gateway is back up — that is a deploy-phase change, not this file.
+ * THINK — Inception mercury-3 (fix pass 14, group E):
+ * The agent's brain is Inception's mercury-3, reached as a Deepgram
+ * bring-your-own-LLM: think.provider stays { type: 'open_ai',
+ * model: 'mercury-3' } and think.endpoint — a SIBLING of provider,
+ * NOT a field inside it — points at
+ * https://api.inceptionlabs.ai/v1/chat/completions with an
+ * Authorization: Bearer <VITE_LLM_API_KEY> header. That is the exact
+ * shape in Deepgram's voice-agent-llm-models docs ("Example using a
+ * custom OpenAI endpoint (BYO)") and in the AsyncAPI reference
+ * (deepgram-skills skills/api/references/agent.md, AgentV1Settings:
+ * think: { provider, endpoint: { url, headers }, ... }). The brief's
+ * "think.provider.endpoint" phrasing is wrong — endpoint lives on
+ * think, and putting it inside provider would be silently ignored or
+ * rejected. For a BYO endpoint Deepgram accepts any model string
+ * without restriction (same docs page, "Passing a custom (BYO) LLM
+ * through a Cloud Provider"), so 'mercury-3' needs no allow-listing.
+ * The key comes from brainConfig() in ./brain — the same env read as
+ * the text chat (VITE_LLM_API_KEY, else VITE_FREELLM_API_KEY) — and
+ * is never hardcoded. NOTE: that env key is the site's LLM key; if it
+ * is a freellm/OpenAI key rather than an Inception key, the mercury-3
+ * request fails auth and the fallback below takes over — the key must
+ * be an Inception key for mercury-3 to answer. The LLM key IS sent to
+ * Deepgram's server inside the Settings message (that is how BYO auth
+ * works — Deepgram needs it to call Inception); it is the same
+ * VITE_-prefixed key the text chat already ships in the bundle, so
+ * this adds no new exposure class. The Deepgram API key itself is
+ * never in Settings.
+ * Reasoning params: there is NO schema slot for reasoning_effort or
+ * max_completion_tokens on a Deepgram-constructed think request
+ * (neither the docs page nor the AsyncAPI reference lists one), so
+ * the direct-call proof's reasoning_effort "instant" +
+ * max_completion_tokens 512 are NOT wired — they cannot be, and
+ * faking them would be a lie. think.provider.reasoning_mode exists
+ * but is documented only for OpenAI reasoning models (gpt-5…), and
+ * whether Deepgram forwards it to a custom endpoint is undocumented,
+ * so it is deliberately NOT set for mercury-3. think.context_length
+ * (custom-endpoint only) is a context-window cap, not a completion
+ * budget, and is left at its default.
+ * Fallback: think is an ARRAY — [mercury-3 + endpoint, managed
+ * gpt-4o-mini] — the documented ordered fallback chain (same docs
+ * page, "Using multiple LLM providers"): a failed/timed-out mercury-3
+ * request warns THINK_REQUEST_FAILED and the turn retries on the
+ * managed model; every turn starts again from mercury-3. Each entry
+ * carries its own prompt + functions, as the schema requires. When no
+ * LLM key is configured at all, think is a single managed gpt-4o-mini
+ * object (the old behaviour) so the Settings shape is always valid —
+ * the endpoint (and its auth header) exists only when a key exists.
+ *
+ * The agent's brain is mercury-3 (above) with a French prompt built
+ * from the site's own data (menu, hours, address — never invented).
+ * Two client-side functions run in this client: add_to_order
+ * (deferred until end-of-turn: an order is a side effect) and
+ * get_menu.
  *
  * Voice model note: Flux TTS only ships English voices, so the agent
  * speaks French text with the documented English Flux voice
@@ -54,6 +100,7 @@
 
 import { CAFE, MENU } from '../content'
 import { avatarBridge, rmsOf, shapeMouthOpen, VISEME, type AvatarBridge } from './avatarBridge'
+import { brainConfig } from './brain'
 
 const AGENT_SOCKET_URL = 'wss://agent.deepgram.com/v1/agent/converse'
 const GRANT_URL = 'https://api.deepgram.com/v1/auth/grant'
@@ -105,7 +152,78 @@ function agentPrompt(_persona: VoicePersona = 'nekomi'): string {
   ].join('\n')
 }
 
-function settingsMessage(persona: VoicePersona = 'nekomi'): Record<string, unknown> {
+/** Inception mercury-3 as the Deepgram think provider (see the THINK
+    note at the top of this file). */
+const THINK_MODEL_PRIMARY = 'mercury-3'
+const THINK_ENDPOINT_URL = 'https://api.inceptionlabs.ai/v1/chat/completions'
+const THINK_MODEL_FALLBACK = 'gpt-4o-mini'
+const THINK_TEMPERATURE = 0.7
+
+/** The client-side functions the agent can call. */
+function thinkFunctions(): Record<string, unknown>[] {
+  return [
+    {
+      name: 'add_to_order',
+      description: 'Ajoute une boisson de la carte à la commande du client.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Nom exact de la boisson sur la carte' },
+          quantity: { type: 'integer', description: 'Quantité, 1 par défaut' },
+        },
+        required: ['name'],
+      },
+      defer_until_eot: true,
+    },
+    {
+      name: 'get_menu',
+      description: 'Récupère la carte complète du café avec les prix.',
+      parameters: { type: 'object', properties: {} },
+    },
+  ]
+}
+
+/**
+ * Build the `think` value for the Settings message. Pure function of
+ * the LLM key (read from env by the caller via brainConfig()), so the
+ * fix-14 probe can drive it without env or network:
+ * - No key: a single managed gpt-4o-mini think object (the old
+ *   behaviour) — no endpoint, no auth header, always a valid shape.
+ * - Key: the documented ordered fallback array — mercury-3 on the
+ *   Inception endpoint first (endpoint is a SIBLING of provider, per
+ *   Deepgram's voice-agent-llm-models docs and the AsyncAPI
+ *   reference), managed gpt-4o-mini second. Each entry carries its
+ *   own prompt + functions, as the schema requires.
+ * No reasoning_effort / max_completion_tokens is set: the think
+ * schema has no slot for either (see the THINK note above).
+ */
+export function buildThinkBlock(
+  llmKey?: string,
+  persona: VoicePersona = 'nekomi',
+): Record<string, unknown> | Record<string, unknown>[] {
+  const prompt = agentPrompt(persona)
+  const functions = thinkFunctions()
+  const fallback: Record<string, unknown> = {
+    provider: { type: 'open_ai', model: THINK_MODEL_FALLBACK, temperature: THINK_TEMPERATURE },
+    prompt,
+    functions,
+  }
+  if (!llmKey) return fallback
+  return [
+    {
+      provider: { type: 'open_ai', model: THINK_MODEL_PRIMARY, temperature: THINK_TEMPERATURE },
+      endpoint: {
+        url: THINK_ENDPOINT_URL,
+        headers: { Authorization: `Bearer ${llmKey}` },
+      },
+      prompt,
+      functions,
+    },
+    fallback,
+  ]
+}
+
+export function settingsMessage(persona: VoicePersona = 'nekomi'): Record<string, unknown> {
   return {
     type: 'Settings',
     audio: {
@@ -122,30 +240,7 @@ function settingsMessage(persona: VoicePersona = 'nekomi'): Record<string, unkno
           language_hints: ['fr', 'en'],
         },
       },
-      think: {
-        provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 },
-        prompt: agentPrompt(persona),
-        functions: [
-          {
-            name: 'add_to_order',
-            description: 'Ajoute une boisson de la carte à la commande du client.',
-            parameters: {
-              type: 'object',
-              properties: {
-                name: { type: 'string', description: 'Nom exact de la boisson sur la carte' },
-                quantity: { type: 'integer', description: 'Quantité, 1 par défaut' },
-              },
-              required: ['name'],
-            },
-            defer_until_eot: true,
-          },
-          {
-            name: 'get_menu',
-            description: 'Récupère la carte complète du café avec les prix.',
-            parameters: { type: 'object', properties: {} },
-          },
-        ],
-      },
+      think: buildThinkBlock(brainConfig().key, persona),
       speak: {
         provider: { type: 'deepgram', version: 'v2', model: 'flux-alexis-en' },
       },
