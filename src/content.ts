@@ -357,7 +357,7 @@ export const CHARACTER = {
 export const AGENT = {
   eyebrow: 'Agent',
   title: 'Parlez à Nekomi.',
-  lede: "Notre agent connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle vous proposera même de vous appeler pour la confirmer.",
+  lede: "Notre agent connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle la note ici, prête à montrer au bar.",
   statusOffline: 'Agent — chat disponible · voix et cerveau bientôt en ligne',
   statusHint:
     'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
@@ -389,7 +389,7 @@ export const AGENT = {
   orderEmpty: 'Rien pour l’instant — ajoutez une boisson depuis la carte ou depuis le chat.',
   orderConfirm: 'Confirmer la commande',
   orderConfirmed:
-    'Commande notée ! Notre agent vous appellera pour confirmer et préparer votre venue au café.',
+    'Commande notée ! Présentez-la au bar à votre arrivée.',
   orderTotal: 'Total',
   henshinLabel: 'Henshin',
   henshinHuman: 'Forme humaine',
@@ -402,16 +402,16 @@ export const AGENT = {
   guidance: [
     'Connaît toute la carte et les prix, ainsi que l’adresse du café.',
     'Propose des conseils selon vos goûts — café, bière, vin, apéritif.',
-    'Compose votre commande et propose de vous appeler pour la confirmer.',
+    'Compose votre commande et la note, prête à montrer au bar.',
   ],
 } as const;
 
 export const FOOTER = {
   subscribeTitle: 'Restez au courant.',
-  subscribeText: 'Une adresse e-mail, et on vous écrit quand la carte change ou quand un événement se prépare.',
+  subscribeText: 'La lettre du café arrive bientôt — carte, événements et nouveautés.',
   subscribePlaceholder: 'Votre adresse e-mail',
   subscribeCta: 'S’abonner',
-  subscribeDone: 'Merci — vous êtes inscrit·e.',
+  subscribeDone: 'Merci ! Les inscriptions n’ont pas encore ouvert — votre adresse n’a pas été enregistrée.',
   columns: [
     {
       title: 'Le café',
@@ -433,14 +433,3 @@ export const FOOTER = {
   legal: '© 2026 Art du Rendez-Vous — Café · Bruxelles',
   mapsLine: 'Rue de Malines 21, 1000 Bruxelles, Belgium',
 } as const;
-
-// Live-agent connection config. Keys are read from environment variables only.
-// Nothing here is a secret: unset values mean "not connected yet" and the UI
-// shows the graceful offline state.
-export const AGENT_ENV = {
-  deepgramKey: import.meta.env.VITE_DEEPGRAM_API_KEY as string | undefined,
-  freellmKey: import.meta.env.VITE_FREELLM_API_KEY as string | undefined,
-  freellmBaseUrl: (import.meta.env.VITE_FREELLM_BASE_URL as string | undefined) ?? '',
-} as const;
-
-export const agentConnected = Boolean(AGENT_ENV.deepgramKey && AGENT_ENV.freellmKey);

@@ -199,5 +199,3 @@ export function orderTotal(lines: { price: string }[]): string {
   const sum = lines.reduce((acc, l) => acc + (parseFloat(l.price.replace(',', '.')) || 0), 0)
   return `${sum.toFixed(2).replace('.', ',')} €`
 }
-
-export const HOURS_TEXT = 'Horaires — à confirmer'

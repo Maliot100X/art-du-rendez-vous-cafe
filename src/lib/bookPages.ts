@@ -15,7 +15,6 @@ import { MENU, CAFE, VISIT, type MenuCategory } from '../content';
 
 export const PAGE_W = 1024;
 export const PAGE_H = 1420;
-export const PAGE_ASPECT = PAGE_W / PAGE_H;
 
 export type BookPage =
   | { kind: 'cover' }
