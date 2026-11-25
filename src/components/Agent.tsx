@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   MessageSquareText,
@@ -22,11 +22,24 @@ import { isSpeechMuted, isSpeechSupported, setSpeechMuted, speak, stopSpeaking }
 import { DeepgramVoiceAgent, type VoiceErrorReason, type VoiceStatus } from '../lib/voiceAgent'
 import type { OrderLine } from './MenuSection'
 import { EASE_SILK, ScrollTrigger } from '../lib/motion'
+import { lazyWithRetry } from '../lib/lazyRetry'
 
 // The stages are their own chunks (three-vrm, pixi + cubism): they load
-// only when the Agent tab opens, never with the first paint.
-const VrmModel = lazy(() => import('./VrmModel'))
-const Live2DModel = lazy(() => import('./Live2DModel'))
+// only when the Agent tab opens, never with the first paint. lazyWithRetry
+// (fix pass 6): a plain React.lazy rejects on a dropped chunk straight
+// into the agent ErrorBoundary; the retry gives a transient blip one
+// second chance before the boundary's manual retry.
+const VrmModel = lazyWithRetry(() => import('./VrmModel'))
+const Live2DModel = lazyWithRetry(() => import('./Live2DModel'))
+
+/**
+ * Fix pass 6: the selected stage survives an Agent remount. The agent
+ * ErrorBoundary's "Réessayer" remounts Agent with fresh state, which
+ * used to reset the stage to 'vrm' — retrying Nekomi was impossible.
+ * The module-level value outlives the remount (same page), so a retry
+ * re-selects Nekomi instead of silently switching back to Vita.
+ */
+let lastAgentStage: 'vrm' | 'live2d' = 'vrm'
 
 interface ChatMsg {
   role: 'user' | 'bot'
@@ -79,7 +92,12 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   })
   const [agentSpeaking, setAgentSpeaking] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
-  const [stage, setStage] = useState<'vrm' | 'live2d'>('vrm')
+  const [stage, setStage] = useState<'vrm' | 'live2d'>(() => lastAgentStage)
+  /** Every stage change goes through here so the remount-proof value above stays in sync. */
+  const setStagePersist = (next: 'vrm' | 'live2d') => {
+    lastAgentStage = next
+    setStage(next)
+  }
   const [muted, setMutedState] = useState(isSpeechMuted())
   const reducedMotion = useReducedMotion()
   const sectionRef = useRef<HTMLElement>(null)
@@ -214,7 +232,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleVrmFailed = useCallback(() => setStage('live2d'), [])
+  const handleVrmFailed = useCallback(() => setStagePersist('live2d'), [])
 
   // Deepgram voice call (Phase 4). The voice client owns the socket,
   // mic worklet and TTS playback; this component only renders its
@@ -350,7 +368,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setStage(opt.id)}
+                onClick={() => setStagePersist(opt.id)}
                 aria-pressed={stage === opt.id}
                 className={`min-h-11 flex-1 rounded-full px-4 py-2 text-xs font-bold transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                   stage === opt.id ? 'bg-bone text-ink' : 'text-bone/60 hover:text-bone'

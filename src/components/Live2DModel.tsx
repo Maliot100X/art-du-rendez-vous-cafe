@@ -254,6 +254,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   const formRef = useRef<Form>('human')
   const fitRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  /** The init failure message, shown verbatim on the failed placeholder
+      (fix pass 6) so the next check can read the cause without a console. */
+  const [failMessage, setFailMessage] = useState<string | null>(null)
   /** Retry nonce: the init effect re-runs on each increment, so the
       failed stage can be retried in place instead of reloading the page. */
   const [retryTick, setRetryTick] = useState(0)
@@ -321,7 +324,23 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           autoDensity: true,
         })
 
+        // Fix pass 6: fit MUST NOT close over the `model` const below —
+        // it is in the temporal dead zone until Live2DModel.from()
+        // resolves, and fitRef used to be published before that await.
+        // The resize effect calls fitRef on the first ResizeObserver
+        // delivery, which lands while the model is still fetching:
+        // the old code threw `ReferenceError: Cannot access 'model'
+        // before initialization` inside a React effect — outside the
+        // init try/catch — straight into the agent ErrorBoundary.
+        // Fix pass 5 unmasked it: prewarmed chunk imports made init
+        // fast enough to publish fitRef before the model fetch, while
+        // fix pass 4's poisoned cubism4 import threw inside the
+        // try/catch before fitRef was ever set (placeholder, no crash).
+        // fit now reads the model from modelRef and no-ops until it
+        // exists; fitRef is only published after the model is set.
         const fit = () => {
+          const m = modelRef.current
+          if (!m) return
           const w = container.clientWidth
           const h = container.clientHeight
           if (w === 0 || h === 0) return
@@ -330,19 +349,19 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // top of the bounds: getBounds() is the whole canvas rect, so
           // the window is placed by measured canvas fractions. A
           // horizontal guard keeps the head inside narrow stages.
-          model.scale.set(1)
-          model.position.set(0, 0)
-          const b = model.getBounds()
+          m.scale.set(1)
+          m.position.set(0, 0)
+          const b = m.getBounds()
           if (!b || b.height === 0) {
-            const scale = (h * 0.98) / model.height
-            model.scale.set(scale)
-            model.position.set(w / 2, h * 0.55)
+            const scale = (h * 0.98) / m.height
+            m.scale.set(scale)
+            m.position.set(w / 2, h * 0.55)
             return
           }
           const windowH = FACE_BOTTOM - FACE_TOP
           const s = Math.min((h * 0.98) / (b.height * windowH), (w * 0.96) / (b.width * HEAD_WIDTH_FRAC))
-          model.scale.set(s)
-          model.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * FACE_TOP) * s)
+          m.scale.set(s)
+          m.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * FACE_TOP) * s)
           // Debug projection (verifiable without a real browser): where
           // the eyes and mouth land in stage pixels, from the measured
           // fractions and the actual scale/position just applied.
@@ -363,8 +382,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             error: null,
           }
         }
-        fitRef.current = fit
-
         const model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
         if (cancelled) {
           model.destroy()
@@ -373,6 +390,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         model.anchor.set(0.5, 0.5)
         app.stage.addChild(model)
         modelRef.current = model
+        // Publish fit only now that the model exists (fix pass 6 — see
+        // the note on fit above: publishing earlier let the resize
+        // effect call it while `model` was still in its dead zone).
+        fitRef.current = fit
 
         // Human is the default form: Param3 defaults to 0 in the .moc3 and
         // the expression is never played on load, so nothing to set here —
@@ -467,6 +488,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // (WebGL context limit, missing file, parse failure…).
           const message = err instanceof Error ? err.message : String(err)
           live2dError = message
+          setFailMessage(message)
           window.__nekomiDebug = {
             status: 'failed',
             form: formRef.current,
@@ -585,11 +607,17 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
               <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />
               {status === 'loading' ? 'Modèle en cours de chargement' : 'Modèle indisponible'}
             </span>
+            {status === 'failed' && failMessage && (
+              <p className="mt-3 max-w-xs break-words font-mono text-[11px] leading-relaxed text-mist/90">
+                Erreur : {failMessage}
+              </p>
+            )}
             {status === 'failed' && (
               <button
                 type="button"
                 onClick={() => {
                   live2dError = null
+                  setFailMessage(null)
                   if (window.__nekomiDebug) window.__nekomiDebug.error = null
                   setStatus('loading')
                   setRetryTick((t) => t + 1)

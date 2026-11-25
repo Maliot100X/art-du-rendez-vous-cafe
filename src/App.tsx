@@ -44,13 +44,18 @@ function PanelLoading({ label }: { label: string }) {
 }
 
 /** A tab panel that failed to load — keeps Nav + TabBar alive, offers a retry. */
-function PanelError({ label, onRetry }: { label: string; onRetry: () => void }) {
+function PanelError({ label, detail, onRetry }: { label: string; detail?: string | null; onRetry: () => void }) {
   return (
     <div className="mx-auto flex min-h-[60svh] max-w-[1400px] flex-col items-center justify-center px-4 py-24 text-center">
       <p className="font-display text-3xl italic text-bone">Oups — {label} n'a pas pu se charger.</p>
       <p className="mt-3 max-w-md text-sm leading-relaxed text-mist">
         Le reste du site fonctionne. Réessayez — le plus souvent, c'est juste la connexion.
       </p>
+      {detail ? (
+        <p className="mt-4 max-w-md break-words font-mono text-[11px] leading-relaxed text-mist/90">
+          Erreur : {detail}
+        </p>
+      ) : null}
       <button
         type="button"
         onClick={onRetry}
@@ -453,6 +458,9 @@ export default function App() {
   // Bumping this remounts the panel ErrorBoundaries (their hasError state
   // is per-instance) — the "Réessayer" button's retry mechanism.
   const [panelNonce, setPanelNonce] = useState(0)
+  // Fix pass 6: the last error the agent boundary caught, shown verbatim
+  // on its fallback (the boundary used to swallow it). Cleared on retry.
+  const [agentError, setAgentError] = useState<string | null>(null)
   const reducedMotion = useReducedMotion()
 
   // One global rAF loop: Lenis + every scroll subscriber. Lenis is off
@@ -572,7 +580,25 @@ export default function App() {
           <TabSurface tab="agent">
             <ErrorBoundary
               key={`agent-${panelNonce}`}
-              fallback={<PanelError label="L'agent" onRetry={() => setPanelNonce((n) => n + 1)} />}
+              onError={(err) => setAgentError(err.message)}
+              fallback={
+                <PanelError
+                  label="L'agent"
+                  // The caught boundary error first; the Live2D init
+                  // failure recorded on window as a fallback (read
+                  // without importing Live2DModel, which would drag
+                  // pixi into the first-paint bundle).
+                  detail={
+                    agentError ??
+                    (window as unknown as { __nekomiDebug?: { error?: string | null } }).__nekomiDebug?.error ??
+                    null
+                  }
+                  onRetry={() => {
+                    setAgentError(null)
+                    setPanelNonce((n) => n + 1)
+                  }}
+                />
+              }
             >
               <Suspense fallback={<PanelLoading label="L'agent se prépare…" />}>
                 <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
