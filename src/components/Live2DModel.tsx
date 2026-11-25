@@ -97,9 +97,26 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           const h = container.clientHeight
           if (w === 0 || h === 0) return
           app?.renderer.resize(w, h)
-          const scale = (h * 0.98) / model.height
-          model.scale.set(scale)
-          model.position.set(w / 2, h * 0.55)
+          // Frame head + shoulders from the TRUE drawn bounds, not
+          // model.height: this rig's drawn geometry extends far beyond
+          // its layout height, so scaling by model.height zooms into
+          // the chin (the close-up of mouth/nose with no face or eyes
+          // seen on a phone). Measure the real bounds at scale 1, then
+          // frame the top 32% of the model (head + shoulders) into the
+          // stage, face centred and fully in frame.
+          model.scale.set(1)
+          model.position.set(0, 0)
+          const b = model.getBounds()
+          if (!b || b.height === 0) {
+            const scale = (h * 0.98) / model.height
+            model.scale.set(scale)
+            model.position.set(w / 2, h * 0.55)
+            return
+          }
+          const FRAME = 0.32
+          const s = (h * 0.92) / (b.height * FRAME)
+          model.scale.set(s)
+          model.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.04 - b.y * s)
         }
 
         const model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
@@ -219,7 +236,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     <div className="overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
       <div
         ref={containerRef}
-        className="relative h-[420px] sm:h-[480px]"
+        className="relative h-[300px] sm:h-[380px] lg:h-[480px]"
         style={{ background: 'radial-gradient(70% 70% at 50% 30%, rgba(232,163,61,0.14), transparent 70%), #171210' }}
       >
         {status !== 'ready' && (
@@ -227,7 +244,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             <img
               src="/images/nekomi-icon.png"
               alt="Nekomi — portrait de l’agent"
-              className="h-40 w-40 rounded-full border border-amber/40 object-cover shadow-2xl shadow-black/50"
+              className="h-48 w-48 rounded-full border border-amber/40 object-cover shadow-2xl shadow-black/50 sm:h-56 sm:w-56"
             />
             <p className="mt-5 font-display text-2xl italic text-bone">Nekomi</p>
             <p className="mt-2 max-w-xs text-sm leading-relaxed text-mist">
