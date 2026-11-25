@@ -115,6 +115,15 @@ type WarmStage = {
 let warmStage: WarmStage | null = null
 
 /**
+ * Fix pass 15 — the boot-preloaded PARSED model (see preloadLive2dModel
+ * below). One shared in-flight promise: App starts it at boot and the
+ * first mount joins it instead of starting a second from(). Cleared on
+ * failure (so the mount retries fresh) and in dropWarmStage (so a
+ * destroyed model is never re-served to a later mount).
+ */
+let preloadedModelPromise: Promise<Live2DModelType> | null = null
+
+/**
  * Destroy the cached stage (if any) and drop the cache — the next
  * mount does a full cold init. Used by the "Réessayer" path and by
  * the webglcontextlost handler; NEVER called on a plain unmount.
@@ -123,6 +132,10 @@ function dropWarmStage(): void {
   const stage = warmStage
   warmStage = null
   if (!stage) return
+  // Fix pass 15: the warm stage's model IS the preloaded one (the mount
+  // joined the shared promise) — a destroyed model must never be
+  // re-served to a later mount, so clear the promise with the cache.
+  preloadedModelPromise = null
   try {
     stage.unapplyHenshin()
   } catch {
@@ -355,6 +368,69 @@ export function preloadLive2d(): void {
     })
   }
   void live2dPreloadPromise.catch(() => undefined)
+}
+
+/**
+ * Fix pass 15 — boot preload of the PARSED model, not just its bytes.
+ *
+ * Root cause of the first-load wait: the fix-3 prewarm only fills the
+ * HTTP cache (fetch of the .moc3 + textures). The first mount still
+ * paid the whole parse in series — Live2DModel.from() fetching the
+ * settings, parsing the 1.05 MB .moc3 with the Cubism Core, and
+ * decoding the two 1024x2048 textures — before the stage could show
+ * anything (~5 s on the first Agent visit; returns are instant because
+ * fix 13 keeps the parsed stage in warmStage).
+ *
+ * Live2DModel.from() needs no PIXI Application and no WebGL context:
+ * it fetches, parses the .moc3 (CPU) and decodes the texture images;
+ * the GPU upload only happens at the first render. So App can start it
+ * at boot and the first mount joins the SAME in-flight promise instead
+ * of starting a second from() — one parse per page lifetime. The mount
+ * then only pays WebGL context creation + first-render upload + fit.
+ *
+ * Two guards keep it cheap:
+ * - autoUpdate: false while preloading. A default-constructed model
+ *   attaches its Automator to PIXI.Ticker.shared and runs a full
+ *   model.update() on every rAF — a background animation loop on every
+ *   page load even for visitors who never open Agent. The mount
+ *   re-enables it (model.automator.autoUpdate = true) once the model
+ *   is on a stage, which is exactly the cold path's state.
+ * - the parse chains AFTER the byte prewarm (preloadLive2d above):
+ *   from() then reads the .moc3 + textures from the HTTP cache
+ *   instead of downloading them a second time in parallel with the
+ *   prewarm's own fetch. A byte-prewarm failure is best-effort only —
+ *   from() re-fetches on its own.
+ */
+async function preloadModelOnce(): Promise<Live2DModelType> {
+  await ensureCore() // Core global must exist BEFORE cubism4 evaluates
+  // The model's automator reads PIXI.Ticker.shared from the global
+  // PIXI namespace, so publish the dynamically imported module first.
+  const PIXI = await import('pixi.js')
+  ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
+  const { Live2DModel } = await import('pixi-live2d-display/cubism4')
+  return (await Live2DModel.from(MODEL_URL, { autoUpdate: false })) as Live2DModelType
+}
+
+/**
+ * Start the parsed-model preload in the background. Safe to call
+ * repeatedly — concurrent callers share the one in-flight promise. A
+ * failure clears it so a later call (or the mount) retries fresh.
+ */
+export function preloadLive2dModel(): void {
+  if (!preloadedModelPromise) {
+    // Start the byte prewarm too when it hasn't run, and chain the
+    // parse after it (see the note on preloadModelOnce).
+    preloadLive2d()
+    const bytes = live2dPreloadPromise ?? Promise.resolve()
+    preloadedModelPromise = bytes
+      .catch(() => undefined)
+      .then(() => preloadModelOnce())
+      .catch((err: unknown) => {
+        preloadedModelPromise = null
+        throw err
+      })
+  }
+  void preloadedModelPromise.catch(() => undefined)
 }
 
 declare global {
@@ -626,9 +702,46 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // Fix pass 13: fit now lives at component level and reads the
         // model from modelRef, so it no-ops until the model exists;
         // fitRef is only published after the model is set.
-        const model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
+        // Fix pass 15: join the boot preload when it ran — the parsed
+        // model (fetch + .moc3 parse + texture decode) is already done
+        // or in flight, so the mount only pays context creation +
+        // first render instead of starting a second from(). When no
+        // preload ran (save-data/2G, or it failed and cleared itself),
+        // fall back to the old fresh from(). A preloaded model was
+        // built parked (autoUpdate: false — no background ticker work
+        // before it reaches a stage); re-enable it now, the cold
+        // path's state.
+        const preloaded = preloadedModelPromise
+        let model: Live2DModelType
+        let reusedPreload = false
+        if (preloaded) {
+          try {
+            model = await preloaded
+            reusedPreload = true
+            model.automator.autoUpdate = true
+          } catch {
+            if (cancelled) {
+              try {
+                app.destroy(true, { children: true })
+              } catch {
+                // Already destroyed — nothing to free.
+              }
+              return
+            }
+            model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
+          }
+        } else {
+          model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
+        }
         if (cancelled) {
-          model.destroy()
+          if (reusedPreload) {
+            // Shared model: park it again (no ticker work) for the
+            // next mount instead of destroying the instance the
+            // preload promise holds.
+            model.automator.autoUpdate = false
+          } else {
+            model.destroy()
+          }
           try {
             app.destroy(true, { children: true })
           } catch {

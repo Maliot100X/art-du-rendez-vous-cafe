@@ -525,18 +525,25 @@ export default function App() {
   useEffect(() => startScroll(reducedMotion), [reducedMotion])
   useReveal()
 
-  // Heavy-model prewarm (fix pass 3, defect 6): after first paint,
-  // on idle, start the Nekomi Live2D bytes + its JS chunk, so opening
-  // the Agent tab later is a cache hit instead of a 20–35 s wait.
+  // Heavy-model prewarm (fix pass 3, defect 6; fix pass 15: parsed-model
+  // preload): after first paint, on idle, start the Nekomi Live2D bytes
+  // + its JS chunk, then the parsed model (fetch + .moc3 parse +
+  // texture decode, no WebGL context), so opening the Agent tab later
+  // joins the already-loading model instead of a ~5 s cold parse.
   // Skipped on save-data / 2G — hovering the tab still warms on
   // demand (see prewarmForTab on the tab buttons).
   useEffect(() => {
     if (shouldDeferHeavyPreload()) return
     runWhenIdle(() => {
-      prewarmLive2d()
-      // Warm the component chunk too (Live2DModel is React.lazy —
-      // otherwise the first tab open pays the JS fetch).
-      void import('./components/Live2DModel').catch(() => undefined)
+      // Fix pass 15: one dynamic import warms the component chunk
+      // (Live2DModel is React.lazy — otherwise the first tab open pays
+      // the JS fetch) and starts the parsed-model preload, which
+      // chains the fix-3 byte prewarm (HTTP cache + placeholder
+      // progress) into the parse. prewarmLive2d() stays the
+      // hover/focus path (bytes only — cheap, no parse).
+      void import('./components/Live2DModel')
+        .then((m) => m.preloadLive2dModel())
+        .catch(() => undefined)
     })
   }, [])
 
