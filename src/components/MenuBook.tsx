@@ -57,7 +57,7 @@ import {
  * - Scroll opens it: a ScrollTrigger fires once when the stage scrolls
  *   into view and turns the cover to the first category.
  * - The flip lands on a category → emitBookCategory(catId), so the
- *   agent (and the menu Vita) react — the end-to-end book → agent wire.
+ *   agent (and the menu guide) react — the end-to-end book → agent wire.
  * - Sizing is measured (react-cool-dimensions, the react-pageflip
  *   "stretch" pattern): the stage frames from its real rendered bounds,
  *   never from an assumed width; single-page vs spread follows the
@@ -143,7 +143,7 @@ export default function MenuBook({
   onAskBartender,
 }: {
   /**
-   * External flip request (the menu Vita's "Feuilleter le livre"):
+   * External flip request (the menu guide's "Feuilleter le livre"):
    * { catId, nonce } — the nonce makes repeat requests to the same
    * category fire again.
    */
@@ -267,7 +267,7 @@ export default function MenuBook({
       setFlipped(next);
       flipRef.current = next;
       lastFlipped = next;
-      // The flip landed on a category: tell the agent + the menu Vita.
+      // The flip landed on a category: tell the agent + the menu guide.
       // In the animated path this fires on tween completion; in static
       // mode (or before the scene exists) the flip is instant, so it
       // fires here.
@@ -316,7 +316,7 @@ export default function MenuBook({
     [staticMode, clampReadingPosition],
   );
 
-  /* ---- External flip request (menu Vita → book). ----
+  /* ---- External flip request (menu guide → book). ----
      Re-runs when the scene becomes ready: a request that arrived
      before the Three.js init finished (three was null) is replayed
      once the scene exists, so it lands on the requested category
@@ -328,7 +328,7 @@ export default function MenuBook({
   }, [goToCategory, goTo, threeReady]);
 
   /* ---- Scroll opens the book: cover → first category, once. ----
-     Skipped when the book was opened ON a category (menu Vita): the
+     Skipped when the book was opened ON a category (menu guide): the
      scroll-open must never override the requested leaf. */
   useEffect(() => {
     if (reducedMotion) return;

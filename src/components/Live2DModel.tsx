@@ -26,6 +26,18 @@ import { pixelRatioCap } from '../lib/perf'
 type Form = 'human' | 'furry'
 
 /**
+ * Fix pass 12, bug 3: the Henshin form survives an Agent remount.
+ * The tab shell unmounts Live2DModel on every tab leave, and the form
+ * used to live only in useState — so returning to AGENT always reset
+ * to human (and reloaded the model) even though the model choice
+ * persisted. Same module-level pattern as lastAgentStage in Agent.tsx
+ * (now src/lib/agentSelection.ts): the init effect below already
+ * applies formRef on load, so a persisted 'furry' re-plays Henshin
+ * on the fresh model instead of resetting.
+ */
+let lastHenshinForm: Form = 'human'
+
+/**
  * FACE BAND — measured from the real .moc3 with the Cubism Core
  * (Node + live2dcubismcore.min.js, /tmp/measure-nekomi-parts.js), NOT
  * guessed. pixi-live2d-display's getBounds() returns the WHOLE canvas
@@ -262,7 +274,7 @@ async function ensureCore(): Promise<void> {
 export default function Live2DModel({ bridge = avatarBridge }: { bridge?: AvatarBridge }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const modelRef = useRef<Live2DModelType | null>(null)
-  const formRef = useRef<Form>('human')
+  const formRef = useRef<Form>(lastHenshinForm)
   const fitRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   /** The init failure message, shown verbatim on the failed placeholder
@@ -271,7 +283,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   /** Retry nonce: the init effect re-runs on each increment, so the
       failed stage can be retried in place instead of reloading the page. */
   const [retryTick, setRetryTick] = useState(0)
-  const [form, setForm] = useState<Form>('human')
+  const [form, setForm] = useState<Form>(() => lastHenshinForm)
   // Prewarm progress (fix pass 3): the idle preload's byte progress,
   // shown honestly while the stage loads — never a blank dark area.
   const [liveProgress, setLiveProgress] = useState(getLive2dProgress())
@@ -560,6 +572,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   }, [bridge, retryTick])
 
   const setHenshin = (next: Form) => {
+    // Fix pass 12, bug 3: persist the choice module-level (see
+    // lastHenshinForm above) so it survives the tab-leave unmount.
+    lastHenshinForm = next
     formRef.current = next
     setForm(next)
     const model = modelRef.current

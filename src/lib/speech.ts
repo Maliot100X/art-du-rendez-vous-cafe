@@ -21,8 +21,8 @@
  * `speechSynthesis.speaking` every frame, and `onboundary` is only
  * an opportunistic re-anchor when it does fire (desktop Chrome).
  * A watchdog closes the mouth if speech never starts (voice missing
- * or blocked), so it never flaps silently. Both stages (VRM + Live2D)
- * read the same avatarBridge value, so they move together.
+ * or blocked), so it never flaps silently. Nekomi (Live2D) reads the
+ * same avatarBridge value, so her mouth moves with the voice.
  */
 
 import { avatarBridge, smoothMouthOpen } from './avatarBridge'

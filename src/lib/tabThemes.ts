@@ -7,7 +7,7 @@ import type { TabId } from './tabs'
  * `text-amber` (eyebrows, italic accent words, prices, icons) takes
  * the tab's accent, so each tab reads as its own room while staying in
  * the Scrolltide grammar: near-black, bone text, Bodoni display + mono
- * eyebrows. The layouts were already distinct per tab (hero, side-Vita
+ * eyebrows. The layouts were already distinct per tab (hero, side-guide
  * menu, 3D book, poster banner, pinned cinema, day timeline, stage +
  * chat) — this file adds the background treatment, accent and header
  * ribbon that make the identity unmistakable at a glance.
@@ -75,7 +75,7 @@ export const TAB_THEMES: Record<TabId, TabTheme> = {
   },
   agent: {
     index: '07',
-    tagline: 'Nekomi & Vita · Chat',
+    tagline: 'Nekomi · Chat',
     accent: '#9d8bd4',
     glow: 'rgba(157, 139, 212, 0.18)',
     glowPosition: '85% 8%',

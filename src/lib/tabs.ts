@@ -1,6 +1,6 @@
 /**
  * Tab shell state — one tiny store, no React involved, so the tab can be
- * switched from anywhere (Nav, Hero CTAs, the menu Vita, scrollToHash)
+ * switched from anywhere (Nav, Hero CTAs, the menu guide, scrollToHash)
  * without prop-drilling.
  *
  * Tabs are deep-linkable: #home #menu #book #gallery #ambiance #visit
