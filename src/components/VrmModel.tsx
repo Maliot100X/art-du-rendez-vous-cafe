@@ -7,6 +7,7 @@ import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
 import { loadVrm, type ReadRest } from '../lib/vrmCache'
+import { loadVrmClips, type VrmClipName } from '../lib/vrmClips'
 import { getWalkStatus, resetWalkStatus, setWalkStatus } from '../lib/walkStatus'
 
 /**
@@ -38,6 +39,15 @@ import { getWalkStatus, resetWalkStatus, setWalkStatus } from '../lib/walkStatus
  * for the scalar-only Deepgram RMS path, which carries no vowel).
  * Idle motion: gentle breathing (chest) + sway. Nod: the head dips
  * when speaking starts.
+ *
+ * Real movement (fix pass 11): the body is driven by VRMA clips
+ * (src/lib/vrmClips.ts — open-vrma, CC0: Idle_Loop standing,
+ * Idle_Talking_Loop while speaking/reading, Walk_Loop / Walk_Carry_Loop
+ * while walking), crossfaded 0.4 s via a THREE.AnimationMixer in the
+ * loop. The procedural code yields the bones the clips drive and stays
+ * as the fallback when the clips fail to load; the traverse, the
+ * reading arm pose and the viseme lip-sync are still procedural (the
+ * clips are body-only, no expression tracks).
  *
  * Hand book (menu tab, `withBook`): a small 3D book prop parented to
  * her leftHand bone (src/lib/handBook.ts). At rest she carries NOTHING
@@ -329,6 +339,10 @@ interface VrmDebug {
         the pass-8 readout quoted the TRUE 3D bend, so it said
         60–62° while the picture showed ~31–42°. */
     kneeBendDeg: number
+    /** Fix pass 11: which VRMA clip is playing ('idle' | 'talking' |
+        'walk' | 'walkCarry'), or 'procedural' when the clips failed
+        to load and the procedural code is driving. */
+    clip: string
   }
   /** Fix pass 10: live lip-sync, for the cloud-browser check — the
       mouth value + vowel staged into the VRM this frame, and whether
@@ -437,6 +451,17 @@ interface ThreeStage {
       pose). Used for the read rig AND to restore the shared bones on
       unmount, so the next mount never inherits a posed arm. */
   readRest: ReadRest | null
+  /**
+   * VRMA clip mixer (fix pass 11): the AnimationMixer driving the
+   * real clips (vrmClips.ts) + one action per clip, or null when the
+   * clips failed to load — the procedural walk/idle/reading in the
+   * loop is the fallback and runs exactly as before. Per-mount (the
+   * mixer is bound to the shared vrm.scene but only one mount's loop
+   * ever runs); the clips themselves are cached once per page
+   * lifetime in vrmClips.ts.
+   */
+  mixer: THREE.AnimationMixer | null
+  clipActions: Partial<Record<VrmClipName, THREE.AnimationAction>>
 }
 
 export default function VrmModel({
@@ -458,11 +483,12 @@ export default function VrmModel({
    */
   compact?: boolean
   /**
-   * Walk trigger: every increment starts one procedural walk cycle
-   * (legs + arms swing, hips bob). No walk VRMA exists on disk —
-   * utsuwa's VRMA_01–07 are emotes (Show Full Body, Greeting, Peace
-   * Sign, Shoot, Spin, Model Pose, Squat) and idle_*.vrma are idle
-   * loops — so the walk is bone-driven here, not a clip.
+   * Walk trigger: every increment starts one walk cycle. The limbs
+   * are driven by a real VRMA clip (fix pass 11 — Walk_Loop, or
+   * Walk_Carry_Loop while the hand book is out; open-vrma, CC0) and
+   * the traverse / step timing / arrival stay procedural; if the clips
+   * failed to load, the procedural leg solving below takes over
+   * (fbtpods planted-foot gait) with no other change.
    */
   walkTick?: number
   /**
@@ -754,6 +780,7 @@ export default function VrmModel({
         kneeR: 0,
         thighR: 0,
         kneeBendDeg: 0,
+        clip: 'procedural',
       },
       mouth: bridge.getMouthOpen(),
       vowel: bridge.getMouthVowel(),
@@ -814,6 +841,7 @@ export default function VrmModel({
           kneeR: 0,
           thighR: 0,
           kneeBendDeg: 0,
+          clip: 'procedural',
         }
       }
     }
@@ -860,6 +888,7 @@ export default function VrmModel({
           kneeR: 0,
           thighR: 0,
           kneeBendDeg: 0,
+          clip: 'procedural',
         },
         mouth: 0,
         vowel: null,
@@ -1106,6 +1135,10 @@ export default function VrmModel({
         handBook,
         readRig,
         readRest,
+        // VRMA clips (fix pass 11): filled in below, once loaded —
+        // null + {} until then means "procedural fallback".
+        mixer: null,
+        clipActions: {},
       }
       layout()
       setStatus('ready')
@@ -1115,10 +1148,36 @@ export default function VrmModel({
       pendingReadingRef.current = null
       if (pending) beginReading(pending.categoryId, pending.seconds)
 
+      // ---- VRMA clips (fix pass 11): real animation clips for idle /
+      // talking / walk, loaded once per page lifetime (vrmClips.ts).
+      // Loaded AFTER setStatus('ready') so a slow clip fetch never
+      // delays the stage; the first frames run procedural until the
+      // mixer exists. A failure resolves to null and the loop below
+      // runs exactly as before — every procedural gate checks the
+      // mixer, so there is no half-wired state.
+      const clips = await loadVrmClips(vrm)
+      const mixer = clips ? new THREE.AnimationMixer(vrm.scene) : null
+      const clipActions: Partial<Record<VrmClipName, THREE.AnimationAction>> = {}
+      if (mixer && clips) {
+        ;(Object.keys(clips) as VrmClipName[]).forEach((name) => {
+          const action = mixer.clipAction(clips[name])
+          action.setLoop(THREE.LoopRepeat, Infinity)
+          clipActions[name] = action
+        })
+        clipActions.idle?.play()
+      }
+      threeRef.current.mixer = mixer
+      threeRef.current.clipActions = clipActions
+
       // ---- Per-frame loop: VRM update, breathing, lip-sync, nod, blink.
       let happyWeight = 0
       // Fix pass 10: eased per-vowel mouth weights (see the mouth block).
       const mouthWeights: Record<MouthVowel, number> = { a: 0, i: 0, u: 0, e: 0, o: 0 }
+      // VRMA clip state (fix pass 11): the clip currently fading in /
+      // playing (null = no clips, procedural fallback). The idle action
+      // was started at load above, so the first frames already move.
+      let activeClipName: VrmClipName | null = mixer ? 'idle' : null
+      let activeClipAction: THREE.AnimationAction | null = mixer ? (clipActions.idle ?? null) : null
       let wasSpeaking = false
       let nodT = 1
       let nextBlinkAt = 2.5
@@ -1199,6 +1258,50 @@ export default function VrmModel({
         const three = threeRef.current
         if (!three) return
         three.vrm.update(dt)
+
+        // VRMA clips (fix pass 11) — see vrmClips.ts. The mixer writes
+        // the normalized bones FIRST; the procedural blocks below then
+        // overwrite only the bones they own (walk legs while walking,
+        // left arm while reading, head on nod/dip), and the
+        // humanoid.update() at the end of the loop syncs the result to
+        // the raw bones before the render. When the clips failed to
+        // load (mixer null) every gate below is false and the loop runs
+        // exactly as before — the procedural code is the fallback, not
+        // a second driver. State mapping: Idle_Loop standing,
+        // Walk_Loop / Walk_Carry_Loop while walkTick runs (carry while
+        // the hand book is out), Idle_Talking_Loop while speaking or
+        // reading. Crossfade 0.4 s, never a hard cut.
+        const clipMixer = three.mixer
+        let clipActive = false
+        let clipDrivesWalk = false
+        // The clip that was driving BEFORE this frame's switch — the
+        // walk completion branch needs it (below): by the time the
+        // walk ends, the mixer has already crossfaded to idle, so
+        // clipDrivesWalk is false there, but the walk clip was the
+        // driver a frame ago and its fade still owns the legs.
+        let clipDroveWalk = false
+        if (clipMixer) {
+          clipDroveWalk = activeClipName === 'walk' || activeClipName === 'walkCarry'
+          const walkingNow = walkRef.current.t < WALK_DURATION
+          const bookOut = readingRef.current.active || readingBlendRef.current > 0.1
+          const want: VrmClipName = walkingNow
+            ? bookOut
+              ? 'walkCarry'
+              : 'walk'
+            : bridge.isSpeaking() || readingRef.current.active
+              ? 'talking'
+              : 'idle'
+          const next = three.clipActions[want]
+          if (next && want !== activeClipName) {
+            if (activeClipAction) activeClipAction.fadeOut(0.4)
+            next.reset().fadeIn(0.4).play()
+            activeClipAction = next
+            activeClipName = want
+          }
+          clipActive = activeClipName !== null
+          clipDrivesWalk = activeClipName === 'walk' || activeClipName === 'walkCarry'
+          clipMixer.update(dt)
+        }
 
         // Procedural walk — a sidestep gait solved from the planted
         // feet (fbtpods solver.py + body.py), not a free swing. The old
@@ -1286,7 +1389,12 @@ export default function VrmModel({
             const swingRest = steppingLeft ? restL : restR
             const stanceAngle = clampA((stanceFootX - hipX) / LEG_LEN) - stanceRest
             const swingAngle = clampA((swingX - hipX) / LEG_LEN) - swingRest
-            if (steppingLeft) {
+            // VRMA (fix pass 11): when a walk clip is playing, the
+            // mixer owns the legs — the procedural writes below are
+            // skipped so the two never fight on the same bones. The
+            // traverse, step bookkeeping and heading still run (the
+            // clips are in-place; the site moves her across the stage).
+            if (!clipDrivesWalk && steppingLeft) {
               // Extra sideways swing at peak lift (fix pass 6 —
               // SWING_SPLAY, in the travel direction): the stepping
               // thigh angles visibly out sideways on top of its
@@ -1315,7 +1423,7 @@ export default function VrmModel({
               setZ(rig.rightLowerLeg, 0)
               if (rig.leftFoot) rig.leftFoot.rotation.x = (rig.baseX.get(rig.leftFoot) ?? 0) - 0.35 * lift * env
               if (rig.rightFoot) rig.rightFoot.rotation.x = rig.baseX.get(rig.rightFoot) ?? 0
-            } else {
+            } else if (!clipDrivesWalk) {
               setZ(rig.rightUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
               setZ(rig.leftUpperLeg, stanceAngle)
               setX(rig.rightUpperLeg, THIGH_LIFT * lift)
@@ -1328,17 +1436,23 @@ export default function VrmModel({
             }
             // Arms counter-swing (one cycle per two steps); the LEFT
             // (reading) arm fades out as the book rises, as before.
+            // VRMA (fix pass 11): skipped while a walk clip plays —
+            // the clip swings the arms and bobs the hips itself.
             const armPhase = (wt / (STEP_DURATION * 2)) * Math.PI * 2
             const armS = Math.sin(armPhase)
-            setX(rig.leftUpperArm, 0.45 * armS * (1 - readingBlendRef.current))
-            // Capture the swing just applied (setX adds v*env to
-            // baseX) so the reading block can reproduce it absolutely
-            // below, without depending on this setX having run.
-            walkArmSwing = 0.45 * armS * (1 - readingBlendRef.current) * env
-            setX(rig.rightUpperArm, -0.45 * armS)
-            // Hip: dips at double support, rises mid-swing; pelvis rocks.
-            three.group.position.y = -HIP_BOB * (1 - lift) * env
-            if (rig.hips) setZ(rig.hips, HIP_SWAY * Math.sin((wt / STEP_DURATION) * Math.PI))
+            if (!clipDrivesWalk) {
+              setX(rig.leftUpperArm, 0.45 * armS * (1 - readingBlendRef.current))
+              // Capture the swing just applied (setX adds v*env to
+              // baseX) so the reading block can reproduce it absolutely
+              // below, without depending on this setX having run.
+              // (0 when the clip drives — the reading block then adds
+              // no swing of its own.)
+              walkArmSwing = 0.45 * armS * (1 - readingBlendRef.current) * env
+              setX(rig.rightUpperArm, -0.45 * armS)
+              // Hip: dips at double support, rises mid-swing; pelvis rocks.
+              three.group.position.y = -HIP_BOB * (1 - lift) * env
+              if (rig.hips) setZ(rig.hips, HIP_SWAY * Math.sin((wt / STEP_DURATION) * Math.PI))
+            }
             // Heading: turns part-way toward the travel direction
             // mid-walk, back to face-front at the ends.
             walkTurn = WALK_TURN * dir * Math.sin(Math.PI * uw)
@@ -1351,12 +1465,19 @@ export default function VrmModel({
             // crossing-frame latch above) — the loop now holds the
             // "Arrivée" state until resetWalkStatus() consumes it.
             arrivedRef.current = true
-            rig.baseX.forEach((base, node) => {
-              node.rotation.x = base
-            })
-            rig.baseZ.forEach((base, node) => {
-              node.rotation.z = base
-            })
+            // VRMA (fix pass 11): skip the restore while the walk clip
+            // was driving — the crossfade to idle/talking owns the
+            // transition (clipDroveWalk was captured before this
+            // frame's switch); restoring bases here would snap the
+            // legs to rest for one frame mid-fade.
+            if (!clipDroveWalk) {
+              rig.baseX.forEach((base, node) => {
+                node.rotation.x = base
+              })
+              rig.baseZ.forEach((base, node) => {
+                node.rotation.z = base
+              })
+            }
             three.group.position.y = 0
             three.group.position.x = w.toX
             // Walk over: the camera returns to the selected framing
@@ -1439,22 +1560,28 @@ export default function VrmModel({
         // and a small arm sway are added, all gated to NOT walking
         // (the walk block owns hips/arms while it runs).
         const swayAmp = reducedMotion ? 0.4 : 1
-        if (chestNode) {
+        // VRMA (fix pass 11): the idle/talking clips own the chest,
+        // head, hips and arms — the procedural writes below are
+        // skipped while a clip plays so the two never fight on the
+        // same bones. The nod is a speech cue and still writes (only
+        // while it is actually moving); the reading block's head dip
+        // is gated the same way below.
+        if (chestNode && !clipActive) {
           chestNode.rotation.x = three.chestBaseRotationX + 0.032 * Math.sin(t * 1.2) * swayAmp
         }
-        three.group.rotation.y = walkTurn + 0.05 * Math.sin(t * 0.5) * swayAmp
+        three.group.rotation.y = walkTurn + (clipActive ? 0 : 0.05 * Math.sin(t * 0.5) * swayAmp)
         if (headNode) {
           nod = 0
           if (nodT < 0.6) {
             nodT += dt
             nod = 0.12 * Math.sin(Math.min(1, nodT / 0.6) * Math.PI)
           }
-          headNode.rotation.x = three.headBaseRotationX + nod
+          if (!clipActive || nod !== 0) headNode.rotation.x = three.headBaseRotationX + nod
           // Micro-sway (rotation.y — the reading block only ever
           // sets .x, so this never fights it).
-          headNode.rotation.y = 0.04 * Math.sin(t * 0.4 + 0.6) * swayAmp
+          if (!clipActive) headNode.rotation.y = 0.04 * Math.sin(t * 0.4 + 0.6) * swayAmp
         }
-        if (rig && walkRef.current.t >= WALK_DURATION) {
+        if (rig && walkRef.current.t >= WALK_DURATION && !clipActive) {
           if (rig.hips) {
             rig.hips.rotation.z = (rig.baseZ.get(rig.hips) ?? 0) + 0.02 * Math.sin(t * 0.5) * swayAmp
           }
@@ -1537,7 +1664,11 @@ export default function VrmModel({
           // restores the rest quaternion exactly. The head dip is
           // safe as `+=`: the nod code above sets head rotation.x
           // absolutely every frame before this runs.
-          if (rr) {
+          // VRMA (fix pass 11): the reading arm pose only takes over
+          // once the book is actually rising (blend > 0) — at blend 0
+          // the clip owns the left arm. In the procedural fallback
+          // (!clipActive) the writes run every frame, as before.
+          if (rr && (blend > 0.001 || !clipActive)) {
             if (walkRef.current.t < WALK_DURATION) {
               rr.leftUpperArm.rotation.x = rr.upperBaseX + walkArmSwing + READ_UPPER * blend
             } else {
@@ -1568,7 +1699,7 @@ export default function VrmModel({
           // first, every frame; one skipped nod frame would have
           // accumulated the dip. No `+=` remains on any
           // reading-driven bone.
-          if (headNode) {
+          if (headNode && (!clipActive || nod !== 0 || blend > 0.001)) {
             headNode.rotation.x = three.headBaseRotationX + nod + 0.18 * blend
           }
 
@@ -1717,6 +1848,9 @@ export default function VrmModel({
           const wr = three.walkRig
           wdbg.walk = {
             tick: wdbg.walk?.tick ?? 0,
+            // VRMA (fix pass 11): which clip is playing, for the
+            // cloud-browser check ('procedural' = clips failed to load).
+            clip: activeClipName ?? 'procedural',
             t: walkRef.current.t,
             x: three.group.position.x,
             rig: !!wr,
@@ -1863,6 +1997,10 @@ export default function VrmModel({
       cancelled = true
       cancelAnimationFrame(raf)
       const three = threeRef.current
+      // VRMA clips (fix pass 11): stop the mixer's actions so no clip
+      // keeps writing the shared VRM's bones after unmount; the next
+      // mount builds a fresh mixer from the cached clips.
+      three?.mixer?.stopAllAction()
       // Walk readout (fix pass 6, reset fixed in fix pass 8): the loop
       // stops writing on unmount, so reset the store to idle here —
       // otherwise a tab switch mid-walk (e.g. a reading ending in a
