@@ -9,16 +9,20 @@ import './FluidBackground.css'
  * palette (amber / gold / ember / teal on near-black). Pointer movement
  * stirs it; a slow ambient splat keeps it alive with no input.
  *
- * Fix pass 10: the sim runs on coarse-pointer devices (phones) too.
- * Fix pass 4 froze it to a static gradient on phones — the
- * `coarsePointer` early returns below — because the URL bar
- * showing/hiding while scrolling changes the viewport height, and
- * every resize re-initialised the sim's framebuffers, so the
- * background jumped. That is fixed at the source instead: fluid.ts
- * now ignores small height-only resizes (URL-bar wobble, see
- * shouldApplyResize), so the freeze is gone and the animated fluid
- * runs on phones, at lower resolution / fewer pressure iterations /
- * 1x DPR / slower ambient splats (see resolveFluidConfig in fluid.ts).
+ * Fix pass 15: the background was effectively STATIC on desktop
+ * (measured: mean pixel change 0.27/255 over 14.8s in a fixed region,
+ * bokeh dots in identical positions). The sim was stepping — it was
+ * the steady state that was empty: DENSITY_DISSIPATION 0.3 erased
+ * the opening splats in ~5s of sim time and the only sustaining
+ * input was one weak random splat every 2.4s, and hover never stirred
+ * (every hover move reset prev=pos, so delta was always 0). Fixed in
+ * fluid.ts: slower dissipation, 1–2 wandering ambient emitters laying
+ * a continuous dye trail, hover stirs, and window.__fluidDebug
+ * (frames / lastStepAt / fps / splat counts) so the next pixel check
+ * can confirm stepping. The CSS fallback below was also too soft and
+ * slow to register on pixels (0.33/255, 0.00% >10 in the top-right
+ * region over 8s) — its cycles are now ~2x faster with ~1.6x larger
+ * travel and tighter gradients (see FluidBackground.css).
  *
  * Failure can never blank the page (the lesson of the Hero R3F canvas):
  * - prefers-reduced-motion → static gradient, no canvas at all. This

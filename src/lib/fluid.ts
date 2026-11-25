@@ -77,6 +77,11 @@ interface Pointer {
   down: boolean
   moved: boolean
   color: RGB
+  /** Fix 15: has the pointer ever been positioned? Hover stirs only
+      once this is true (see onPointerMove) — without it, every hover
+      move re-ran updatePointerDownData, resetting prev=pos, so the
+      delta was always 0 and mouse movement never stirred the fluid. */
+  seen: boolean
 }
 
 /* Café palette — warm amber/gold + deep green/teal on near-black. */
@@ -123,6 +128,15 @@ export interface FluidConfig {
   DPR_CAP: number
   /** Seconds between ambient splats when there is no pointer input. */
   AMBIENT_INTERVAL: number
+  /** Wandering ambient emitters (fix 15): slow invisible "fingers"
+      that lay a dye trail across the field. Desktop gets 3 so the
+      trail covers more of the viewport; mobile gets 1 (cheaper). */
+  AMBIENT_WANDERERS: number
+  /** Ambient splats are wider than pointer splats (fix 15): a wider
+      ribbon covers more of a fixed region and its edge — where the
+      dye gradient is steep — sweeps more pixels per second. Pointer
+      splats stay at scale 1. */
+  AMBIENT_RADIUS_SCALE: number
 }
 
 /**
@@ -131,13 +145,32 @@ export interface FluidConfig {
  * ambient splat — so the animated background stays smooth on a phone.
  * The field is a soft glow behind text, not a sharp render, so the
  * lower dye resolution is not visible; what matters is that it MOVES.
+ *
+ * Fix 15 — the steady state was a still near-black field (measured:
+ * isolated sim, mobile config: mean brightness 12.1 at t≈1s → 10.5
+ * at t≈25s, pure background is 10.3, and 0.0% of pixels above
+ * background+10 from t≈25s on). Two causes, both fixed here:
+ * (1) DENSITY_DISSIPATION 0.3 erased the 6 opening splats in ~5s of
+ * sim time, and the only sustaining input was one weak random splat
+ * every 2.4s (3.2s mobile) whose dye faded before the next arrived —
+ * so the field converged to empty. Now dissipation is 0.12/0.35 and
+ * the ambient input is 1–3 slow wandering emitters (see the wanderer
+ * block in update()) laying a continuous dye trail every 0.9s
+ * (1.6s mobile) at 1.5–1.8x the pointer splat radius, so injection
+ * beats decay at a visible equilibrium.
+ * (2) Hover never stirred: onPointerMove re-ran updatePointerDownData
+ * on every move with no button down, resetting prev=pos, so delta was
+ * always 0 and only click-drag stirred. Now only the first sighting
+ * positions the pointer (see `seen`), and mouse movement stirs.
+ * Brightness dimming is UNCHANGED — brighter dye caused the
+ * "pale on white" text problem; the fix is motion, not brightness.
  */
 export function resolveFluidConfig(mobile: boolean): FluidConfig {
   return {
     SIM_RESOLUTION: mobile ? 80 : 128,
     DYE_RESOLUTION: mobile ? 384 : 1024,
-    DENSITY_DISSIPATION: 0.3,
-    VELOCITY_DISSIPATION: 0.6,
+    DENSITY_DISSIPATION: 0.12,
+    VELOCITY_DISSIPATION: 0.35,
     PRESSURE: 0.25,
     PRESSURE_ITERATIONS: mobile ? 10 : 20,
     CURL: 10,
@@ -145,7 +178,9 @@ export function resolveFluidConfig(mobile: boolean): FluidConfig {
     SPLAT_FORCE: 5000,
     SHADING: true,
     DPR_CAP: mobile ? 1 : 1.5,
-    AMBIENT_INTERVAL: mobile ? 3.2 : 2.4,
+    AMBIENT_INTERVAL: mobile ? 1.6 : 0.9,
+    AMBIENT_WANDERERS: mobile ? 1 : 3,
+    AMBIENT_RADIUS_SCALE: mobile ? 1.5 : 1.8,
   }
 }
 
@@ -181,6 +216,25 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
   let destroyed = false
   let raf = 0
 
+  /**
+   * Live diagnostic (fix 15) so the next cloud-browser pixel check can
+   * confirm the sim is stepping on real pixels without guessing:
+   * frames = rAF steps taken, lastStepAt = epoch ms of the last step,
+   * fps = EMA of the real frame rate, ambientSplats / pointerSplats =
+   * splats injected by the wanderers / by pointer input. Read it as
+   * `window.__fluidDebug` in the page. Set once here; `destroyed`
+   * flips when the component unmounts.
+   */
+  const debug = {
+    frames: 0,
+    ambientSplats: 0,
+    pointerSplats: 0,
+    lastStepAt: 0,
+    fps: 0,
+    destroyed: false,
+  }
+  ;(window as unknown as { __fluidDebug?: typeof debug }).__fluidDebug = debug
+
   const scaleByPixelRatio = (input: number): number => {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, dprCap)
     return Math.floor(input * pixelRatio)
@@ -214,6 +268,7 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
       down: false,
       moved: false,
       color: generateColor(),
+      seen: false,
     }
   }
 
@@ -994,14 +1049,14 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     return radius
   }
 
-  function splat(x: number, y: number, dx: number, dy: number, color: RGB): void {
+  function splat(x: number, y: number, dx: number, dy: number, color: RGB, radiusScale = 1): void {
     if (!dye || !velocity) return
     splatProgram.bind()
     gl.uniform1i(splatProgram.uniforms.uTarget, velocity.read.attach(0))
     gl.uniform1f(splatProgram.uniforms.aspectRatio, canvas.width / canvas.height)
     gl.uniform2f(splatProgram.uniforms.point, x, y)
     gl.uniform3f(splatProgram.uniforms.color, dx, dy, 0.0)
-    gl.uniform1f(splatProgram.uniforms.radius, correctRadius(config.SPLAT_RADIUS / 100.0))
+    gl.uniform1f(splatProgram.uniforms.radius, correctRadius((config.SPLAT_RADIUS / 100.0) * radiusScale))
     blit(velocity.write)
     velocity.swap()
 
@@ -1043,6 +1098,7 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     pointers.forEach((p) => {
       if (p.moved) {
         p.moved = false
+        debug.pointerSplats++
         splatPointer(p)
       }
     })
@@ -1092,7 +1148,18 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     const pointer = pointers[0]
     const posX = scaleByPixelRatio(e.clientX)
     const posY = scaleByPixelRatio(e.clientY)
-    if (!pointer.down) updatePointerDownData(pointer, -1, posX, posY)
+    // Fix 15 — hover stirs. The old code ran updatePointerDownData
+    // here on every move with no button down, which reset
+    // prevTexcoord to the current position, so deltaX/deltaY were
+    // always 0 and mouse movement never stirred the fluid (only
+    // click-drag did). Now only the FIRST sighting positions the
+    // pointer; every later move — button or not — tracks a delta.
+    if (!pointer.seen) {
+      updatePointerDownData(pointer, -1, posX, posY)
+      pointer.down = false
+      pointer.seen = true
+      return
+    }
     updatePointerMoveData(pointer, posX, posY)
   }
 
@@ -1125,6 +1192,38 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
   initFramebuffers()
   multipleSplats(6)
 
+  /**
+   * Ambient wanderers (fix 15) — the sustaining motion source. Each
+   * one is a slow invisible "finger" that drifts across the field on
+   * a random walk, laying a dye trail and pushing the dye along its
+   * heading, so the field keeps moving with no input. The old ambient
+   * input — one weak splat at a random position every 2.4s — could
+   * not sustain the field: with DENSITY_DISSIPATION 0.3 the opening
+   * splats were gone in ~5s of sim time and each ambient blob faded
+   * before the next arrived (measured steady state: 0.0% of pixels
+   * above background+10). A wanderer crosses the field in ~20s and
+   * emits every AMBIENT_INTERVAL, so consecutive blobs overlap into
+   * a continuous ribbon; the along-heading velocity kick (600, vs the
+   * old ±350 random kick) keeps the dye advecting between emissions.
+   * Bounces off the edges instead of wrapping — a wrap would smear
+   * a line across the whole field. Recolours on bounce so the trail
+   * changes palette as it wanders.
+   */
+  const WANDERER_SPEED = 0.05 // UV units per second
+  const WANDERER_PUSH = 600 // velocity kick along the heading
+  interface Wanderer {
+    x: number
+    y: number
+    angle: number
+    color: RGB
+  }
+  const wanderers: Wanderer[] = Array.from({ length: config.AMBIENT_WANDERERS }, () => ({
+    x: 0.15 + Math.random() * 0.7,
+    y: 0.15 + Math.random() * 0.7,
+    angle: Math.random() * Math.PI * 2,
+    color: generateColor(),
+  }))
+
   let lastUpdateTime = Date.now()
   let ambientTimer = 0
 
@@ -1133,17 +1232,40 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     raf = requestAnimationFrame(update)
     if (document.hidden) return
     const now = Date.now()
-    let dt = (now - lastUpdateTime) / 1000
+    const rawDt = (now - lastUpdateTime) / 1000
+    let dt = rawDt
     dt = Math.min(dt, 0.016666)
     lastUpdateTime = now
+    debug.frames++
+    debug.lastStepAt = now
+    if (rawDt > 0) {
+      const instantFps = 1 / rawDt
+      debug.fps = debug.fps === 0 ? instantFps : debug.fps * 0.9 + instantFps * 0.1
+    }
     if (resizeCanvas()) initFramebuffers()
-    // Gentle ambient life with no input: one soft splat every few
-    // seconds (slower on mobile — see config.AMBIENT_INTERVAL).
+    // Gentle ambient life with no input: the wanderers lay a dye
+    // trail every AMBIENT_INTERVAL (slower on mobile — see config).
     ambientTimer += dt
     if (ambientTimer > config.AMBIENT_INTERVAL) {
       ambientTimer = 0
-      const color = generateColor()
-      splat(Math.random(), Math.random(), 700 * (Math.random() - 0.5), 700 * (Math.random() - 0.5), color)
+      for (const w of wanderers) {
+        w.angle += (Math.random() - 0.5) * 0.9
+        const step = WANDERER_SPEED * config.AMBIENT_INTERVAL
+        w.x += Math.cos(w.angle) * step
+        w.y += Math.sin(w.angle) * step
+        if (w.x < 0.06 || w.x > 0.94) {
+          w.angle = Math.PI - w.angle
+          w.x = Math.min(0.94, Math.max(0.06, w.x))
+          w.color = generateColor()
+        }
+        if (w.y < 0.06 || w.y > 0.94) {
+          w.angle = -w.angle
+          w.y = Math.min(0.94, Math.max(0.06, w.y))
+          w.color = generateColor()
+        }
+        splat(w.x, w.y, Math.cos(w.angle) * WANDERER_PUSH, Math.sin(w.angle) * WANDERER_PUSH, w.color, config.AMBIENT_RADIUS_SCALE)
+        debug.ambientSplats++
+      }
     }
     applyInputs()
     step(dt)
@@ -1154,6 +1276,7 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
   function destroy(): void {
     if (destroyed) return
     destroyed = true
+    debug.destroyed = true
     cancelAnimationFrame(raf)
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerdown', onPointerDown)

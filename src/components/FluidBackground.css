@@ -1,4 +1,4 @@
-/* Animated fallback for the fluid background (fix pass 10).
+/* Animated fallback for the fluid background (fix pass 10, fix 15).
  *
  * Used ONLY when WebGL fails on the Home tab (context creation, shader
  * or FBO failure, or context loss after init). The WebGL sim is the
@@ -11,6 +11,22 @@
  * always changing. The static `.fluid-fallback` gradient from
  * index.css is NOT used here; that class stays the reduced-motion /
  * under-canvas base only.
+ *
+ * Fix 15 — the blobs moved but read as static in a pixel diff
+ * (measured: 8s apart, top-right region mean change 0.33/255, 0.00%
+ * of pixels changed >10; a screenshot shows why — the viewport is
+ * mostly flat near-black with a couple of wide, dim glow bands).
+ * They were too big, too soft (blur 70px, gradient fading to
+ * transparent at 70%) and too slow (26–36s cycles), so the region a
+ * blob covers is a nearly flat interior and translating it changes
+ * almost no pixel by more than a few levels. Now: ~2.5x faster
+ * cycles (12–16s), ~2x larger travel, SMALLER blobs (34–44vmax
+ * instead of 44–58vmax) with tighter gradients (transparent at 50%)
+ * and slightly higher peak alphas, so a blob's edge and mid-slope —
+ * where the spatial gradient is steep — sweep across a fixed region
+ * every few seconds instead of its flat interior sitting on it.
+ * Still slow and calm — about one drift cycle every 13 seconds — but
+ * the motion now registers on real pixels, not just in the keyframes.
  *
  * Reduced motion never reaches this fallback (the component returns
  * the static gradient instead), but the animation is also killed by
@@ -25,104 +41,104 @@
   position: absolute;
   display: block;
   border-radius: 9999px;
-  filter: blur(70px);
+  filter: blur(45px);
   will-change: transform, opacity;
   pointer-events: none;
 }
 
 .fluid-blob--amber {
-  width: 58vmax;
-  height: 44vmax;
+  width: 42vmax;
+  height: 34vmax;
   left: -10%;
   top: -8%;
-  background: radial-gradient(circle, rgba(232, 163, 61, 0.55), transparent 70%);
-  animation: fluid-drift-a 26s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(232, 163, 61, 0.65), transparent 50%);
+  animation: fluid-drift-a 12s ease-in-out infinite alternate;
 }
 
 .fluid-blob--teal {
-  width: 50vmax;
-  height: 40vmax;
+  width: 38vmax;
+  height: 30vmax;
   right: -12%;
   top: 12%;
-  background: radial-gradient(circle, rgba(46, 125, 107, 0.5), transparent 70%);
-  animation: fluid-drift-b 32s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(46, 125, 107, 0.6), transparent 50%);
+  animation: fluid-drift-b 14s ease-in-out infinite alternate;
 }
 
 .fluid-blob--ember {
-  width: 56vmax;
-  height: 44vmax;
+  width: 44vmax;
+  height: 34vmax;
   left: 22%;
   bottom: -14%;
-  background: radial-gradient(circle, rgba(217, 93, 57, 0.45), transparent 70%);
-  animation: fluid-drift-c 29s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(217, 93, 57, 0.55), transparent 50%);
+  animation: fluid-drift-c 13s ease-in-out infinite alternate;
 }
 
 .fluid-blob--moss {
-  width: 44vmax;
-  height: 36vmax;
+  width: 34vmax;
+  height: 28vmax;
   left: -6%;
   bottom: 18%;
-  background: radial-gradient(circle, rgba(63, 125, 78, 0.45), transparent 70%);
-  animation: fluid-drift-d 36s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(63, 125, 78, 0.55), transparent 50%);
+  animation: fluid-drift-d 16s ease-in-out infinite alternate;
 }
 
 @keyframes fluid-drift-a {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.85;
+    opacity: 0.7;
   }
   50% {
-    transform: translate3d(14vw, 10vh, 0) scale(1.15);
+    transform: translate3d(26vw, 18vh, 0) scale(1.15);
     opacity: 1;
   }
   100% {
-    transform: translate3d(-6vw, 18vh, 0) scale(0.95);
-    opacity: 0.8;
+    transform: translate3d(-14vw, 26vh, 0) scale(0.95);
+    opacity: 0.7;
   }
 }
 
 @keyframes fluid-drift-b {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.9;
+    opacity: 0.75;
   }
   50% {
-    transform: translate3d(-16vw, 12vh, 0) scale(1.12);
+    transform: translate3d(-28vw, 20vh, 0) scale(1.12);
     opacity: 1;
   }
   100% {
-    transform: translate3d(-8vw, -8vh, 0) scale(0.92);
-    opacity: 0.75;
+    transform: translate3d(-16vw, -18vh, 0) scale(0.92);
+    opacity: 0.7;
   }
 }
 
 @keyframes fluid-drift-c {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.8;
+    opacity: 0.7;
   }
   50% {
-    transform: translate3d(-12vw, -10vh, 0) scale(1.18);
+    transform: translate3d(-24vw, -18vh, 0) scale(1.18);
     opacity: 1;
   }
   100% {
-    transform: translate3d(10vw, -16vh, 0) scale(0.94);
-    opacity: 0.85;
+    transform: translate3d(20vw, -26vh, 0) scale(0.94);
+    opacity: 0.7;
   }
 }
 
 @keyframes fluid-drift-d {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.85;
+    opacity: 0.75;
   }
   50% {
-    transform: translate3d(16vw, -8vh, 0) scale(1.1);
-    opacity: 0.95;
+    transform: translate3d(28vw, -16vh, 0) scale(1.1);
+    opacity: 1;
   }
   100% {
-    transform: translate3d(6vw, 12vh, 0) scale(1.05);
-    opacity: 0.8;
+    transform: translate3d(14vw, 24vh, 0) scale(1.05);
+    opacity: 0.7;
   }
 }
 
