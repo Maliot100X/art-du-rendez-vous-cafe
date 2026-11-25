@@ -81,12 +81,11 @@ import { loadVrm } from '../lib/vrmCache'
  */
 
 const FOV = 30
-/** One walk: three steps, ~0.7 s per step, and a real lateral traverse —
+/** One walk: four sidesteps of 0.55 s, and a real lateral traverse —
     she walks from one side of the stage to the other and STAYS there
-    (alternating sides each trigger). The previous version swung the legs
-    in place for 1.4 s and then restored the exact rest pose, so any
-    screenshot taken after the window showed the identical pose and the
-    walk was invisible. */
+    (alternating sides each trigger). The legs are solved from the
+    planted feet (fbtpods gait — see the walk block), so the walk is
+    visible in the legs while it happens AND in her new position after. */
 const WALK_DURATION = 2.2
 /**
  * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
@@ -99,9 +98,46 @@ const WALK_DURATION = 2.2
 const WALK_LEFT = -0.08
 const WALK_RIGHT = 0.14
 
+/**
+ * fbtpods gait constants (airpodsvr/body.py proportions, Vita H=1.713 m):
+ * hip joint 0.530*H = 0.908 m, thigh 0.245*H = 0.420 m, shin 0.246*H =
+ * 0.421 m, hip half-width 0.052*H = 0.089 m, ankle 0.039*H = 0.067 m.
+ * The walk is a sidestep — she faces the camera and steps sideways.
+ * What is used here: the proportions, the knee-as-hinge model
+ * (solver.py _u(k,s,f) / pos(k)), the planted-foot lock
+ * (skating_correction: a planted foot never slides, it only moves
+ * while lifted), the hip lowering when both feet are loaded
+ * (solve_body), and the slow-follow heading (body.py HipEstimator,
+ * tau 0.6 s). What is NOT used, and why: solve_leg / solve_leg_fk
+ * need a MEASURED shin/thigh orientation from an AirPods IMU — there
+ * is no tracker on a website, so the gait is phase-driven and the leg
+ * angles are solved from the hip + the planted feet instead (closed
+ * form, not the solver's 64-point floor-contact root search);
+ * fusion.py (Mahony/BudFusion) fuses gyro+accel+magnetometer from
+ * those same IMUs — no IMU data exists here, nothing to fuse;
+ * math3d.py's rotation helpers (rot_y, axis_angle, heading_of, wrap)
+ * are three.js Quaternion/Euler/MathUtils here — the concepts transfer,
+ * the code does not; HipEstimator.update needs a headset pose (R_hmd,
+ * p_hmd) that does not exist on a website — only its heading-follower
+ * idea is used.
+ */
+const HIP_HALF = 0.089
+const LEG_LEN = 0.841
+const STEP_DURATION = 0.55
+const STEP_COUNT = 4
+const KNEE_SWING = 0.6
+const THIGH_LIFT = 0.25
+const HIP_BOB = 0.02
+const HIP_SWAY = 0.05
+const WALK_TURN = 0.3
+
 type Framing = 'full' | 'half' | 'face'
 
-/** Bones the procedural walk drives, with their rest-pose rotation.x. */
+/**
+ * Bones the procedural walk drives, with their rest-pose rotation.x/z.
+ * The pelvis + feet are optional (hip sway + foot levelling); the six
+ * core bones are required.
+ */
 interface WalkRig {
   leftUpperLeg: THREE.Object3D
   rightUpperLeg: THREE.Object3D
@@ -109,7 +145,11 @@ interface WalkRig {
   rightLowerLeg: THREE.Object3D
   leftUpperArm: THREE.Object3D
   rightUpperArm: THREE.Object3D
+  hips: THREE.Object3D | null
+  leftFoot: THREE.Object3D | null
+  rightFoot: THREE.Object3D | null
   baseX: Map<THREE.Object3D, number>
+  baseZ: Map<THREE.Object3D, number>
 }
 
 interface VrmDebug {
@@ -248,7 +288,7 @@ export default function VrmModel({
   const containerRef = useRef<HTMLDivElement>(null)
   const threeRef = useRef<ThreeStage | null>(null)
   const framingRef = useRef<Framing>(compact ? 'half' : 'full')
-  const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0 })
+  const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0, step: -1, footL: -HIP_HALF, footR: HIP_HALF })
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [progress, setProgress] = useState(0)
   const [framing, setFraming] = useState<Framing>(compact ? 'half' : 'full')
@@ -274,6 +314,11 @@ export default function VrmModel({
       // Alternate ends: at/near the right end go left, otherwise right.
       w.toX = w.toX >= (WALK_LEFT + WALK_RIGHT) / 2 ? WALK_LEFT : WALK_RIGHT
       w.t = 0
+      // Planted feet start under the hips (fbtpods body.py: hip joints
+      // 0.052 * height apart) — the gait solves the legs from these.
+      w.step = -1
+      w.footL = w.fromX - HIP_HALF
+      w.footR = w.fromX + HIP_HALF
     }
   }, [walkTick, reducedMotion])
 
@@ -510,8 +555,10 @@ export default function VrmModel({
       const chestNode = vrm.humanoid?.getNormalizedBoneNode('chest')
 
       // Walk rig: the six bones the procedural walk drives, with their
-      // rest-pose rotation.x so the cycle can add swing on top and
-      // return exactly to rest afterwards.
+      // rest-pose rotation.x/z so the cycle can add swing on top and
+      // return exactly to rest afterwards. The pelvis + feet are
+      // optional (hip sway + foot levelling) — missing bones just
+      // disable those cues, the core gait still runs.
       let walkRig: WalkRig | null = null
       try {
         const humanoid = vrm.humanoid
@@ -522,11 +569,38 @@ export default function VrmModel({
           rightLowerLeg: humanoid.getNormalizedBoneNode('rightLowerLeg'),
           leftUpperArm: humanoid.getNormalizedBoneNode('leftUpperArm'),
           rightUpperArm: humanoid.getNormalizedBoneNode('rightUpperArm'),
-        } as Record<keyof Omit<WalkRig, 'baseX'>, THREE.Object3D | null>
+        } as Record<keyof Omit<WalkRig, 'baseX' | 'baseZ' | 'hips' | 'leftFoot' | 'rightFoot'>, THREE.Object3D | null>
         if (Object.values(nodes).every(Boolean)) {
           const baseX = new Map<THREE.Object3D, number>()
-          Object.values(nodes).forEach((n) => baseX.set(n as THREE.Object3D, (n as THREE.Object3D).rotation.x))
-          walkRig = { ...(nodes as Omit<WalkRig, 'baseX'>), baseX }
+          const baseZ = new Map<THREE.Object3D, number>()
+          Object.values(nodes).forEach((n) => {
+            baseX.set(n as THREE.Object3D, (n as THREE.Object3D).rotation.x)
+            baseZ.set(n as THREE.Object3D, (n as THREE.Object3D).rotation.z)
+          })
+          let hips: THREE.Object3D | null = null
+          let leftFoot: THREE.Object3D | null = null
+          let rightFoot: THREE.Object3D | null = null
+          try {
+            hips = humanoid.getNormalizedBoneNode('hips')
+            leftFoot = humanoid.getNormalizedBoneNode('leftFoot')
+            rightFoot = humanoid.getNormalizedBoneNode('rightFoot')
+          } catch {
+            // Optional bones — ignore.
+          }
+          ;[hips, leftFoot, rightFoot].forEach((n) => {
+            if (n) {
+              baseX.set(n, n.rotation.x)
+              baseZ.set(n, n.rotation.z)
+            }
+          })
+          walkRig = {
+            ...(nodes as Omit<WalkRig, 'baseX' | 'baseZ' | 'hips' | 'leftFoot' | 'rightFoot'>),
+            hips,
+            leftFoot,
+            rightFoot,
+            baseX,
+            baseZ,
+          }
         }
       } catch {
         // No walk rig — the model still renders, it just never walks.
@@ -652,51 +726,110 @@ export default function VrmModel({
         if (!three) return
         three.vrm.update(dt)
 
-        // Procedural walk: while the traverse runs, legs and arms swing
-        // in opposition and the hips bob, AND the whole model walks
-        // laterally from one side of the stage to the other (smoothstep
-        // over the full cycle) and stays there. The envelope fades the
-        // limb swing in and out so the cycle starts and ends at the
-        // rest pose — but the lateral position is kept, so the walk is
-        // visible in a screenshot taken after it ends, not just during.
+        // Procedural walk — a sidestep gait solved from the planted
+        // feet (fbtpods solver.py + body.py), not a free swing. The old
+        // code swung the legs forward/back (rotation.x) while the body
+        // travelled sideways, so the legs and the travel disagreed and
+        // the walk read as a slide. Now she faces the camera and steps
+        // sideways to the other side of the stage (4 steps of 0.55 s):
+        // each step one foot lifts (knee bends, thigh lifts forward)
+        // and plants one step length ahead, while the stance foot NEVER
+        // slides (skating_correction) — its thigh angle is solved from
+        // the hip's position over it (asin of the foot-hip offset over
+        // the 0.841 m leg, relative to the rest splay). The hip dips at
+        // double support and rises mid-swing (solve_body lowering), the
+        // pelvis rocks, and the whole body turns part-way toward the
+        // travel direction (HipEstimator's slow-follow heading) and
+        // back. The lateral position is kept after the walk, so she is
+        // visibly standing on the other side.
         const rig = three.walkRig
+        let walkTurn = 0
         if (rig) {
-          const wt = walkRef.current.t
+          const w = walkRef.current
+          const wt = w.t
           if (wt < WALK_DURATION) {
-            walkRef.current.t = wt + dt
-            const phase = (wt / 0.7) * Math.PI * 2
+            w.t = wt + dt
+            const dir = w.toX >= w.fromX ? 1 : -1
+            const stepLen = (w.toX - w.fromX) / 2
+            const stepIdx = Math.min(STEP_COUNT - 1, Math.floor(wt / STEP_DURATION))
+            const u = Math.min(1, (wt - stepIdx * STEP_DURATION) / STEP_DURATION)
+            const leadLeft = dir < 0
+            const steppingLeft = (stepIdx % 2 === 0) === leadLeft
+            if (stepIdx !== w.step) {
+              if (steppingLeft) w.footL += stepLen
+              else w.footR += stepLen
+              w.step = stepIdx
+            }
+            // Traverse first (smoothstep), so the hip position below is
+            // the one the legs are solved from.
+            const uw = Math.min(1, wt / WALK_DURATION)
+            const smooth = uw * uw * (3 - 2 * uw)
+            three.group.position.x = w.fromX + (w.toX - w.fromX) * smooth
+            const hipX = three.group.position.x
             const env = Math.min(1, wt / 0.15) * Math.min(1, (WALK_DURATION - wt) / 0.25)
-            const s = Math.sin(phase)
+            const lift = Math.sin(Math.PI * u)
             const setX = (node: THREE.Object3D, v: number) => {
               node.rotation.x = (rig.baseX.get(node) ?? 0) + v * env
             }
-            // Forward swing is negative rotation.x (legs point down, the
-            // model faces +Z): left leg forward while right arm forward.
-            // The LEFT arm is the reading arm: its swing fades out as
-            // the book rises (last frame's blend — the reading block
-            // below recomputes it), so the book stays steady at chest
-            // height while the legs still walk. The right arm swings on.
-            setX(rig.leftUpperLeg, -0.62 * s)
-            setX(rig.rightUpperLeg, 0.62 * s)
-            setX(rig.leftLowerLeg, 0.34 * Math.max(0, Math.sin(phase + Math.PI / 2)))
-            setX(rig.rightLowerLeg, 0.34 * Math.max(0, Math.sin(phase - Math.PI / 2)))
-            setX(rig.leftUpperArm, 0.45 * s * (1 - readingBlendRef.current))
-            setX(rig.rightUpperArm, -0.45 * s)
-            three.group.position.y = 0.03 * Math.abs(s) * env
-            const u = Math.min(1, wt / WALK_DURATION)
-            const smooth = u * u * (3 - 2 * u)
-            three.group.position.x =
-              walkRef.current.fromX + (walkRef.current.toX - walkRef.current.fromX) * smooth
-          } else if (walkRef.current.t !== Infinity) {
+            const setZ = (node: THREE.Object3D, v: number) => {
+              node.rotation.z = (rig.baseZ.get(node) ?? 0) + v * env
+            }
+            // Solved thigh angle (rotation.z) from a planted foot:
+            // asin of the foot-hip offset over the leg, minus the rest
+            // splay, so the angle is 0 at rest and follows the hip.
+            const clampA = (a: number) => Math.asin(THREE.MathUtils.clamp(a, -0.4, 0.4))
+            const restL = clampA(-HIP_HALF / LEG_LEN)
+            const restR = clampA(HIP_HALF / LEG_LEN)
+            const swingFrom = (steppingLeft ? w.footL : w.footR) - stepLen
+            const swingTo = steppingLeft ? w.footL : w.footR
+            const swingX = swingFrom + (swingTo - swingFrom) * (u * u * (3 - 2 * u))
+            const stanceFootX = steppingLeft ? w.footR : w.footL
+            const stanceRest = steppingLeft ? restR : restL
+            const swingRest = steppingLeft ? restL : restR
+            const stanceAngle = clampA((stanceFootX - hipX) / LEG_LEN) - stanceRest
+            const swingAngle = clampA((swingX - hipX) / LEG_LEN) - swingRest
+            if (steppingLeft) {
+              setZ(rig.leftUpperLeg, swingAngle)
+              setZ(rig.rightUpperLeg, stanceAngle)
+              setX(rig.leftUpperLeg, -THIGH_LIFT * lift)
+              setX(rig.leftLowerLeg, KNEE_SWING * lift)
+              setX(rig.rightLowerLeg, 0)
+              if (rig.leftFoot) rig.leftFoot.rotation.x = (rig.baseX.get(rig.leftFoot) ?? 0) - 0.35 * lift * env
+              if (rig.rightFoot) rig.rightFoot.rotation.x = rig.baseX.get(rig.rightFoot) ?? 0
+            } else {
+              setZ(rig.rightUpperLeg, swingAngle)
+              setZ(rig.leftUpperLeg, stanceAngle)
+              setX(rig.rightUpperLeg, -THIGH_LIFT * lift)
+              setX(rig.rightLowerLeg, KNEE_SWING * lift)
+              setX(rig.leftLowerLeg, 0)
+              if (rig.rightFoot) rig.rightFoot.rotation.x = (rig.baseX.get(rig.rightFoot) ?? 0) - 0.35 * lift * env
+              if (rig.leftFoot) rig.leftFoot.rotation.x = rig.baseX.get(rig.leftFoot) ?? 0
+            }
+            // Arms counter-swing (one cycle per two steps); the LEFT
+            // (reading) arm fades out as the book rises, as before.
+            const armPhase = (wt / (STEP_DURATION * 2)) * Math.PI * 2
+            const armS = Math.sin(armPhase)
+            setX(rig.leftUpperArm, 0.45 * armS * (1 - readingBlendRef.current))
+            setX(rig.rightUpperArm, -0.45 * armS)
+            // Hip: dips at double support, rises mid-swing; pelvis rocks.
+            three.group.position.y = -HIP_BOB * (1 - lift) * env
+            if (rig.hips) setZ(rig.hips, HIP_SWAY * Math.sin((wt / STEP_DURATION) * Math.PI))
+            // Heading: turns part-way toward the travel direction
+            // mid-walk, back to face-front at the ends.
+            walkTurn = WALK_TURN * dir * Math.sin(Math.PI * uw)
+          } else if (w.t !== Infinity) {
             // Traverse finished: restore the rest pose exactly, once —
             // but KEEP the lateral position, so she is visibly standing
             // on the other side of the stage.
-            walkRef.current.t = Infinity
+            w.t = Infinity
             rig.baseX.forEach((base, node) => {
               node.rotation.x = base
             })
+            rig.baseZ.forEach((base, node) => {
+              node.rotation.z = base
+            })
             three.group.position.y = 0
-            three.group.position.x = walkRef.current.toX
+            three.group.position.x = w.toX
           }
         }
 
@@ -733,7 +866,7 @@ export default function VrmModel({
         if (chestNode) {
           chestNode.rotation.x = three.chestBaseRotationX + 0.02 * Math.sin(t * 1.2) * swayAmp
         }
-        three.group.rotation.y = 0.03 * Math.sin(t * 0.5) * swayAmp
+        three.group.rotation.y = walkTurn + 0.03 * Math.sin(t * 0.5) * swayAmp
         if (headNode) {
           let nod = 0
           if (nodT < 0.6) {
