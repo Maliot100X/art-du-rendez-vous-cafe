@@ -3,7 +3,7 @@ import { BookOpen, ChevronDown, ChevronUp, Send, Volume2, VolumeX } from 'lucide
 import { MENU } from '../content'
 import { askBrain } from '../lib/brain'
 import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, speak, stopSpeaking } from '../lib/speech'
-import { getWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
+import { getWalkStatus, resetWalkStatus, subscribeWalkStatus, type WalkStatus } from '../lib/walkStatus'
 
 const VrmModel = lazy(() => import('./VrmModel'))
 
@@ -271,6 +271,11 @@ export function useVitaGuide({
 
   const onReadingEnd = useCallback(() => {
     const pending = pendingOpenRef.current
+    // Fix pass 8: the VRM's reading is over — the walk line returns to
+    // "Vita est prête…". (The walk itself already ended, so the loop
+    // has written idle; this covers the case where the status was
+    // still showing a walk line when the reading finished.)
+    resetWalkStatus()
     if (pending && replyArrivedRef.current) {
       pendingOpenRef.current = null
       onOpenBook(pending)
