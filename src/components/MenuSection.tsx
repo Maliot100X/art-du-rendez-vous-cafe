@@ -122,7 +122,7 @@ export default function MenuSection({
         <div>
           <p className="font-mono text-label uppercase text-amber">La carte</p>
           <h2 className="mt-3 font-display text-display text-bone">
-            Que désirez-<span className="italic text-amber">vous</span> ?
+            Que désirez-<span className="italic text-amber">vous</span>&nbsp;?
           </h2>
         </div>
         <p className="max-w-md text-body text-bone/70">
