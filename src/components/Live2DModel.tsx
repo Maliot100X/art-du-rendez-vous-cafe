@@ -218,12 +218,6 @@ declare global {
   }
 }
 
-/** Last Live2D init failure (module-level, for the retry + diagnostics). */
-let live2dError: string | null = null
-export function getLive2dError(): string | null {
-  return live2dError
-}
-
 const CORE_LOCAL = '/live2d/live2dcubismcore.min.js'
 const CORE_CDN = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
 const MODEL_URL = '/live2d/nekomi/Furry.model3.json'
@@ -603,7 +597,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           if (!warmStage || warmStage.canvas !== canvas) return
           dropWarmStage()
           if (!cancelled) {
-            live2dError = 'WebGL context lost'
             setFailMessage('WebGL context lost')
             setStatus('failed')
           }
@@ -827,7 +820,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // check reads window.__nekomiDebug.error to name the cause
           // (WebGL context limit, missing file, parse failure…).
           const message = err instanceof Error ? err.message : String(err)
-          live2dError = message
           setFailMessage(message)
           window.__nekomiDebug = {
             status: 'failed',
@@ -972,7 +964,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
                   // Fix pass 13: retry MUST clear the warm cache and
                   // do a full cold init — never re-attach a dead stage.
                   dropWarmStage()
-                  live2dError = null
                   setFailMessage(null)
                   if (window.__nekomiDebug) window.__nekomiDebug.error = null
                   setStatus('loading')

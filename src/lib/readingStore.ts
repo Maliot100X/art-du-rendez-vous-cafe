@@ -122,10 +122,6 @@ export function setPendingOpen(catId: string | null): void {
   pendingOpen = catId
 }
 
-export function getReplyArrived(): boolean {
-  return replyArrived
-}
-
 export function setReplyArrived(value: boolean): void {
   replyArrived = value
 }
