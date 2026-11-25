@@ -10,9 +10,10 @@ import { isSpeechMuted, isSpeechSupported, setSpeechMuted, shortenForSpeech, spe
  * The VRM walking guide was removed (user order — the live model was
  * full of bugs). What remains is the guide itself:
  *
- * - Category change → the guide reads the category aloud (2–3 items +
- *   prices, from MENU data, never retyped) and shows the line; the big
- *   book tab opens on that category once the reading ends.
+ * - Category change → the guide shows the category line only (2–3
+ *   items + prices, from MENU data, never retyped). Fix pass 13: no
+ *   reading, no voice, no big-book open on a category tap — a reading
+ *   starts only from "Demander à la barmaid" or an explicit ask.
  * - Item tap → the guide speaks that item ("ajouté à votre commande").
  * - Mini chat: the brain adapter (src/lib/brain.ts) — the LLM brain
  *   when a key is configured and the call succeeds, the offline
@@ -205,7 +206,13 @@ export function useMenuGuide({
     [],
   )
 
-  // Category change → read the category aloud + speak it.
+  // Category change → show the category line only. Fix pass 13: NO
+  // reading, NO voice, NO pending big-book open here — the old effect
+  // auto-started a reading (startReading + speak + pendingOpenRef) on
+  // every category tab select, which raised the "Lecture en cours…"
+  // indicator, spoke, and auto-opened the book without being asked.
+  // Readings start ONLY from "Demander à la barmaid" (askBartender)
+  // or an explicit chat ask — see ask()/askBartender below.
   useEffect(() => {
     if (firstCategoryRef.current) {
       // First mount: greet without reading.
@@ -215,19 +222,7 @@ export function useMenuGuide({
     const text = categoryLine(categoryId)
     if (!text) return
     setLine(text)
-    startReading(categoryId, estimateSeconds(text))
-    // A manual category tap opens the big book on that category once
-    // the reading ends, exactly like "Demander à la barmaid". The
-    // category line IS the reply (no brain call to wait for), so the
-    // pending open is armed at once and the reply flag is set. A later
-    // tap re-arms it for the new category; the old timer never fires
-    // (superseded timers are cleared, and finishReading is
-    // nonce-guarded), so it cannot fire twice. An item tap (+ on a
-    // row) still cancels it — the user is ordering, not reading.
-    pendingOpenRef.current = categoryId
-    replyArrivedRef.current = true
-    if (isSpeechSupported()) speak(text)
-  }, [categoryId, startReading])
+  }, [categoryId])
 
   // Item tap (+ on a row) → speak that item.
   useEffect(() => {

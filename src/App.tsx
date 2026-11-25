@@ -331,7 +331,21 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
  * nonce-guarded so a stale timer cannot clear a newer reading.
  * No walk: she reads from beside the book, in voice only.
  */
-function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: number } | null }) {
+function BookTab({
+  goToCategory,
+  onTargetConsumed,
+}: {
+  goToCategory: { catId: string; nonce: number } | null
+  /**
+   * Fix pass 13: called when the book lands on the category the
+   * goToCategory target asked for — App clears bookTarget there, so a
+   * stale target can never re-fire MenuBook's goTo effect on the next
+   * Livre mount and re-flip the book to the first reading's category.
+   * Fires ONLY on a landing (the threeReady replay in MenuBook
+   * depends on the target still being set until the flip lands).
+   */
+  onTargetConsumed?: () => void
+}) {
   const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() =>
     goToCategory ? { categoryId: goToCategory.catId, nonce: goToCategory.nonce } : null,
   )
@@ -376,12 +390,26 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
 
   // Follow the big book: every flip landing on a category restarts her
   // reading on it (the scroll-open to the first category included).
+  // Fix pass 13: the target + callback live in refs so this
+  // subscription (registered once, on armReadingTimer) never churns —
+  // it always sees the current target without re-subscribing. When
+  // the book lands on the target's category, the target is consumed
+  // (App clears bookTarget): the landing carries the TRUE category,
+  // so from here on the book stays where it landed and the next Livre
+  // mount cannot replay a stale target.
+  const goToCategoryRef = useRef(goToCategory)
+  goToCategoryRef.current = goToCategory
+  const onTargetConsumedRef = useRef(onTargetConsumed)
+  onTargetConsumedRef.current = onTargetConsumed
   useEffect(
     () =>
       onBookCategory((catId) => {
         const nonce = Date.now()
         setReading({ categoryId: catId, nonce })
         armReadingTimer(nonce, 12)
+        if (goToCategoryRef.current && catId === goToCategoryRef.current.catId) {
+          onTargetConsumedRef.current?.()
+        }
       }),
     [armReadingTimer],
   )
@@ -531,6 +559,14 @@ export default function App() {
     setTab('book')
   }, [])
 
+  // Fix pass 13: the book has landed on the requested category — the
+  // target is consumed, so MenuBook's goTo effect can never re-fire
+  // it on a later Livre mount. Stable (no deps) so BookTab's
+  // subscription never churns.
+  const handleTargetConsumed = useCallback(() => {
+    setBookTarget(null)
+  }, [])
+
   return (
     // pb clears the fixed mobile bottom tab bar so the footer (and the
     // last panel content) can scroll fully above it on phones. The bar
@@ -577,7 +613,7 @@ export default function App() {
               fallback={<PanelError label="Le livre" onRetry={() => setPanelNonce((n) => n + 1)} />}
             >
               <Suspense fallback={<PanelLoading label="Le livre s'ouvre…" />}>
-                <BookTab goToCategory={bookTarget} />
+                <BookTab goToCategory={bookTarget} onTargetConsumed={handleTargetConsumed} />
               </Suspense>
             </ErrorBoundary>
           </TabSurface>
