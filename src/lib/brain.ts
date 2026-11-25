@@ -1,4 +1,4 @@
-import { CAFE, MENU, VISIT } from '../content'
+import { CAFE, CHARACTER, MENU, VISIT } from '../content'
 import { botReply, expressionForReply, type BotReply } from './agentBrain'
 
 /**
@@ -98,11 +98,14 @@ function hoursSummary(): string {
   return VISIT.hours.map((h) => `${h.days} ${h.time}`).join(', ')
 }
 
-/** System prompt — built from the site's own data, never retyped. */
+/** System prompt — built from the site's own data, never retyped. The
+    persona comes from the character card (src/content.ts CHARACTER):
+    Vita in 3D, Nekomi in Live2D — one and the same barmaid. */
 export function brainSystemPrompt(): string {
   return [
-    'Tu es Nekomi, l\u2019agent en direct de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.',
-    'Tu parles français, avec chaleur et concision — une à trois phrases par réponse.',
+    `Tu es ${CHARACTER.name}, ${CHARACTER.role}, un café-bar à Bruxelles. En forme Live2D, on t’appelle ${CHARACTER.live2dName} — c’est la même personne.`,
+    CHARACTER.personality,
+    CHARACTER.scenario,
     `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Cafe Artistes »).`,
     `Horaires : ${hoursSummary()}.`,
     'La carte (noms et prix exacts, ne jamais inventer un prix) :',

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import * as THREE from 'three';
 import { useDrag } from '@use-gesture/react';
 import useDimensions from 'react-cool-dimensions';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Volume2 } from 'lucide-react';
 import { BOOK, CAFE, MENU, VISIT } from '../content';
 import { gsap, GSAP_EASE_SILK, ScrollTrigger } from '../lib/motion';
 import { useReducedMotion } from '../lib/scroll';
@@ -140,6 +140,7 @@ function headerStackBottom(): number {
 
 export default function MenuBook({
   goToCategory,
+  onAskBartender,
 }: {
   /**
    * External flip request (the menu Vita's "Feuilleter le livre"):
@@ -147,6 +148,11 @@ export default function MenuBook({
    * category fire again.
    */
   goToCategory?: { catId: string; nonce: number } | null
+  /**
+   * "Demander à la barmaid" button (Livre tab): reads the current page
+   * aloud. Only rendered when provided — the book stays usable without it.
+   */
+  onAskBartender?: (catId: string) => void
 }) {
   const reducedMotion = useReducedMotion();
   const [flipped, setFlipped] = useState(() => lastFlipped);
@@ -671,6 +677,15 @@ export default function MenuBook({
           share one viewport instead of the tab scrolling with dead dark
           space above and below the book. */}
       <div className="mt-4 flex flex-col items-center gap-3 md:mt-8 md:gap-4" data-reveal style={{ ['--d' as string]: '90ms' }}>
+        {category && onAskBartender && (
+          <button
+            type="button"
+            onClick={() => onAskBartender(category.id)}
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-amber px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.03]"
+          >
+            <Volume2 size={15} /> Demander à la barmaid — elle lit cette page
+          </button>
+        )}
         <div className="flex items-center gap-4">
           <button
             type="button"

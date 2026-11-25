@@ -13,7 +13,9 @@ import { runWhenIdle, shouldDeferHeavyPreload } from './lib/perf'
 import { useReveal } from './lib/useReveal'
 import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
 import { TAB_THEMES } from './lib/tabThemes'
-import MenuVita, { MenuVitaPanel, MenuVitaStage, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
+import MenuVita, { MenuVitaPanel, MenuVitaStage, estimateSeconds, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
+import { askBrain } from './lib/brain'
+import { isSpeechSupported, shortenForSpeech, speak } from './lib/speech'
 import { MENU } from './content'
 
 // Below-fold / heavy scenes load in their own chunks so the first paint
@@ -333,7 +335,7 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
  * No walk: she stands beside the book.
  */
 function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: number } | null }) {
-  const [reading, setReading] = useState<{ categoryId: string; nonce: number } | null>(() =>
+  const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() =>
     goToCategory ? { categoryId: goToCategory.catId, nonce: goToCategory.nonce } : null,
   )
   const [isDesktop, setIsDesktop] = useState(
@@ -354,6 +356,22 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
     [],
   )
 
+  // "Demander à la barmaid" (Livre tab): she is already beside the
+  // book and it is already open on the page, so the button reads this
+  // page aloud — the same brain path as the Menu tab's button
+  // (askBrain → LLM when live, offline brain otherwise). The reading
+  // starts at once on the hand book and is re-timed on the spoken reply.
+  const askBartender = useCallback((catId: string) => {
+    const cat = MENU.find((c) => c.id === catId)
+    if (!cat) return
+    setReading({ categoryId: catId, nonce: Date.now(), seconds: 12 })
+    const request = `Lis-moi la page ${cat.label} à voix haute`
+    void askBrain(request).then(({ reply }) => {
+      setReading({ categoryId: catId, nonce: Date.now(), seconds: estimateSeconds(shortenForSpeech(reply.text)) })
+      if (isSpeechSupported()) speak(reply.text)
+    })
+  }, [])
+
   const vita = (
     <Suspense
       fallback={
@@ -367,7 +385,7 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
         withBook
         readingTick={reading?.nonce ?? 0}
         readingCategory={reading?.categoryId}
-        readingSeconds={12}
+        readingSeconds={reading?.seconds ?? 12}
       />
     </Suspense>
   )
@@ -379,7 +397,7 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
           <div className="sticky top-[132px]">{vita}</div>
         </aside>
         <div className="min-w-0">
-          <MenuBook goToCategory={goToCategory} />
+          <MenuBook goToCategory={goToCategory} onAskBartender={askBartender} />
         </div>
       </div>
     )

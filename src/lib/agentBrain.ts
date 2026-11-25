@@ -116,7 +116,8 @@ function botReplyInner(message: string): BotReply {
         actions: hits.map((h) => ({ label: `Ajouter ${h.name}`, name: h.name, price: h.price })),
       }
     }
-    return { text: 'Dites-moi de quelle boisson vous parlez et je vous donne son prix — toute la carte est affichée plus haut sur la page.' }
+    // No named drink: fall through to the category read below instead
+    // of asking the visitor to repeat themselves.
   }
 
   const hits = findItems(message)
@@ -128,7 +129,16 @@ function botReplyInner(message: string): BotReply {
     }
   }
   if (/(vin|biere|aperitif|liqueur|alcool|froid|chaud)/.test(n)) {
-    const cat = MENU.find((c) => n.includes(norm(c.label).split(' ')[0].slice(0, 5)))
+    // Match on the category label's distinctive word, not the shared
+    // "boissons" prefix: "froides" -> Boissons Froides, "chaudes" ->
+    // Boissons Chaudes. The old slice(0,5) on the first word matched
+    // "boiss" for both and always returned Chaudes, the first in MENU.
+    const cat = MENU.find((c) => {
+      const words = norm(c.label)
+        .split(/\s+/)
+        .filter((w) => w !== 'boissons')
+      return words.some((w) => w.length >= 4 && n.includes(w))
+    })
     if (cat) {
       const sample = cat.items.slice(0, 3).map((i) => `${i.name} ${i.price}`).join(', ')
       return { text: `Côté ${cat.label.toLowerCase()} : ${sample}… et bien d’autres sur la carte. Dites-moi ce qui vous tente.` }

@@ -63,7 +63,7 @@ function findCategoryForText(text: string): string | null {
   return null
 }
 
-function categoryLine(catId: string): string {
+export function categoryLine(catId: string): string {
   const cat = MENU.find((c) => c.id === catId)
   if (!cat) return ''
   const picks = cat.items.slice(0, 3)
@@ -71,7 +71,7 @@ function categoryLine(catId: string): string {
 }
 
 /** Rough spoken duration of a line, for the hand-book reading timer. */
-function estimateSeconds(text: string): number {
+export function estimateSeconds(text: string): number {
   const words = text.split(/\s+/).filter(Boolean).length
   return Math.min(30, Math.max(6, Math.round(words / 2.4)))
 }
@@ -102,6 +102,14 @@ export interface VitaGuide {
   toggleCollapse: () => void
   categoryId: string
   ask: (e: FormEvent) => void
+  /**
+   * "Demander à la barmaid" — the button the visitor presses: she walks
+   * to the book, reads the current category aloud and, once she has
+   * finished, opens the big book on that page. Runs through the same
+   * brain path as the chat (askBrain → LLM when live, offline brain
+   * otherwise): the brain's reply is the spoken line.
+   */
+  askBartender: () => void
   openBook: () => void
   /** True only after the LLM brain has actually answered once — the
       footnote below must not claim the brain is live before that. */
@@ -223,6 +231,33 @@ export function useVitaGuide({
     })
   }
 
+  // "Demander à la barmaid" — the button, not a typed question: she
+  // walks to the book and reads the current category aloud, then the
+  // big book opens on that page once she has finished (onReadingEnd).
+  // The line shows at once from the menu data; the brain's reply
+  // (askBrain — LLM when live, offline brain otherwise) replaces it,
+  // re-times the reading and is the one spoken line — speak() cancels,
+  // so the immediate line is shown, never spoken twice.
+  const askBartender = () => {
+    const cat = MENU.find((c) => c.id === categoryId)
+    if (!cat) return
+    const text = categoryLine(categoryId)
+    replyArrivedRef.current = false
+    setWalkTick((t) => t + 1)
+    setLine(text)
+    setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(text) })
+    pendingOpenRef.current = categoryId
+    const request = `Lis-moi la page ${cat.label} à voix haute`
+    void askBrain(request).then(({ reply, source }) => {
+      if (source === 'llm') setBrainLive(true)
+      if (pendingOpenRef.current !== categoryId) return
+      replyArrivedRef.current = true
+      setLine(reply.text)
+      setReading({ categoryId, nonce: Date.now(), seconds: estimateSeconds(shortenForSpeech(reply.text)) })
+      if (isSpeechSupported()) speak(reply.text)
+    })
+  }
+
   const onReadingEnd = useCallback(() => {
     const pending = pendingOpenRef.current
     if (pending && replyArrivedRef.current) {
@@ -242,6 +277,7 @@ export function useVitaGuide({
     toggleCollapse,
     categoryId,
     ask,
+    askBartender,
     openBook,
     brainLive,
     reading,
@@ -311,13 +347,22 @@ export function MenuVitaPanel({ guide }: { guide: VitaGuide }) {
       </p>
 
       <div className="px-4 pb-4 pt-3">
-        <button
-          type="button"
-          onClick={guide.openBook}
-          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-bone px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.03]"
-        >
-          <BookOpen size={15} /> Feuilleter le livre
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={guide.askBartender}
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-amber px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.03]"
+          >
+            <Volume2 size={15} /> Demander à la barmaid
+          </button>
+          <button
+            type="button"
+            onClick={guide.openBook}
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line px-5 py-2.5 text-sm font-bold text-bone transition-colors duration-300 hover:border-amber hover:text-amber"
+          >
+            <BookOpen size={15} /> Feuilleter le livre
+          </button>
+        </div>
         <form className="mt-3 flex items-center gap-2" onSubmit={guide.ask}>
           <label htmlFor="menu-vita-input" className="sr-only">
             Demander à Vita
