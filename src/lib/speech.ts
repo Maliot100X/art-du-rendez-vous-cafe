@@ -37,6 +37,20 @@
  * start later, the clock restarts from now (re-sync to the real
  * audio) and switches back to engine mode. The kill-watchdog is
  * gone: it can never kill an open-loop run.
+ *
+ * Fix pass 15 — the event kill fix 14 missed: the no-audio browser
+ * does NOT sit in the fix-13 shape (speaking false, no events). It
+ * raises `speaking` for the queued utterance, so the poll starts the
+ * clock in engine mode, then rejects the utterance at ~100-150 ms
+ * (onerror + onend, no audio ever played) — and fix 14's
+ * `endIfSpoken` ended the run on that event because visemeStarted
+ * was already true. One ~50 ms blip, then a dead mouth for the whole
+ * reply (scripts/fix15-mouth-probe.mjs scenarios E/E2 reproduce it).
+ * An event now ends a run only after >= 1000 ms of real audio since
+ * onstart; anything earlier falls back to open-loop. Plus a
+ * stuck-engine grace in the poll: beats done + engine still claiming
+ * speaking 2 s later ends the run instead of spinning the tick
+ * forever.
  */
 
 import { avatarBridge, smoothMouthOpen } from './avatarBridge'
@@ -64,6 +78,30 @@ let openLoop = false
     visible lead); only when audio truly never starts does open-loop
     take over. */
 const OPEN_LOOP_AFTER_MS = 800
+/** Fix pass 15: an utterance event may end a run only after real audio
+    has played for at least this long since onstart fired. Chrome
+    raises `speechSynthesis.speaking` for a merely QUEUED utterance,
+    so the poll can start the clock in engine mode before any audio
+    plays — and a no-voice / no-audio engine then rejects the utterance
+    almost at once (onerror + onend at ~100-150 ms). Ending the run on
+    that event killed the mouth for the whole reply (probe E/E2:
+    one ~50 ms blip, then dead). `onstart` firing is the witness that
+    audio really started, and even then only a meaningful stretch of
+    it counts: a sub-second start-then-error is a failed start, not
+    speech, and falls back to open-loop instead. */
+const MIN_AUDIBLE_MS = 1000
+/** Fix pass 15: if the beats are done but the engine still claims
+    speaking this long later (utterance queued forever, no audio, no
+    event), end the run instead of spinning the tick forever. The
+    mouth is already 0 at that point, so nothing visible changes. */
+const STUCK_ENGINE_GRACE_MS = 2000
+/** Fix pass 15: performance.now() of the last utter.onstart (null
+    until one fires). Presence proves the engine really started;
+    absence proves nothing (Android often never fires it). */
+let engineStartAtMs: number | null = null
+/** Fix pass 15: performance.now() when the beats first reported done
+    while the engine still claimed speaking (null otherwise). */
+let beatsDoneAtMs: number | null = null
 /** Fix pass 10: hold the utterance so Chrome cannot garbage-collect
     it mid-speech (a known cause of dropped `onend`). */
 let utterRef: SpeechSynthesisUtterance | null = null
@@ -147,9 +185,21 @@ function tickSpeaking() {
     // engine flag may never move); in engine mode keep the existing
     // end (beats done AND the engine quiet). The poll — not
     // `onend` — is what closes the mouth on Android.
-    if (frame.done && (openLoop || !engineSpeaking)) {
-      endSpeaking()
-      return
+    // Fix pass 15: if the beats are done but the engine still claims
+    // speaking, it is stuck (queued forever, no audio, no event) —
+    // end after the grace instead of spinning the tick forever.
+    if (frame.done) {
+      if (openLoop || !engineSpeaking) {
+        endSpeaking()
+        return
+      }
+      if (beatsDoneAtMs === null) beatsDoneAtMs = now
+      else if (now - beatsDoneAtMs >= STUCK_ENGINE_GRACE_MS) {
+        endSpeaking()
+        return
+      }
+    } else {
+      beatsDoneAtMs = null
     }
   }
   // NOTE: no kill-watchdog here any more (fix pass 13). Before the
@@ -179,6 +229,8 @@ function endSpeaking() {
   viseme = null
   visemeStarted = false
   openLoop = false
+  engineStartAtMs = null
+  beatsDoneAtMs = null
   utterRef = null
 }
 
@@ -211,9 +263,17 @@ export function speak(text: string): void {
   viseme = new SpeechViseme(short, utter.rate)
   visemeStarted = false
   openLoop = false
+  engineStartAtMs = null
+  beatsDoneAtMs = null
   speakQueuedAt = performance.now()
   utterRef = utter
   utter.onstart = () => {
+    // Fix pass 15: onstart firing is the witness that the engine
+    // really started playing audio (its absence proves nothing —
+    // Android often never fires it — but its presence is reliable).
+    // Recorded before the branches below, so endIfSpoken can tell a
+    // real start from a merely queued utterance.
+    engineStartAtMs = performance.now()
     // Opportunistic start — the poll in tickSpeaking() is the real
     // trigger (Android often never fires this).
     if (viseme && !visemeStarted) {
@@ -248,8 +308,27 @@ export function speak(text: string): void {
   // existed. Only an engine that really spoke may end the run from
   // its event; a never-started / open-loop run is ended by the poll
   // in tickSpeaking() when its beats are done.
+  // Fix pass 15: the fix-14 guard (`visemeStarted && !openLoop`) was
+  // not enough. Chrome raises `speechSynthesis.speaking` for a
+  // merely QUEUED utterance, so the poll starts the clock in engine
+  // mode before any audio plays — and a no-voice engine then rejects
+  // the utterance at ~100-150 ms. The event arrived with
+  // visemeStarted true and openLoop false, so the run died ~150 ms
+  // in (probe E: one ~50 ms blip, then dead for the whole reply).
+  // An event may therefore end a run only after real audio played
+  // for at least MIN_AUDIBLE_MS since onstart; anything earlier is a
+  // failed start, and the run falls back to open-loop (the clock
+  // keeps its start time — only the end rule changes) so the mouth
+  // still runs the beats. If onstart never fired at all, no audible
+  // time can have elapsed, so the same fallback applies — the poll
+  // ends the run when the beats are done.
   const endIfSpoken = () => {
-    if (visemeStarted && !openLoop) endSpeaking()
+    const now = performance.now()
+    if (engineStartAtMs !== null && now - engineStartAtMs >= MIN_AUDIBLE_MS) {
+      endSpeaking()
+      return
+    }
+    if (visemeStarted && !openLoop) openLoop = true
   }
   utter.onend = endIfSpoken
   utter.onerror = endIfSpoken
