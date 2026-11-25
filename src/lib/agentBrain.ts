@@ -1,4 +1,4 @@
-import { AGENT, MENU, CAFE } from '../content'
+import { MENU, CAFE } from '../content'
 import type { AvatarExpression } from './avatarBridge'
 
 /**
@@ -201,4 +201,3 @@ export function orderTotal(lines: { price: string }[]): string {
 }
 
 export const HOURS_TEXT = 'Horaires — à confirmer'
-export const AGENT_WELCOME = AGENT.chatWelcome

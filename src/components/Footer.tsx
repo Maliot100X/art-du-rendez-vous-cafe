@@ -160,6 +160,7 @@ export default function Footer() {
             Retour en haut ↑
           </button>
         </div>
+        <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.14em] text-mist/70">{FOOTER.animCredit}</p>
         <p className="sr-only">{CAFE.name} {CAFE.suffix}</p>
       </div>
     </footer>

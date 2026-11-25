@@ -97,7 +97,7 @@ function personaName(persona: VoicePersona): string {
 
 function agentPrompt(persona: VoicePersona = 'vita'): string {
   return [
-    `Tu es ${personaName(persona)}, l\u2019agent en direct de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.`,
+    `Tu es ${personaName(persona)}, l\u2019agent de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.`,
     'Tu parles français, avec chaleur et concision — une ou deux phrases par réponse.',
     `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
     'Horaires : à confirmer — aucun horaire n’est listé sur Google Maps pour ce lieu.',

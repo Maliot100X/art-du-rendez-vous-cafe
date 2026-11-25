@@ -75,7 +75,7 @@ export const TAB_THEMES: Record<TabId, TabTheme> = {
   },
   agent: {
     index: '07',
-    tagline: 'Nekomi & Vita · Chat en direct',
+    tagline: 'Nekomi & Vita · Chat',
     accent: '#9d8bd4',
     glow: 'rgba(157, 139, 212, 0.18)',
     glowPosition: '85% 8%',

@@ -340,7 +340,7 @@ export const VISIT = {
 export const CHARACTER = {
   name: 'Vita',
   live2dName: 'Nekomi',
-  role: 'la barmaid en direct de l’Art du Rendez-Vous',
+  role: 'la barmaid de l’Art du Rendez-Vous',
   description:
     'La barmaid du café : elle connaît toute la carte par cœur, marche vers la catégorie choisie, ouvre son livre et lit les prix à voix haute.',
   personality:
@@ -368,8 +368,6 @@ export const AGENT = {
     'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
   chatPlaceholder: 'Écrivez ici… ex. « un café et un Aperol Spritz »',
   chatSend: 'Envoyer',
-  chatWelcome:
-    "Bonjour ! Je suis Nekomi, l’agent de l’Art du Rendez-Vous. Dites-moi ce qui vous ferait plaisir — je connais toute la carte et je peux préparer votre commande.",
   chatSuggestions: ['Un café, s’il vous plaît', 'Qu’est-ce que vous conseillez en apéritif ?', 'Vos horaires ?', 'Je veux commander'],
   voiceTitle: 'Appel vocal',
   voiceCta: 'Parler à voix haute',
@@ -439,6 +437,10 @@ export const FOOTER = {
   ],
   legal: '© 2026 Art du Rendez-Vous — Café · Bruxelles',
   mapsLine: 'Rue de Malines 21, 1000 Bruxelles, Belgium',
+  // Fix pass 11 (VRMA): the VRM animation clips are CC0 — the
+  // Quaternius Universal Animation Library credit, rendered small in
+  // the footer (see Footer.tsx).
+  animCredit: 'Animations : Universal Animation Library par Quaternius (CC0 1.0)',
 } as const;
 
 // Live-agent connection config. Keys are read from environment variables only.
