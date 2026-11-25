@@ -139,10 +139,16 @@ export function subscribeLive2dProgress(cb: (p: number, label: string) => void):
 }
 
 async function preloadLive2dOnce(): Promise<void> {
-  setLive2dProgress(0, 'Moteur d’affichage…')
+  // Fix pass 5: the Core MUST load BEFORE pixi-live2d-display/cubism4
+  // evaluates — that module throws at import time if
+  // window.Live2DCubismCore is undefined, and an ES-module evaluation
+  // failure is cached for the page lifetime, so every later mount and
+  // every "Réessayer" re-imported the dead module and failed instantly
+  // (the poisoned-module bug). The old order imported cubism4 first.
+  setLive2dProgress(0, 'Cœur Live2D…')
+  await ensureCore() // Core global must exist BEFORE cubism4 evaluates
+  setLive2dProgress(8, 'Moteur d’affichage…')
   await Promise.all([import('pixi.js'), import('pixi-live2d-display/cubism4')])
-  setLive2dProgress(8, 'Cœur Live2D…')
-  await ensureCore()
   setLive2dProgress(12, 'Modèle Nekomi…')
   const settingsRes = await fetch(MODEL_URL)
   if (!settingsRes.ok) throw new Error(`Live2D settings fetch failed: ${settingsRes.status}`)
@@ -352,7 +358,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
             param3: window.__nekomiDebug?.param3 ?? -1,
             expressionOk: window.__nekomiDebug?.expressionOk ?? null,
-            error: window.__nekomiDebug?.error ?? null,
+            // A successful fit means no error — never carry a stale
+            // failure forward into the ready diagnostic (fix pass 5).
+            error: null,
           }
         }
         fitRef.current = fit
@@ -582,6 +590,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
                 type="button"
                 onClick={() => {
                   live2dError = null
+                  if (window.__nekomiDebug) window.__nekomiDebug.error = null
                   setStatus('loading')
                   setRetryTick((t) => t + 1)
                 }}

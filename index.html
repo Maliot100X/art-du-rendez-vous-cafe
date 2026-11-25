@@ -18,6 +18,10 @@
     <meta property="og:type" content="website" />
     <link rel="preload" as="image" href="/images/exterior.jpg" fetchpriority="high" />
     <title>ART DU RENDEZ-VOUS — CAFÉ · Bruxelles</title>
+    <!-- Fix pass 5: Cubism Core global BEFORE any module can evaluate —
+      pixi-live2d-display/cubism4 throws at import time without it, and
+      a failed module evaluation is cached for the page lifetime. -->
+    <script src="/live2d/live2dcubismcore.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
