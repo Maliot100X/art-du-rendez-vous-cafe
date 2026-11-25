@@ -15,7 +15,7 @@ import { currentTab, onTabChange, setTab, TABS, type TabId } from './lib/tabs'
 import { TAB_THEMES } from './lib/tabThemes'
 import MenuVita, { MenuVitaPanel, MenuVitaStage, estimateSeconds, useVitaGuide, type MenuVitaItemEvent } from './components/MenuVita'
 import { askBrain } from './lib/brain'
-import { isSpeechSupported, shortenForSpeech, speak } from './lib/speech'
+import { isSpeechSupported, shortenForSpeech, speak, stopSpeaking } from './lib/speech'
 import { MENU } from './content'
 
 // Below-fold / heavy scenes load in their own chunks so the first paint
@@ -390,11 +390,43 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
     </Suspense>
   )
 
+  // Fix pass 5: the Livre tab had no feedback surface — a tap on
+  // "Demander à la barmaid" produced no verifiable UI. While a
+  // reading is active, show what she is reading and a stop control.
+  const readingCategoryLabel = reading
+    ? (MENU.find((c) => c.id === reading.categoryId)?.label ?? '')
+    : ''
+  const readingPanel = reading ? (
+    <div
+      className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-line bg-ink-2 px-4 py-3"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="min-w-0 truncate text-sm text-bone">
+        <span className="live-dot mr-2 inline-block h-2 w-2 rounded-full bg-amber" aria-hidden />
+        Lecture en cours…{readingCategoryLabel ? ` · ${readingCategoryLabel}` : ''}
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          stopSpeaking()
+          setReading(null)
+        }}
+        className="shrink-0 rounded-full border border-line bg-ink px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-bone transition-colors hover:border-bone/50"
+      >
+        Couper la voix
+      </button>
+    </div>
+  ) : null
+
   if (isDesktop) {
     return (
       <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[380px_1fr]">
         <aside className="min-w-0 pb-16 pl-4 pt-16 sm:pl-6 sm:pt-24 md:pt-36">
-          <div className="sticky top-[132px]">{vita}</div>
+          <div className="sticky top-[132px]">
+            {vita}
+            {readingPanel}
+          </div>
         </aside>
         <div className="min-w-0">
           <MenuBook goToCategory={goToCategory} onAskBartender={askBartender} />
@@ -405,8 +437,11 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
 
   return (
     <div className="mx-auto max-w-[1400px]">
-      <div className="px-4 pt-10 sm:px-6">{vita}</div>
-      <MenuBook goToCategory={goToCategory} />
+      <div className="px-4 pt-10 sm:px-6">
+        {vita}
+        {readingPanel}
+      </div>
+      <MenuBook goToCategory={goToCategory} onAskBartender={askBartender} />
     </div>
   )
 }
