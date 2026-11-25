@@ -39,6 +39,18 @@ const Live2DModel = lazyWithRetry(() => import('./Live2DModel'))
  */
 let lastChatMessages: ChatMsg[] | null = null
 
+/**
+ * Fix pass 13: the book-reaction dedupe lives at module level, next to
+ * lastChatMessages — NOT in a per-mount ref. The old lastBookCatRef
+ * reset on every Agent remount, so the mount replay
+ * (getLastBookCategory() → handleCategory) re-posted the last emitted
+ * category on every return to AGENT (count grew 1→2→4). A module-level
+ * value outlives the tab-shell unmount, so each consecutive category
+ * posts at most once per page lifetime. A full page reload still
+ * resets it (and the chat).
+ */
+let lastPostedBookCat: string | null = null
+
 interface ChatMsg {
   role: 'user' | 'bot'
   text: string
@@ -101,7 +113,6 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const levelRef = useRef<HTMLDivElement>(null)
   const voiceAgentRef = useRef<DeepgramVoiceAgent | null>(null)
   const bookTimerRef = useRef<number | null>(null)
-  const lastBookCatRef = useRef<string | null>(null)
 
   // This section lazy-mounts at the bottom of the page: re-measure every
   // ScrollTrigger (Visit's were created before this section existed).
@@ -202,13 +213,17 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   // the visitor is not typing or on a voice call — never over the user.
   useEffect(() => {
     const handleCategory = (catId: string) => {
-      if (catId === lastBookCatRef.current) return
+      // Fix pass 13: module-level dedupe (lastPostedBookCat) — checked
+      // here AND set inside the timeout just before posting, so the
+      // mount replay of a flip that happened while Agent was unmounted
+      // posts at most once per page lifetime.
+      if (catId === lastPostedBookCat) return
       if (bookTimerRef.current !== null) window.clearTimeout(bookTimerRef.current)
       bookTimerRef.current = window.setTimeout(() => {
         bookTimerRef.current = null
         const cat = MENU.find((c) => c.id === catId)
         if (!cat) return
-        lastBookCatRef.current = catId
+        lastPostedBookCat = catId
         const picks = cat.items.slice(0, 3)
         // Fix pass 11: blurb dropped — with it, the message ran long
         // enough to spill below the fold of the chat list and the last
