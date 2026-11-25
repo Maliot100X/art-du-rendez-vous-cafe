@@ -72,8 +72,13 @@ export default function Atmosphere() {
         const start = i / N
         const end = (i + 1) / N
         const local = range(p, start, end)
-        // Fade in over the first 8% of the chapter, out over the last 8%.
-        const opacity = clamp(local / 0.08) * (1 - clamp((local - 0.92) / 0.08))
+        // Fade in over the first 8% of the chapter, out over the last 8% —
+        // except the first chapter, which starts fully visible at p = 0.
+        // (Before, chapter 0 faded in from opacity 0, so the section
+        // opened on a large black area until the visitor had scrolled
+        // through the first 8% of the pinned span.)
+        const fadeIn = i === 0 ? 1 : clamp(local / 0.08)
+        const opacity = fadeIn * (1 - clamp((local - 0.92) / 0.08))
         const img = layer.querySelector('img')
         if (img) {
           const e = easeOutCubic(local)
@@ -97,7 +102,7 @@ export default function Atmosphere() {
 
   return (
     <section id="ambiance" ref={sectionRef} className="relative" style={{ height: '420svh' }}>
-      <div className="sticky top-0 h-svh overflow-hidden">
+      <div className="sticky top-0 h-svh overflow-hidden bg-ink-2">
         {/* Layers */}
         {ATMOSPHERE.chapters.map((chapter, i) => (
           <div
@@ -112,13 +117,13 @@ export default function Atmosphere() {
             <img
               src={chapter.image}
               alt={chapter.imageAlt}
-              loading={i === 0 ? 'eager' : 'lazy'}
+              loading="eager"
               className="h-full w-full object-cover will-change-transform"
             />
             <div
               className="absolute inset-0"
               aria-hidden="true"
-              style={{ background: 'linear-gradient(180deg, rgba(13,10,8,0.55), transparent 30%, transparent 55%, rgba(13,10,8,0.88))' }}
+              style={{ background: 'linear-gradient(180deg, rgba(13,10,8,0.34), transparent 30%, transparent 55%, rgba(13,10,8,0.68))' }}
             />
           </div>
         ))}
