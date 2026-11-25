@@ -38,6 +38,52 @@ type Form = 'human' | 'furry'
 let lastHenshinForm: Form = 'human'
 
 /**
+ * Fix pass 13, bug 3: the parsed Live2D stage survives an Agent remount.
+ * The tab shell unmounts Live2DModel on every tab leave, and the old
+ * cleanup destroyed the PIXI Application + parsed model, so every
+ * return re-ran Live2DModel.from() (fetch + .moc3 parse + texture
+ * upload) behind a ~10–15 s placeholder. The prewarm only warms the
+ * HTTP cache, not the parsed model. This module-level cache keeps the
+ * app, the parsed model, the canvas and the bridge subscription alive
+ * across unmounts: unmount only stops the ticker and detaches the
+ * pointer listener; remount re-appends the SAME canvas, resizes,
+ * re-fits, restarts the ticker and is 'ready' immediately.
+ */
+type WarmStage = {
+  app: import('pixi.js').Application
+  model: Live2DModelType
+  canvas: HTMLCanvasElement
+  unsubscribe: () => void
+}
+let warmStage: WarmStage | null = null
+
+/**
+ * Destroy the cached stage (if any) and drop the cache — the next
+ * mount does a full cold init. Used by the "Réessayer" path and by
+ * the webglcontextlost handler; NEVER called on a plain unmount.
+ */
+function dropWarmStage(): void {
+  const stage = warmStage
+  warmStage = null
+  if (!stage) return
+  try {
+    stage.unsubscribe()
+  } catch {
+    // Subscription already gone — nothing to free.
+  }
+  try {
+    stage.model.destroy()
+  } catch {
+    // Already destroyed — nothing to free.
+  }
+  try {
+    stage.app.destroy(true, { children: true })
+  } catch {
+    // Already destroyed — nothing to free.
+  }
+}
+
+/**
  * FACE BAND — measured from the real .moc3 with the Cubism Core
  * (Node + live2dcubismcore.min.js, /tmp/measure-nekomi-parts.js), NOT
  * guessed. pixi-live2d-display's getBounds() returns the WHOLE canvas
@@ -274,9 +320,20 @@ async function ensureCore(): Promise<void> {
 export default function Live2DModel({ bridge = avatarBridge }: { bridge?: AvatarBridge }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const modelRef = useRef<Live2DModelType | null>(null)
+  /** Fix pass 13: the PIXI Application, read by the component-level
+      fit() so both the cold init and the warm remount use it. */
+  const appRef = useRef<import('pixi.js').Application | null>(null)
+  /** The container the pointermove listener is currently attached to
+      (captured at attach time — containerRef may already be detached
+      when the unmount cleanup runs, so it cannot be trusted there). */
+  const pointerContainerRef = useRef<HTMLDivElement | null>(null)
   const formRef = useRef<Form>(lastHenshinForm)
   const fitRef = useRef<(() => void) | null>(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  // Fix pass 13: initialise from the warm cache — a return to AGENT
+  // with a live cached stage never shows the loading placeholder.
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>(() =>
+    warmStage ? 'ready' : 'loading',
+  )
   /** The init failure message, shown verbatim on the failed placeholder
       (fix pass 6) so the next check can read the cause without a console. */
   const [failMessage, setFailMessage] = useState<string | null>(null)
@@ -307,6 +364,83 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     [observe],
   )
 
+  // Fix pass 13: fit lives at component level and reads only refs
+  // (containerRef / modelRef / appRef), so the cold init path and the
+  // warm remount path use the same fit. It used to close over the
+  // init-local `app` and `container`, which made a warm remount
+  // impossible (fix pass 6's dead-zone guard stays: it no-ops until
+  // the model exists).
+  const fit = useCallback(() => {
+    const m = modelRef.current
+    const app = appRef.current
+    const container = containerRef.current
+    if (!m || !app || !container) return
+    const w = container.clientWidth
+    const h = container.clientHeight
+    if (w === 0 || h === 0) return
+    app.renderer.resize(w, h)
+    // Frame the FACE band (see FACE_TOP/FACE_BOTTOM above), not the
+    // top of the bounds: getBounds() is the whole canvas rect, so
+    // the window is placed by measured canvas fractions. A
+    // horizontal guard keeps the head inside narrow stages.
+    // Fix pass 11: fit from the TALLER form — in furry form the
+    // window starts at FURRY_TOP (canvas top) instead of
+    // FACE_TOP, because the ears rise above the human hair top
+    // and the old 0.02 window clipped their tips (see the FACE
+    // BAND note above). The scale drops slightly to hold the
+    // taller window; eyes/mouth move by only a few px.
+    m.scale.set(1)
+    m.position.set(0, 0)
+    const b = m.getBounds()
+    if (!b || b.height === 0) {
+      const scale = (h * 0.98) / m.height
+      m.scale.set(scale)
+      m.position.set(w / 2, h * 0.55)
+      return
+    }
+    const top = formRef.current === 'furry' ? FURRY_TOP : FACE_TOP
+    const windowH = FACE_BOTTOM - top
+    const s = Math.min((h * 0.98) / (b.height * windowH), (w * 0.96) / (b.width * HEAD_WIDTH_FRAC))
+    m.scale.set(s)
+    m.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * top) * s)
+    // Debug projection (verifiable without a real browser): where
+    // the eyes and mouth land in stage pixels, from the measured
+    // fractions and the actual scale/position just applied.
+    const stageY = (fracFromTop: number) => h * 0.02 + (fracFromTop - top) * b.height * s
+    window.__nekomiDebug = {
+      status: 'ready',
+      form: formRef.current,
+      stageW: w,
+      stageH: h,
+      bounds: { x: b.x, y: b.y, width: b.width, height: b.height },
+      scale: s,
+      eyeScreenPx: [Math.round(w / 2), Math.round(stageY(0.41))],
+      mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
+      param3: window.__nekomiDebug?.param3 ?? -1,
+      expressionOk: window.__nekomiDebug?.expressionOk ?? null,
+      // A successful fit means no error — never carry a stale
+      // failure forward into the ready diagnostic (fix pass 5).
+      error: null,
+    }
+  }, [])
+
+  // Fix pass 13: the pointer handler also lives at component level
+  // and reads modelRef/containerRef, so the warm remount can re-attach
+  // the same handler to the new container div.
+  const onPointer = useCallback((e: PointerEvent) => {
+    const container = containerRef.current
+    const model = modelRef.current
+    if (!container || !model) return
+    const rect = container.getBoundingClientRect()
+    model.focus(e.clientX - rect.left, e.clientY - rect.top)
+  }, [])
+
+  // Publish the component-level fit for the resize effect and the
+  // Henshin re-fit timeouts.
+  useEffect(() => {
+    fitRef.current = fit
+  }, [fit])
+
   // Re-fit whenever the measured stage size changes.
   useEffect(() => {
     if (stageW > 0 && stageH > 0) fitRef.current?.()
@@ -323,6 +457,42 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     const init = async () => {
       const container = containerRef.current
       if (!container) return
+
+      // WARM PATH (fix pass 13, bug 3): the parsed stage survived the
+      // last unmount — re-attach it instead of re-loading the model.
+      // No fetch, no .moc3 parse, no placeholder flash: status was
+      // already initialised to 'ready' from the cache.
+      if (warmStage) {
+        const stage = warmStage
+        let contextAlive = true
+        try {
+          const gl = (stage.app.renderer as unknown as { gl?: WebGLRenderingContext | WebGL2RenderingContext }).gl
+          if (gl && typeof gl.isContextLost === 'function' && gl.isContextLost()) contextAlive = false
+        } catch {
+          contextAlive = false
+        }
+        if (contextAlive) {
+          container.appendChild(stage.canvas)
+          appRef.current = stage.app
+          modelRef.current = stage.model
+          pointerContainerRef.current = container
+          container.addEventListener('pointermove', onPointer)
+          fitRef.current = fit
+          fit()
+          try {
+            stage.app.ticker.start()
+          } catch {
+            // Ticker already running — nothing to restart.
+          }
+          setStatus('ready')
+          return
+        }
+        // The context died while the tab was away: drop the dead
+        // stage so the cold path below does a full init.
+        dropWarmStage()
+        setStatus('loading')
+      }
+
       try {
         await ensureCore()
         // The model's automator reads PIXI.Ticker.shared from the global
@@ -339,6 +509,21 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         container.appendChild(canvas)
         canvasEl = canvas
 
+        // Context-loss guard (fix pass 13): if the WebGL context dies,
+        // the cached stage is unusable — drop it so the next mount does
+        // a full cold init instead of re-attaching a dead canvas. The
+        // canvas check guards against an old canvas's listener firing
+        // after a retry already built a fresh stage on a new canvas.
+        canvas.addEventListener('webglcontextlost', () => {
+          if (!warmStage || warmStage.canvas !== canvas) return
+          dropWarmStage()
+          if (!cancelled) {
+            live2dError = 'WebGL context lost'
+            setFailMessage('WebGL context lost')
+            setStatus('failed')
+          }
+        })
+
         app = new PIXI.Application({
           view: canvas,
           backgroundAlpha: 0,
@@ -346,6 +531,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           resolution: Math.min(window.devicePixelRatio || 1, pixelRatioCap()),
           autoDensity: true,
         })
+        appRef.current = app
 
         // Fix pass 6: fit MUST NOT close over the `model` const below —
         // it is in the temporal dead zone until Live2DModel.from()
@@ -359,62 +545,17 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // fast enough to publish fitRef before the model fetch, while
         // fix pass 4's poisoned cubism4 import threw inside the
         // try/catch before fitRef was ever set (placeholder, no crash).
-        // fit now reads the model from modelRef and no-ops until it
-        // exists; fitRef is only published after the model is set.
-        const fit = () => {
-          const m = modelRef.current
-          if (!m) return
-          const w = container.clientWidth
-          const h = container.clientHeight
-          if (w === 0 || h === 0) return
-          app?.renderer.resize(w, h)
-          // Frame the FACE band (see FACE_TOP/FACE_BOTTOM above), not the
-          // top of the bounds: getBounds() is the whole canvas rect, so
-          // the window is placed by measured canvas fractions. A
-          // horizontal guard keeps the head inside narrow stages.
-          // Fix pass 11: fit from the TALLER form — in furry form the
-          // window starts at FURRY_TOP (canvas top) instead of
-          // FACE_TOP, because the ears rise above the human hair top
-          // and the old 0.02 window clipped their tips (see the FACE
-          // BAND note above). The scale drops slightly to hold the
-          // taller window; eyes/mouth move by only a few px.
-          m.scale.set(1)
-          m.position.set(0, 0)
-          const b = m.getBounds()
-          if (!b || b.height === 0) {
-            const scale = (h * 0.98) / m.height
-            m.scale.set(scale)
-            m.position.set(w / 2, h * 0.55)
-            return
-          }
-          const top = formRef.current === 'furry' ? FURRY_TOP : FACE_TOP
-          const windowH = FACE_BOTTOM - top
-          const s = Math.min((h * 0.98) / (b.height * windowH), (w * 0.96) / (b.width * HEAD_WIDTH_FRAC))
-          m.scale.set(s)
-          m.position.set(w / 2 - (b.x + b.width / 2) * s, h * 0.02 - (b.y + b.height * top) * s)
-          // Debug projection (verifiable without a real browser): where
-          // the eyes and mouth land in stage pixels, from the measured
-          // fractions and the actual scale/position just applied.
-          const stageY = (fracFromTop: number) => h * 0.02 + (fracFromTop - top) * b.height * s
-          window.__nekomiDebug = {
-            status: 'ready',
-            form: formRef.current,
-            stageW: w,
-            stageH: h,
-            bounds: { x: b.x, y: b.y, width: b.width, height: b.height },
-            scale: s,
-            eyeScreenPx: [Math.round(w / 2), Math.round(stageY(0.41))],
-            mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
-            param3: window.__nekomiDebug?.param3 ?? -1,
-            expressionOk: window.__nekomiDebug?.expressionOk ?? null,
-            // A successful fit means no error — never carry a stale
-            // failure forward into the ready diagnostic (fix pass 5).
-            error: null,
-          }
-        }
+        // Fix pass 13: fit now lives at component level and reads the
+        // model from modelRef, so it no-ops until the model exists;
+        // fitRef is only published after the model is set.
         const model = (await Live2DModel.from(MODEL_URL)) as Live2DModelType
         if (cancelled) {
           model.destroy()
+          try {
+            app.destroy(true, { children: true })
+          } catch {
+            // Already destroyed — nothing to free.
+          }
           return
         }
         model.anchor.set(0.5, 0.5)
@@ -493,22 +634,22 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         }
         app.ticker.add(tick)
 
-        const detachTicker = () => {
-          app?.ticker.remove(tick)
-          unsubscribe()
-        }
-
-        const onPointer = (e: PointerEvent) => {
-          const rect = container.getBoundingClientRect()
-          model.focus(e.clientX - rect.left, e.clientY - rect.top)
-        }
+        // Fix pass 13: the tick closure and the bridge subscription
+        // live with the cached app across unmounts — unmount only
+        // stops/starts the ticker, it never removes the tick or
+        // unsubscribes. The subscription is released in
+        // dropWarmStage(), when the stage is really discarded.
+        pointerContainerRef.current = container
         container.addEventListener('pointermove', onPointer)
 
+        // Publish the warm cache now that the stage is fully built:
+        // the next mount re-attaches this app/model/canvas instead
+        // of re-loading. The Henshin form needs no re-apply here —
+        // it is already applied (the tick keeps writing Param3 every
+        // frame from formRef), the warm path just re-fits.
+        warmStage = { app, model, canvas, unsubscribe }
+
         setStatus('ready')
-        return () => {
-          detachTicker()
-          container.removeEventListener('pointermove', onPointer)
-        }
       } catch (err: unknown) {
         if (!cancelled) {
           // Fix pass 4: record the REAL error instead of swallowing it
@@ -537,33 +678,35 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
       }
     }
 
-    let detach: void | (() => void)
-    void init().then((fn) => {
-      detach = fn
-    })
+    void init()
     return () => {
       cancelled = true
-      detach?.()
+      // Fix pass 13: unmount does NOT destroy the app/model/canvas —
+      // warmStage keeps the parsed stage alive for the next mount.
+      // Only stop the ticker (restarted on remount) and detach the
+      // pointer listener from the dying container. The tick closure
+      // and bridge subscription survive with the cached app.
+      // Instance refs are cleared so fit() no-ops until the next
+      // mount re-points them at the cache.
+      try {
+        appRef.current?.ticker.stop()
+      } catch {
+        // Renderer already gone — nothing to stop.
+      }
+      const pointerContainer = pointerContainerRef.current
+      if (pointerContainer) {
+        pointerContainer.removeEventListener('pointermove', onPointer)
+        pointerContainerRef.current = null
+      }
       fitRef.current = null
-      // Destroy calls can throw if the renderer is already gone (context
-      // lost mid-unmount) — a throw here during React's unmount would
-      // propagate and unmount the whole app into a black page.
-      try {
-        modelRef.current?.destroy()
-      } catch {
-        // Already destroyed — nothing to free.
-      }
       modelRef.current = null
-      try {
-        app?.destroy(true, { children: true })
-      } catch {
-        // Already destroyed — nothing to free.
-      }
+      appRef.current = null
       app = null
-      // Orphan canvas from an init that threw before the app existed
-      // (context creation): PIXI never got to remove it.
+      // Orphan canvas from an init that threw before the stage was
+      // cached (context creation): PIXI never got to remove it, and
+      // there is no warm stage to keep it for.
       const container = containerRef.current
-      if (canvasEl && container && canvasEl.parentElement === container) {
+      if (!warmStage && canvasEl && container && canvasEl.parentElement === container) {
         container.removeChild(canvasEl)
       }
       canvasEl = null
@@ -651,6 +794,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
               <button
                 type="button"
                 onClick={() => {
+                  // Fix pass 13: retry MUST clear the warm cache and
+                  // do a full cold init — never re-attach a dead stage.
+                  dropWarmStage()
                   live2dError = null
                   setFailMessage(null)
                   if (window.__nekomiDebug) window.__nekomiDebug.error = null
