@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import ErrorBoundary from './ErrorBoundary'
 
 // The dust veil is its own chunk (three + fiber + postprocessing):
@@ -7,7 +7,7 @@ const HeroDust = lazy(() => import('./HeroDust'))
 import { HERO } from '../content'
 import { onFrame, scrollToHash, useReducedMotion } from '../lib/scroll'
 import { clamp } from '../lib/math'
-import { gsap, GSAP_EASE_SILK } from '../lib/motion'
+import { EASE_SILK_CSS, gsap, GSAP_EASE_SILK } from '../lib/motion'
 import PullPhoto from './PullPhoto'
 
 export default function Hero() {
@@ -18,6 +18,11 @@ export default function Hero() {
   const hintRef = useRef<HTMLDivElement>(null)
   const introRef = useRef<HTMLDivElement>(null)
   const badgeRef = useRef<HTMLDivElement>(null)
+  // The pull hint fades once the photo has been pulled (PullPhoto
+  // reports it via onFirstPull). The hint lives on the FRAME, not in
+  // the scaled photo wrapper — the parallax scale (1.12) used to push
+  // it off the frame's right edge.
+  const [pulled, setPulled] = useState(false)
   const reducedMotion = useReducedMotion()
 
   // GSAP: entrance + scroll-away reinforcement for the intro block and the
@@ -78,14 +83,16 @@ export default function Hero() {
     <section
       ref={sectionRef}
       id="top"
-      className="relative flex min-h-[calc(100svh-140px)] flex-col overflow-clip pt-4 sm:pt-6 md:min-h-[calc(100svh-72px)]"
+      className="relative flex min-h-[calc(100svh-140px)] flex-col overflow-clip pt-4 sm:pt-6 md:min-h-[calc(100svh-134px)]"
     >
-      {/* The hero is exactly one viewport tall (minus the fixed nav pill,
-          and minus the fixed mobile tab bar below md): intro + frame +
-          full 3-line title + hint all fit in the first view, no scroll.
-          The frame is flex-1 — it absorbs whatever height is left after
-          the title and intro, instead of the old 16:9 / min-440px frame
-          that pushed the title below the fold. */}
+      {/* The hero is exactly one viewport tall (minus the fixed nav pill
+          AND the in-flow sticky tab bar below md — 72 + 61 + 1 border =
+          134px; the old 72px left the title's last line sitting on the
+          fold's edge — and minus the fixed mobile tab bar below md):
+          intro + frame + full 3-line title + hint all fit in the first
+          view, no scroll. The frame is flex-1 — it absorbs whatever
+          height is left after the title and intro, instead of the old
+          16:9 / min-440px frame that pushed the title below the fold. */}
       {/* 3D dust veil behind everything. Decorative only: if WebGL is
           unavailable (headless browsers, old devices) the boundary drops
           the canvas instead of letting R3F's renderer throw unmount the
@@ -150,8 +157,17 @@ export default function Hero() {
             ref={photoWrapRef}
             className="absolute inset-0 will-change-transform"
           >
-            <PullPhoto src={HERO.pullImage} alt={HERO.pullImageAlt} />
+            <PullPhoto src={HERO.pullImage} alt={HERO.pullImageAlt} onFirstPull={() => setPulled(true)} />
           </div>
+          {/* Pull hint — on the FRAME, not inside the scaled photo
+              wrapper: the parallax scale pushed it off the right edge. */}
+          <p
+            aria-hidden
+            className="pointer-events-none absolute bottom-4 right-4 rounded-full border border-white/25 bg-black/40 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/90 backdrop-blur transition-opacity duration-1000 sm:bottom-6 sm:right-6"
+            style={{ opacity: pulled ? 0 : 1, transitionTimingFunction: EASE_SILK_CSS }}
+          >
+            {HERO.pullHint} ↔
+          </p>
           <div
             className="absolute inset-0"
             aria-hidden="true"
@@ -178,7 +194,7 @@ export default function Hero() {
           </h1>
         </div>
 
-        <div ref={hintRef} className="mt-6 flex flex-col items-center gap-3 pb-5" data-reveal>
+        <div ref={hintRef} className="mt-6 flex flex-col items-center gap-3 pb-6" data-reveal>
           <div className="flex flex-wrap items-center justify-center gap-2">
             {HERO.chips.map((chip) => (
               <span

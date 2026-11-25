@@ -256,7 +256,7 @@ export function MenuVitaStage({ guide }: { guide: VitaGuide }) {
       <Suspense
         fallback={
           <div className="flex h-[260px] items-center justify-center rounded-[1.75rem] border border-line bg-ink-2 sm:h-[300px] lg:h-[480px]">
-            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">Vita se prépare…</p>
+            <span className="live-dot inline-block h-2.5 w-2.5 rounded-full bg-amber" aria-label="Vita se prépare" />
           </div>
         }
       >

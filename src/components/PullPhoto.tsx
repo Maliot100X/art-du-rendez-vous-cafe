@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { HERO } from '../content';
 import { useReducedMotion } from '../lib/scroll';
 import { pixelRatioCap } from '../lib/perf';
-import { EASE_SILK_CSS } from '../lib/motion';
 import { PullEngine } from '../lib/pullEngine';
 
 type Props = {
-  src: string;
-  alt: string;
-};
+  src: string
+  alt: string
+  /** Called once the visitor first pulls the photo (the hero fades its hint). */
+  onFirstPull?: () => void
+}
 
 /**
  * The hero photo as an interactive otis-style shader canvas.
@@ -28,7 +28,7 @@ type Props = {
  * the static <img>. prefers-reduced-motion → the static <img>, no warp.
  * The render loop pauses off-screen via IntersectionObserver.
  */
-export default function PullPhoto({ src, alt }: Props) {
+export default function PullPhoto({ src, alt, onFirstPull }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hitRef = useRef<HTMLDivElement>(null);
@@ -37,7 +37,6 @@ export default function PullPhoto({ src, alt }: Props) {
   // from pointerdown, armed only once the drag proves horizontal.
   const gestureRef = useRef<{ id: number; x: number; y: number; grab: { u: number; v: number } | null; active: boolean } | null>(null);
   const [failed, setFailed] = useState(false);
-  const [pulled, setPulled] = useState(false);
   const reducedMotion = useReducedMotion();
 
   const showCanvas = !failed && !reducedMotion;
@@ -120,7 +119,7 @@ export default function PullPhoto({ src, alt }: Props) {
       ev.preventDefault();
       ev.currentTarget.setPointerCapture(ev.pointerId);
       engine.grab(ev.pointerId, at.u, at.v, p.x, p.y);
-      setPulled(true);
+      onFirstPull?.();
       return;
     }
     gestureRef.current = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, grab: at, active: false };
@@ -154,7 +153,7 @@ export default function PullPhoto({ src, alt }: Props) {
       ev.currentTarget.setPointerCapture(ev.pointerId);
       engine.grab(ev.pointerId, g.grab.u, g.grab.v, p.x, p.y);
       g.active = true;
-      setPulled(true);
+      onFirstPull?.();
     }
   };
 
@@ -184,13 +183,6 @@ export default function PullPhoto({ src, alt }: Props) {
         onPointerUp={onUp}
         onPointerCancel={onUp}
       />
-      <p
-        aria-hidden
-        className="pointer-events-none absolute bottom-4 right-4 rounded-full border border-white/25 bg-black/40 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/90 backdrop-blur transition-opacity duration-1000 sm:bottom-6 sm:right-6"
-        style={{ opacity: pulled ? 0 : 1, transitionTimingFunction: EASE_SILK_CSS }}
-      >
-        {HERO.pullHint} ↔
-      </p>
     </div>
   );
 }

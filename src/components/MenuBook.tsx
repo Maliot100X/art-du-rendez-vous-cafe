@@ -80,6 +80,16 @@ const MARGIN = 0.22;
     is width-capped and every pixel of paper counts. */
 const SINGLE_MARGIN = 0.08;
 
+/**
+ * Fix pass 4: the flipped leaf survives tab switches. MenuBook
+ * unmounts when the visitor leaves the Livre tab, and the old
+ * useState(0) + scroll-open reset the book to feuille 2/9 on every
+ * return. The last leaf lives at module level, so a remount resumes
+ * it; an external goToCategory still takes precedence (goTo writes
+ * it too).
+ */
+let lastFlipped = 0
+
 interface LeafRuntime {
   group: THREE.Group;
   geometry: THREE.PlaneGeometry;
@@ -139,7 +149,7 @@ export default function MenuBook({
   goToCategory?: { catId: string; nonce: number } | null
 }) {
   const reducedMotion = useReducedMotion();
-  const [flipped, setFlipped] = useState(0);
+  const [flipped, setFlipped] = useState(() => lastFlipped);
   const [webglFailed, setWebglFailed] = useState(false);
   const [singlePage, setSinglePage] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 640,
@@ -151,8 +161,8 @@ export default function MenuBook({
   // the Three.js scene is not ready yet, so a flip requested before
   // the scene mounts is not lost and the scroll-open guard reads the
   // truth. `visualRef` is the animated value the tween drives.
-  const flipRef = useRef(0);
-  const visualRef = useRef(0);
+  const flipRef = useRef(lastFlipped);
+  const visualRef = useRef(lastFlipped);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
   const threeRef = useRef<ThreeBook | null>(null);
   const [threeReady, setThreeReady] = useState(false);
@@ -224,6 +234,7 @@ export default function MenuBook({
       const next = Math.max(0, Math.min(LEAF_COUNT, target));
       setFlipped(next);
       flipRef.current = next;
+      lastFlipped = next;
       // The flip landed on a category: tell the agent + the menu Vita.
       // In the animated path this fires on tween completion; in static
       // mode (or before the scene exists) the flip is instant, so it
@@ -391,6 +402,28 @@ export default function MenuBook({
       const book = new THREE.Group();
       scene.add(book);
 
+      // Fix pass 4: the spread read as a flat 2D plane (camera dead-on,
+      // no edge thickness). A green cover slab + a paper block under
+      // the leaves, plus a slight tilt and a camera a touch above the
+      // centre, give the book a visible 3D body: the cover rim and the
+      // page edges read from the top. The leaves stack at z 0.004–
+      // 0.032, clear of the block's top face (z 0.0), so nothing
+      // z-fights. (The static DOM spreads for reduced motion / no
+      // WebGL stay flat by nature — this is the WebGL book only.)
+      const coverSlab = new THREE.Mesh(
+        new THREE.BoxGeometry(PAGE_W_UNITS * 2 + 0.06, PAGE_H_UNITS + 0.06, 0.02),
+        new THREE.MeshStandardMaterial({ color: 0x0b2a1e, roughness: 0.55, metalness: 0.05 }),
+      );
+      coverSlab.position.set(0, 0, -0.014);
+      book.add(coverSlab);
+      const pageBlock = new THREE.Mesh(
+        new THREE.BoxGeometry(PAGE_W_UNITS * 2 - 0.01, PAGE_H_UNITS - 0.01, 0.012),
+        new THREE.MeshStandardMaterial({ color: 0xece5da, roughness: 0.9 }),
+      );
+      pageBlock.position.set(0, 0, -0.006);
+      book.add(pageBlock);
+      book.rotation.x = -0.07;
+
       const leafRuntimes: LeafRuntime[] = leaves.map((_, i) => {
         const geometry = new THREE.PlaneGeometry(PAGE_W_UNITS, PAGE_H_UNITS, 24, 1);
         const base = new Float32Array((geometry.attributes.position as THREE.BufferAttribute).array);
@@ -484,7 +517,11 @@ export default function MenuBook({
           framedW / 2 / (halfFovTan * aspect),
         );
         camera.aspect = aspect;
-        camera.position.set(0, 0, dist);
+        // Slightly above centre, with the book tilted (see init): the
+        // cover rim + page edges read as a 3D body instead of a flat
+        // spread. The tilt is 0.07 rad, so the framed height barely
+        // changes (cos 0.07 ≈ 0.998).
+        camera.position.set(0, 0.12, dist);
         camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix();
         applyFlip(flipRef.current);

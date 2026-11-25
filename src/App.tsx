@@ -166,12 +166,12 @@ function MobileTabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabI
               aria-selected={isActive}
               onClick={() => onSelect(tab.id)}
               onFocus={() => prewarmForTab(tab.id)}
-              className={`flex min-h-[60px] flex-col items-center justify-center gap-1 px-1 py-2 ${
+              className={`flex min-h-[60px] flex-col items-center justify-center gap-1.5 px-1 py-2 ${
                 isActive ? 'text-amber' : 'text-bone/70'
               }`}
             >
-              <Icon size={19} strokeWidth={isActive ? 2.4 : 1.8} />
-              <span className="text-[9px] font-bold uppercase tracking-[0.08em]">{MOBILE_TAB_LABELS[tab.id]}</span>
+              <Icon size={18} strokeWidth={isActive ? 2.4 : 1.8} className="shrink-0" />
+              <span className="whitespace-nowrap text-[9px] font-bold uppercase leading-none tracking-[0.08em]">{MOBILE_TAB_LABELS[tab.id]}</span>
             </button>
           )
         })}
@@ -358,7 +358,7 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
     <Suspense
       fallback={
         <div className="flex h-[260px] items-center justify-center rounded-[1.75rem] border border-line bg-ink-2 sm:h-[300px] lg:h-[480px]">
-          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">Vita se prépare…</p>
+          <span className="live-dot inline-block h-2.5 w-2.5 rounded-full bg-amber" aria-label="Vita se prépare" />
         </div>
       }
     >

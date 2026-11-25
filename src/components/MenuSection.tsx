@@ -137,7 +137,7 @@ export default function MenuSection({
           long. The inner row scrolls sideways; the outer wrapper sticks. */}
       <div className={`sticky z-30 -mx-4 mt-8 bg-ink/90 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 ${barTopClass}`}>
         <div
-          className="flex flex-nowrap gap-2 overflow-x-auto"
+          className="flex flex-wrap gap-2 lg:flex-nowrap lg:overflow-x-auto"
           role="tablist"
           aria-label="Catégories de la carte"
         >
