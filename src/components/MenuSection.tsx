@@ -148,7 +148,7 @@ export default function MenuSection({
               role="tab"
               aria-selected={active === cat.id}
               onClick={() => setActive(cat.id)}
-              className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
+              className={`shrink-0 whitespace-nowrap rounded-full border px-4 py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
                 active === cat.id
                   ? 'border-bone bg-bone text-ink'
                   : 'border-line bg-transparent text-bone/70 hover:border-bone/50 hover:text-bone'

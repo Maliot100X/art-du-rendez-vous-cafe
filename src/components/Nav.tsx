@@ -34,7 +34,7 @@ export default function Nav() {
           <button
             type="button"
             onClick={() => go('#top')}
-            className="flex items-baseline gap-2 text-left"
+            className="flex min-h-11 items-baseline gap-2 py-3 text-left"
             aria-label="Art du Rendez-Vous — retour en haut"
           >
             <span className="font-display text-[15px] font-bold tracking-[0.08em] text-bone">

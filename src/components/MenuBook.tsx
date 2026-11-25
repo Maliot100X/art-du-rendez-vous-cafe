@@ -34,6 +34,21 @@ import {
  * a clearly horizontal swipe turns a leaf. Phase 2's `touch-action:
  * none` trap is deliberately not repeated.
  *
+ * Phone framing: the single-page margin is 0.08 (not the spread's
+ * 0.22), so the paper fills ~93% of the stage width, and the open-book
+ * shift is the half-page centring PLUS half that margin — otherwise
+ * the flipped-leaf stack peeks MARGIN/2 into the frame as a thin
+ * strip of the neighbouring page at the left edge.
+ *
+ * The reading position is held DURING a flip, not only after it:
+ * the tween's onUpdate re-anchors the page (instant scroll, never a
+ * native smooth scrollTo — Lenis would overwrite that frame by
+ * frame) so the instruction line never slides under the header
+ * mid-animation. Mobile chrome is compact (tight section padding,
+ * small gaps) so the instruction + book + controls share one
+ * viewport instead of the tab scrolling with dead dark space above
+ * and below the book.
+ *
  * prefers-reduced-motion (or no WebGL2) → the same spreads as static
  * DOM pages, same controls, no animation. The render loop only runs
  * while a flip is tweening or on resize — no idle rAF.
@@ -60,6 +75,10 @@ import {
 const PAGE_W_UNITS = 1;
 const PAGE_H_UNITS = PAGE_H / PAGE_W;
 const MARGIN = 0.22;
+/** Single-page (phone) margin: the paper fills 93% of the stage width
+    instead of 82% — the book reads bigger on a phone, where the stage
+    is width-capped and every pixel of paper counts. */
+const SINGLE_MARGIN = 0.08;
 
 interface LeafRuntime {
   group: THREE.Group;
@@ -88,6 +107,27 @@ function categoryForFlip(flipped: number): (typeof MENU)[number] | null {
   return flipped >= 1 && flipped <= MENU.length ? MENU[flipped - 1] : null
 }
 
+/**
+ * The bottom edge of the fixed/sticky header stack the book must stay
+ * below — measured live, never assumed: the fixed nav pill (Nav.tsx)
+ * plus the desktop sticky tab bar when it is visible (its tablist's
+ * parent is the sticky wrapper; the mobile bottom bar's tablist sits
+ * at the viewport bottom and is excluded by the top < 160 check).
+ * Falls back to the old 132px threshold if nothing measured.
+ */
+function headerStackBottom(): number {
+  let bottom = 0;
+  const header = document.querySelector('header');
+  if (header) bottom = Math.max(bottom, header.getBoundingClientRect().bottom);
+  document.querySelectorAll('[role="tablist"]').forEach((el) => {
+    const bar = el.parentElement;
+    if (!bar) return;
+    const r = bar.getBoundingClientRect();
+    if (r.height > 0 && r.top < 160) bottom = Math.max(bottom, r.bottom);
+  });
+  return bottom > 0 ? bottom + 8 : 132;
+}
+
 export default function MenuBook({
   goToCategory,
 }: {
@@ -105,6 +145,8 @@ export default function MenuBook({
     () => typeof window !== 'undefined' && window.innerWidth < 640,
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const ledeRef = useRef<HTMLParagraphElement>(null);
   // Logical flip state (mirrors `flipped`) — updated by goTo even when
   // the Three.js scene is not ready yet, so a flip requested before
   // the scene mounts is not lost and the scroll-open guard reads the
@@ -130,6 +172,47 @@ export default function MenuBook({
   );
 
   const staticMode = reducedMotion || webglFailed;
+
+  /**
+   * Keep the book in its reading position WHILE a flip runs — not only
+   * when it finishes (defect 5).
+   *
+   * The mechanism the old one-shot onComplete fix missed: the flip
+   * tween never moves the stage (it only drives canvas pixels), but
+   * the page keeps scrolling under it — the scroll-open trigger fires
+   * mid-scroll, Lenis is still easing the visitor's wheel/touch
+   * momentum — so the stage slides under the fixed/sticky header
+   * during the tween's whole window (0.9 s for one leaf, 3.35 s for
+   * a full 8-leaf jump). The old correction then fired a native
+   * `window.scrollTo({ behavior: 'smooth' })` — but Lenis owns the
+   * scroll here, and while it is in a "smooth" animation its
+   * onNativeScroll ignores native scroll events and its own rAF loop
+   * rewrites the scroll position every frame from its animatedScroll
+   * (lenis 1.3.28, setScroll → instant wrapper.scrollTo). The native
+   * smooth correction is overwritten frame by frame and lands late
+   * or partially — the book sat clipped for ~4 s.
+   *
+   * This clamp runs on every tween tick instead, and corrects with an
+   * atomic jump (no `behavior: 'smooth'`): Lenis picks an instant
+   * jump up through its native-scroll sync instead of fighting it.
+   * Anchor: on a phone the instruction line (the lede) must stay just
+   * under the header — that puts the whole book + controls in view.
+   * On desktop the spread + header cannot share one viewport, so the
+   * stage top is the anchor there (the old settle point, minus the
+   * smooth-scroll fight). Guarded: it only fires while the book is
+   * still substantially in view, so a deliberate scroll past the book
+   * is never fought.
+   */
+  const clampReadingPosition = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const clear = headerStackBottom();
+    const s = stage.getBoundingClientRect();
+    if (s.bottom < clear + 240) return;
+    const anchor = singlePageRef.current ? ledeRef.current ?? stage : stage;
+    const top = anchor.getBoundingClientRect().top;
+    if (top < clear) window.scrollTo(0, window.scrollY + top - clear);
+  }, []);
 
   // The external target, as a ref, so the scroll-open trigger (created
   // once) can see whether the book was opened ON a category.
@@ -172,26 +255,22 @@ export default function MenuBook({
           visualRef.current = proxy.v;
           three.applyFlip(proxy.v);
           three.render();
+          // Hold the reading position through the whole flip — the
+          // stage must never slide under the header mid-animation.
+          clampReadingPosition();
         },
         onComplete: () => {
           visualRef.current = next;
           emit();
-          // After a flip the top of the book was observed clipped under
-          // the sticky header/tab bar. If the stage's top has slipped
-          // above the header's bottom (~130px), nudge it back into
-          // view — only in that case, so a deliberate scroll is never
-          // fought.
-          const stage = stageRef.current;
-          if (stage) {
-            const top = stage.getBoundingClientRect().top;
-            if (top < 130) {
-              window.scrollTo({ top: window.scrollY + top - 132, behavior: 'smooth' });
-            }
-          }
+          // Settle on the same anchor, instantly — the old native
+          // smooth scrollTo fought Lenis and left the book clipped
+          // for seconds; an atomic jump is picked up by Lenis's
+          // native-scroll sync instead.
+          clampReadingPosition();
         },
       });
     },
-    [staticMode],
+    [staticMode, clampReadingPosition],
   );
 
   /* ---- External flip request (menu Vita → book). ----
@@ -360,14 +439,22 @@ export default function MenuBook({
             (i < value ? i : LEAF_COUNT - i) * 0.004 + (turning ? 0.06 * Math.sin(Math.PI * p) : 0);
         });
         // Centre the cover / back cover when closed; on a phone the open
-        // book is framed on its right page only.
+        // book is framed on its right page only. The open-book shift is
+        // the half-page centring PLUS half the framing margin: the
+        // framed window is a margin wider than the page, so with only
+        // the half-page shift the flipped-leaf stack on the left peeked
+        // MARGIN/2 into the frame — a thin strip of the neighbouring
+        // page at the left edge. The extra half-margin puts the stack's
+        // edge exactly on the frame edge (hidden) and the whole margin
+        // on the right of the page.
         const closedFront = 1 - clamp01(value);
         const closedBack = clamp01(value - (LEAF_COUNT - 1));
         const single = singlePageRef.current;
+        const margin = single ? SINGLE_MARGIN : MARGIN;
         book.position.x =
           (-PAGE_W_UNITS / 2) * closedFront +
           (PAGE_W_UNITS / 2) * closedBack +
-          (single && value > 0 && value < LEAF_COUNT ? -PAGE_W_UNITS / 2 : 0);
+          (single && value > 0 && value < LEAF_COUNT ? -PAGE_W_UNITS / 2 - margin / 2 : 0);
       };
 
       const render = () => {
@@ -388,8 +475,9 @@ export default function MenuBook({
           setSinglePage(single);
         }
         const aspect = w / h;
-        const framedW = (single ? PAGE_W_UNITS : PAGE_W_UNITS * 2) + MARGIN;
-        const framedH = PAGE_H_UNITS + MARGIN;
+        const margin = single ? SINGLE_MARGIN : MARGIN;
+        const framedW = (single ? PAGE_W_UNITS : PAGE_W_UNITS * 2) + margin;
+        const framedH = PAGE_H_UNITS + margin;
         const halfFovTan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
         const dist = Math.max(
           framedH / 2 / halfFovTan,
@@ -494,19 +582,24 @@ export default function MenuBook({
 
   const category = flipped >= 1 && flipped <= MENU.length ? MENU[flipped - 1] : null;
   const stageAspect = singlePage
-    ? `${(PAGE_W_UNITS + MARGIN).toFixed(2)} / ${(PAGE_H_UNITS + MARGIN).toFixed(2)}`
+    ? `${(PAGE_W_UNITS + SINGLE_MARGIN).toFixed(2)} / ${(PAGE_H_UNITS + SINGLE_MARGIN).toFixed(2)}`
     : `${(PAGE_W_UNITS * 2 + MARGIN).toFixed(2)} / ${(PAGE_H_UNITS + MARGIN).toFixed(2)}`;
 
   return (
-    <section id="livre" className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36" aria-label="Le livre de la carte">
-      <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between" data-reveal>
+    <section
+      id="livre"
+      ref={sectionRef}
+      className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-4 sm:px-6 sm:py-10 md:py-36"
+      aria-label="Le livre de la carte"
+    >
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:gap-6" data-reveal>
         <div>
           <p className="font-mono text-label uppercase text-amber">{BOOK.eyebrow}</p>
           <h2 className="mt-3 font-display text-display text-bone">
             Feuilletez <span className="italic text-amber">la carte.</span>
           </h2>
         </div>
-        <p className="max-w-md text-body text-bone/70">{BOOK.lede}</p>
+        <p ref={ledeRef} className="max-w-md text-body text-bone/70">{BOOK.lede}</p>
       </div>
 
       {/* Stage — focusable region: arrows turn the pages. */}
@@ -517,7 +610,7 @@ export default function MenuBook({
         aria-label="Livre de la carte — flèches gauche et droite pour tourner les pages"
         onKeyDown={onKeyDown}
         {...bind()}
-        className="relative mx-auto mt-12 w-full touch-pan-y select-none overflow-hidden"
+        className="relative mx-auto mt-4 w-full touch-pan-y select-none overflow-hidden md:mt-12"
         style={{
           maxWidth: singlePage ? 480 : 960,
           aspectRatio: stageAspect,
@@ -537,8 +630,10 @@ export default function MenuBook({
         )}
       </div>
 
-      {/* Controls */}
-      <div className="mt-8 flex flex-col items-center gap-4" data-reveal style={{ ['--d' as string]: '90ms' }}>
+      {/* Controls — tight on a phone so the book + instruction + controls
+          share one viewport instead of the tab scrolling with dead dark
+          space above and below the book. */}
+      <div className="mt-4 flex flex-col items-center gap-3 md:mt-8 md:gap-4" data-reveal style={{ ['--d' as string]: '90ms' }}>
         <div className="flex items-center gap-4">
           <button
             type="button"
@@ -563,7 +658,10 @@ export default function MenuBook({
           </button>
         </div>
 
-        {/* Progress segments — one per view (cover, 7 spreads, back). */}
+        {/* Progress segments — one per view (cover, 7 spreads, back).
+            The visible bar stays 6px, but the button is a full 44px
+            tall (the bar is an inner span): a 6px-tall tap target
+            cannot be hit reliably on a phone. */}
         <div className="flex w-full max-w-xs gap-1.5" role="group" aria-label="Pages du livre">
           {Array.from({ length: LEAF_COUNT + 1 }, (_, i) => (
             <button
@@ -572,10 +670,15 @@ export default function MenuBook({
               onClick={() => goTo(i)}
               aria-label={`Aller à : ${spreadLabel(i)}`}
               aria-current={i === flipped}
-              className={`h-1.5 flex-1 rounded-full transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
-                i === flipped ? 'bg-amber' : 'bg-bone/20 hover:bg-bone/40'
-              }`}
-            />
+              className="group flex h-11 flex-1 items-center rounded-full"
+            >
+              <span
+                aria-hidden
+                className={`h-1.5 w-full rounded-full transition-all duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] ${
+                  i === flipped ? 'bg-amber' : 'bg-bone/20 group-hover:bg-bone/40'
+                }`}
+              />
+            </button>
           ))}
         </div>
 
