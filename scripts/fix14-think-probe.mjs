@@ -29,8 +29,7 @@
 //
 // Usage: node scripts/fix14-think-probe.mjs  (from the repo root)
 // Exit 0 = all checks pass, 1 = at least one fails.
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -51,7 +50,12 @@ function check(name, ok, detail = '') {
 // untouched). The temp dir gets {"type":"module"} so .js imports as ESM.
 import { execFileSync } from 'node:child_process'
 const files = ['content', 'agentBrain', 'avatarBridge', 'brain', 'voiceAgent']
-const outDir = mkdtempSync(join(tmpdir(), 'fix14-think-probe-'))
+// Fix 16: temp dir lives INSIDE the repo root, not /tmp — brain.ts now
+// imports agentStatus (single status store), which imports 'react'
+// (useSyncExternalStore), and Node ESM can only resolve that from a
+// path under the repo's node_modules. Same pattern as fix15-brain-probe
+// ('.fix15-probe-'). Cleaned up before exit.
+const outDir = mkdtempSync(join(root, '.fix14-think-probe-'))
 writeFileSync(join(outDir, 'package.json'), JSON.stringify({ type: 'module' }))
 const tscBin = join(root, 'node_modules', 'typescript', 'bin', 'tsc')
 const entryFiles = files.map((name) =>
@@ -204,4 +208,5 @@ const fnNames = (think) =>
 }
 
 console.log(failures === 0 ? '\nfix14-think-probe: ALL CHECKS PASSED' : `\nfix14-think-probe: ${failures} CHECK(S) FAILED`)
+rmSync(outDir, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)
