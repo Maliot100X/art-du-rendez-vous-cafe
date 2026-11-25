@@ -123,7 +123,7 @@ const catEffect = catEffectStart === -1 || catEffectEnd === -1 ? null : guide.sl
 check('C1a category-change effect block found', catEffect !== null)
 if (catEffect !== null) {
   check('C1b effect keeps first-mount guard', catEffect.includes('firstCategoryRef.current'))
-  check('C1c effect calls setLine(text)', catEffect.includes('setLine(text)'))
+  check('C1c effect calls setGuideLine(text)', catEffect.includes('setGuideLine(text)'))
   check('C1d effect has no startReading', !catEffect.includes('startReading'))
   check('C1e effect has no speak(', !catEffect.includes('speak('))
   check('C1f effect has no pendingOpenRef', !catEffect.includes('pendingOpenRef'))
@@ -132,15 +132,19 @@ if (catEffect !== null) {
 }
 
 // --- C2: explicit readings still work (ask / askBartender untouched) ---
+// Fix pass 14: startReading / the pending open moved to the module-level
+// store (src/lib/readingStore.ts) — the checks below follow them there.
+// The behaviour they guard is unchanged: readings start ONLY from an
+// explicit ask, never from a category tap (see C1 above).
 check(
-  'C2a startReading still defined',
-  guide.includes('const startReading = useCallback('),
+  'C2a startReading comes from the reading store',
+  guide.includes("from '../lib/readingStore'") && guide.includes('  startReading,'),
 )
 check(
   'C2b askBartender still starts a reading + arms pending open',
   (() => {
     const ask = sliceBetween(guide, 'const askBartender = () => {', '\n  }\n\n  return {')
-    return ask !== null && ask.includes('startReading(categoryId,') && ask.includes('pendingOpenRef.current = categoryId')
+    return ask !== null && ask.includes('startReading(categoryId,') && ask.includes('setPendingOpen(categoryId)')
   })(),
 )
 check(
