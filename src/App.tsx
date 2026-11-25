@@ -264,9 +264,17 @@ function TabSurface({ tab, children }: { tab: TabId; children: ReactNode }) {
  *
  * Desktop (lg+): two columns — the menu on the left, Vita in a sticky
  * side column. Phone: Vita sits between the category bar and the list —
- * the stage sticks under the category bar (top 184px = nav 64 + tab
- * bar 60 + category bar 60) while the list scrolls beneath it, and her
- * panel (what she says, book button, mini chat) scrolls away in flow.
+ * the stage sticks BELOW the category bar (top 196px = category bar
+ * bottom ~190px, +6px margin; sm 204px = bar bottom ~198px, +6px) while
+ * the list scrolls beneath it, and her panel (what she says, book
+ * button, mini chat) scrolls away in flow.
+ * Fix pass 11: the stage used to stick at top 76px (md: 192px) — 114px
+ * ABOVE the category bar's bottom edge, so the bar (sticky, z-30)
+ * painted over the stage's top ~66px and swallowed her whole head,
+ * and on a notched phone the stage also slid 43px under the fixed
+ * header (bottom 72px + ~47px safe-area inset; header z-50, stage
+ * z-20). The bar top is 124px (sm: 132px) and ~66px tall (py-3 +
+ * ~42px buttons), so the stage must stick at >= ~190px / ~198px.
  * Only one layout mounts at a time (matchMedia), so the VRM exists
  * exactly once.
  */
@@ -308,7 +316,12 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
       <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[1fr_380px]">
         <MenuSection onAdd={onAdd} onActiveChange={handleActiveChange} onItemAdd={handleItemAdd} />
         <aside className="min-w-0 pb-16 pr-4 pt-16 sm:pr-6 sm:pt-24 md:pt-36">
-          <div className="sticky top-[132px]">
+          {/* Fix pass 11: sticky top 136, not 132 — the tab bar bottom
+              sits at exactly 132 (top 72 + 60 tall), so 132 was flush
+              with zero margin; 136 leaves 4 px so her head can never
+              slide under the tab bar / fixed header (z-50, header
+              bottom 76). */}
+          <div className="sticky top-[136px]">
             <MenuVita guide={guide} />
           </div>
         </aside>
@@ -323,7 +336,7 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
       onItemAdd={handleItemAdd}
       betweenBarAndList={
         <>
-          <div className="sticky top-[76px] z-20 mt-4 md:top-[192px]">
+          <div className="sticky top-[196px] z-20 mt-4 sm:top-[204px]">
             <MenuVitaStage guide={guide} />
           </div>
           <MenuVitaPanel guide={guide} />
@@ -473,7 +486,10 @@ function BookTab({ goToCategory }: { goToCategory: { catId: string; nonce: numbe
     return (
       <div className="mx-auto grid max-w-[1400px] gap-10 lg:grid-cols-[380px_1fr]">
         <aside className="min-w-0 pb-16 pl-4 pt-16 sm:pl-6 sm:pt-24 md:pt-36">
-          <div className="sticky top-[132px]">
+          {/* Fix pass 11: sticky top 136, not 132 — same 4 px safety
+              margin below the tab-bar bottom (132) as the Menu tab,
+              so her head can never slide under the tab bar / header. */}
+          <div className="sticky top-[136px]">
             {vita}
             {readingPanel}
           </div>
