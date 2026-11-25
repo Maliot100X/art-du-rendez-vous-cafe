@@ -107,7 +107,7 @@ function menuSummary(): string {
 /** System prompt — built from the site's own data, never retyped. The
     persona comes from the character card (src/content.ts CHARACTER):
     Nekomi, the barmaid. The first line always leads with her name. */
-export function brainSystemPrompt(_persona: 'vita' | 'nekomi' = 'nekomi'): string {
+export function brainSystemPrompt(_persona: 'nekomi' = 'nekomi'): string {
   const name = CHARACTER.name
   const firstLine = `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles.`
   return [
@@ -173,7 +173,7 @@ interface ChatCompletionsResponse {
 async function callLlm(
   message: string,
   history: ChatTurn[],
-  persona: 'vita' | 'nekomi' = 'nekomi',
+  persona: 'nekomi' = 'nekomi',
 ): Promise<string> {
   const { key, baseUrl, model } = brainConfig()
   if (!key) throw new Error('no-key')
@@ -217,7 +217,7 @@ async function callLlm(
 export async function askBrain(
   message: string,
   history: ChatTurn[] = [],
-  opts?: { persona?: 'vita' | 'nekomi' },
+  opts?: { persona?: 'nekomi' },
 ): Promise<BrainResult> {
   const clean = message.trim()
   if (!clean) return { reply: botReply(''), source: 'offline' }

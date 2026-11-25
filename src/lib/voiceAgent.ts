@@ -134,9 +134,8 @@ function menuSummary(): string {
   ).join('\n')
 }
 
-/** The agent's name: Nekomi, the barmaid (Live2D). The 'vita' variant
-    is kept for callers that still pass it — it resolves to Nekomi. */
-export type VoicePersona = 'vita' | 'nekomi'
+/** The agent's name: Nekomi, the barmaid (Live2D). */
+export type VoicePersona = 'nekomi'
 
 function agentPrompt(_persona: VoicePersona = 'nekomi'): string {
   return [
@@ -147,7 +146,7 @@ function agentPrompt(_persona: VoicePersona = 'nekomi'): string {
     'La carte (noms et prix exacts, ne jamais inventer un prix) :',
     menuSummary(),
     'Tu conseilles selon les goûts, tu composes la commande avec la fonction add_to_order,',
-    'et tu proposes de rappeler le client pour confirmer sa commande.',
+    'et tu notes sa commande, prête à montrer au bar.',
     `Téléphone du café : ${CAFE.phone}. Aucun site web n’est listé : ne jamais en inventer.`,
   ].join('\n')
 }
@@ -351,7 +350,7 @@ export class DeepgramVoiceAgent {
   constructor(
     callbacks: VoiceAgentCallbacks,
     bridge: AvatarBridge = avatarBridge,
-    persona: 'vita' | 'nekomi' = 'nekomi',
+    persona: VoicePersona = 'nekomi',
   ) {
     this.callbacks = callbacks
     this.bridge = bridge
