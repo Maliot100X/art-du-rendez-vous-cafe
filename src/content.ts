@@ -249,11 +249,17 @@ export const BOOK = {
 export const GALLERY = {
   eyebrow: 'Galerie',
   title: 'Le café, en images.',
-  lede: 'La façade au néon, le bar en bois, le café du matin, les cocktails de la terrasse — et la carte, en affiche.',
+  lede: 'La façade au néon, le bar en bois, le café du matin, les cocktails de la terrasse — et la carte, en affiche, dans ses deux formats.',
   poster: {
     src: '/images/menu-poster-wide-1920x1080.jpg',
     alt: 'Affiche de la carte des boissons de l’Art du Rendez-Vous — les sept familles et leurs prix',
     caption: 'La carte, en affiche — les sept familles et leurs prix',
+  },
+  // Portrait poster (stories / partage) — same code-built menu, vertical format.
+  posterTall: {
+    src: '/images/menu-poster-1080x1920.jpg',
+    alt: 'Affiche verticale de la carte des boissons de l’Art du Rendez-Vous — les sept familles et leurs prix',
+    caption: 'La carte, en affiche verticale — à partager',
   },
   items: [
     {

@@ -6,13 +6,15 @@ import { EASE_SILK, gsap, GSAP_EASE_SILK } from '../lib/motion';
 
 /**
  * Galerie — the café in pictures: the wide menu poster as a full-width
- * banner, then the four photos in a row. Tap / click opens a lightbox
- * (visor modal grammar: dark overlay, big frame, prev/next, Esc).
- * Scroll reveal is the MenuSection GSAP pattern: rows stagger in once
- * via ScrollTrigger on the silk curve; reduced motion skips it.
+ * banner, then the four photos in a row, then the tall portrait poster
+ * (the same code-built menu, vertical format for stories / sharing).
+ * Tap / click opens a lightbox (visor modal grammar: dark overlay, big
+ * frame, prev/next, Esc). Scroll reveal is the MenuSection GSAP pattern:
+ * rows stagger in once via ScrollTrigger on the silk curve; reduced
+ * motion skips it.
  */
 
-const ALL = [GALLERY.poster, ...GALLERY.items];
+const ALL = [GALLERY.poster, ...GALLERY.items, GALLERY.posterTall];
 
 export default function Gallery() {
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -130,6 +132,30 @@ export default function Gallery() {
           </figure>
         ))}
       </div>
+
+      {/* The tall portrait poster — same code-built menu, vertical format. */}
+      <figure className="gallery-item group relative mx-auto mt-4 w-full max-w-sm cursor-pointer overflow-hidden rounded-[1.5rem]">
+        <button
+          type="button"
+          onClick={() => setLightbox(ALL.length - 1)}
+          className="block w-full text-left"
+          aria-label={`${GALLERY.posterTall.caption} — agrandir`}
+        >
+          <img
+            src={GALLERY.posterTall.src}
+            alt={GALLERY.posterTall.alt}
+            loading="lazy"
+            className="aspect-[9/16] w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.2,0.7,0.1,1)] group-hover:scale-[1.02]"
+          />
+          <span className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-black/40 text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
+            <Expand size={14} />
+          </span>
+          <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-4 pt-10">
+            <span className="block font-mono text-[11px] uppercase tracking-[0.16em] text-amber">Affiche verticale</span>
+            <span className="mt-1 block font-display text-lg italic leading-tight text-bone">{GALLERY.posterTall.caption}</span>
+          </figcaption>
+        </button>
+      </figure>
 
       {/* Lightbox */}
       <AnimatePresence>
