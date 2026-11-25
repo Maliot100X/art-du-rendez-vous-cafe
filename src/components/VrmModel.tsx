@@ -7,7 +7,7 @@ import { createHandBook, type HandBookRig } from '../lib/handBook'
 import { pixelRatioCap } from '../lib/perf'
 import { useReducedMotion } from '../lib/scroll'
 import { loadVrm, type ReadRest } from '../lib/vrmCache'
-import { setWalkStatus } from '../lib/walkStatus'
+import { resetWalkStatus, setWalkStatus } from '../lib/walkStatus'
 
 /**
  * Vita — VRM 0.x full-body model (CC0, VRoid sample), rendered with
@@ -97,7 +97,26 @@ const FOV = 30
     bend — a still frame cannot miss it. The gait math and the
     three-vrm sync were measured working on the real VRM
     (scripts/runtime-walk-probe.mjs + the three-vrm runtime audit),
-    so the change is the pose itself, not the plumbing. */
+    so the change is the pose itself, not the plumbing.
+    Fix pass 8 (scripts/fix8-walk-probe.mjs — real runtime, real
+    vita.vrm + real three-vrm, skinned-vertex + front-camera pixel
+    measurement): the pass-7 claim was wrong in the one place that
+    matters. The knee DID bend 55° in 3D (raw angle 124.6°), the foot
+    DID lift 0.102 m, the skinned vertices DID move — but the bend was
+    in the SAGITTAL (depth) plane and BACKWARDS: the knee went 0.15 m
+    AWAY from the camera (z −0.15) while the foot went forward, so
+    from the straight-on front camera the leg stayed at 169° in the
+    camera plane (180° = straight) — a ~7 px knee deviation on a
+    480 px stage, ~4 px on a phone. The readout said 57° while the
+    pixels showed straight legs because rotation.x bends the knee in
+    depth, not across the frame. The fix flips the bend to the
+    anatomical direction (thigh forward, knee TOWARD the camera,
+    shin back) and adds a front-plane shin splay, so the knee breaks
+    the leg's silhouette in the camera plane: measured projected knee
+    138–149° (was 169°), foot lift 0.10–0.12 m, foot 14 cm sideways.
+    The DOM readout now also reads the bend BACK from the RAW bones
+    after humanoid.update() (see the readout block), never the
+    commanded normalized value. */
 const WALK_DURATION = 4.0
 /**
  * Walk ends (fix pass 4, measured — scripts/sim-fix4-book.mjs): the
@@ -158,6 +177,22 @@ const STEP_COUNT = 4
  * full bend, ~0.6 s at full bend per step (~2.4 s per walk). The
  * bigger bend + longer hold is the pose change; the plumbing
  * (three-vrm sync) was already proven working.
+ * Fix pass 8 (scripts/fix8-walk-probe.mjs): the pass-7 "knee toward
+ * the camera" claim was WRONG — the probe measures the knee at
+ * z −0.15…−0.20 m (AWAY from the camera) at every peak, and the
+ * front-projected knee angle is 169° (180° = straight). The old
+ * signs (upperLeg x = −lift, lowerLeg x = +knee) fold the leg
+ * backwards, like a flamingo: knee back, foot forward. The signs
+ * are FLIPPED below (upperLeg x = +lift, lowerLeg x = −knee):
+ * thigh forward, knee TOWARD the camera (+0.15 m), shin back —
+ * the anatomical direction, measured projected knee 157°. The
+ * front-plane break comes from SHIN_SPLAY: the stepping shin also
+ * angles sideways (rotation.z, opposite the thigh splay), so the
+ * knee juts out in the camera plane instead of hiding in depth —
+ * measured projected knee 138–149°, foot lift 0.10–0.12 m, foot
+ * 14 cm sideways. The magnitudes stay 0.45 / 1.00; only the signs
+ * and the new splay change. The walk block applies them as
+ * +THIGH_LIFT / −KNEE_SWING / −SHIN_SPLAY·dir.
  */
 const KNEE_SWING = 1.0
 const THIGH_LIFT = 0.45
@@ -165,26 +200,37 @@ const THIGH_LIFT = 0.45
     travel direction (rotation.z moves both feet toward +X, measured
     test F — so the sign is the travel dir). The stance foot is never
     touched, so the planted-foot discipline holds; the extra swing
-    returns to the solved angle as the lift envelope falls to 0. */
-const SWING_SPLAY = 0.15
+    returns to the solved angle as the lift envelope falls to 0.
+    Fix pass 8: 0.15 → 0.20 (measured with the shin splay below). */
+const SWING_SPLAY = 0.2
+/** Front-plane shin splay (fix pass 8): the STEPPING shin angles
+    sideways OPPOSITE the thigh splay (rotation.z, −dir), so the
+    lower leg slants back across the frame while the knee juts out —
+    the knee break the front camera can actually see. 0.30 rad moves
+    the foot ~14 cm sideways at peak (measured); 0.50 was tried and
+    kicked the foot 25 cm out — a can-can kick, not a step. The
+    stance shin is set to 0 explicitly, like its rotation.x. */
+const SHIN_SPLAY = 0.3
 const HIP_BOB = 0.02
 const HIP_SWAY = 0.05
 const WALK_TURN = 0.3
 
 /**
  * Step-lift envelope with a HELD peak (fix pass 6, stretched in fix
- * pass 7): the bent-knee mid-step pose must be the DOMINANT pose of
- * the walk, not a 100 ms flash. Rises over the first 20% of the
- * step, holds at full lift until 80%, eases down — at 1.0 s/step
- * that is ~0.6 s at full bend per step, ~2.4 s per walk.
+ * pass 7, stretched again in fix pass 8): the bent-knee mid-step pose
+ * must be the DOMINANT pose of the walk, not a 100 ms flash. Rises
+ * over the first 10% of the step, holds at full lift until 90%,
+ * eases down — at 1.0 s/step that is ~0.8 s at full bend per step,
+ * ~3.2 s per walk, so a still frame taken at almost any moment of
+ * the walk catches the step.
  */
 function stepLift(u: number): number {
-  if (u < 0.2) {
-    const s = u / 0.2
+  if (u < 0.1) {
+    const s = u / 0.1
     return s * s * (3 - 2 * s)
   }
-  if (u <= 0.8) return 1
-  const s = (u - 0.8) / 0.2
+  if (u <= 0.9) return 1
+  const s = (u - 0.9) / 0.1
   return 1 - s * s * (3 - 2 * s)
 }
 
@@ -239,6 +285,13 @@ interface VrmDebug {
     thighL: number
     kneeR: number
     thighR: number
+    /** Fix pass 8: the TRUE knee bend (degrees, 0 = straight) read
+        BACK from the RAW leg bones after humanoid.update() — the
+        angle the render actually shows. kneeL/thighL above are the
+        COMMANDED normalized values, not the rendered bend: the pass-7
+        readout quoted them, so it said 57° while the pixels showed
+        straight legs. */
+    kneeBendDeg: number
   }
 }
 
@@ -300,6 +353,21 @@ const READ_UPPER = 0.6
 const READ_ELBOW = 0.3
 const READ_ADDUCT = 0.5
 
+/**
+ * Raw leg bones (what the skinning actually uses — NOT the normalized
+ * rig nodes the walk writes to). Fix pass 8: the DOM readout is read
+ * BACK from these after humanoid.update(), so it reports the bend the
+ * render shows instead of the angle the walk commanded.
+ */
+interface RawLegs {
+  hipL: THREE.Object3D
+  kneeL: THREE.Object3D
+  ankL: THREE.Object3D
+  hipR: THREE.Object3D
+  kneeR: THREE.Object3D
+  ankR: THREE.Object3D
+}
+
 interface ThreeStage {
   renderer: THREE.WebGLRenderer
   scene: THREE.Scene
@@ -313,6 +381,10 @@ interface ThreeStage {
   chestBaseRotationX: number
   headBaseRotationX: number
   walkRig: WalkRig | null
+  /** Raw leg bones for the read-back readout (fix pass 8); null when
+      any of them is missing, in which case the readout falls back to
+      the normalized nodes. */
+  rawLegs: RawLegs | null
   /** The small book in her left hand (menu tab only). */
   handBook: HandBookRig | null
   readRig: ReadRig | null
@@ -598,6 +670,7 @@ export default function VrmModel({
         thighL: 0,
         kneeR: 0,
         thighR: 0,
+        kneeBendDeg: 0,
       },
     }
   }, [])
@@ -651,6 +724,7 @@ export default function VrmModel({
           thighL: 0,
           kneeR: 0,
           thighR: 0,
+          kneeBendDeg: 0,
         }
       }
     }
@@ -696,6 +770,7 @@ export default function VrmModel({
           thighL: 0,
           kneeR: 0,
           thighR: 0,
+          kneeBendDeg: 0,
         },
       }
       setStatus('failed')
@@ -807,6 +882,33 @@ export default function VrmModel({
               baseZ.set(n, n.rotation.z)
             }
           })
+          // Fix pass 8 — leg bases are the FILE rest (0), never the
+          // live value: the VRM is shared across mounts, and a mount
+          // that unmounts mid-walk leaves the normalized leg nodes
+          // mid-pose; the next mount used to capture that pose as its
+          // "rest", so the walk added 1.0 rad on top of it and the
+          // readout showed 76°/95°/115° (measured —
+          // scripts/fix8-walk-probe.mjs: unmount at peak knee 1.0,
+          // remount captures base 1.0, next peak reads 2.0 rad =
+          // 114.6°). The file's leg rest IS 0 (measured: rest baseX
+          // 0.000 on all four leg nodes, normalizedRestPose identity;
+          // prepare() never rotates the legs, only the arms), so the
+          // bases are forced to 0 here and any leftover rotation is
+          // reset on the nodes — a mount self-heals a drifted session
+          // instead of inheriting it. Arms/hips/feet keep the live
+          // capture: the arms carry prepare()'s rest pose.
+          const legNodes = [
+            nodes.leftUpperLeg,
+            nodes.rightUpperLeg,
+            nodes.leftLowerLeg,
+            nodes.rightLowerLeg,
+          ] as THREE.Object3D[]
+          legNodes.forEach((n) => {
+            baseX.set(n, 0)
+            baseZ.set(n, 0)
+            n.rotation.x = 0
+            n.rotation.z = 0
+          })
           walkRig = {
             ...(nodes as Omit<WalkRig, 'baseX' | 'baseZ' | 'hips' | 'leftFoot' | 'rightFoot'>),
             hips,
@@ -875,6 +977,26 @@ export default function VrmModel({
         }
       }
 
+      // Raw leg bones (fix pass 8): the skinning bones the readout is
+      // read BACK from. getRawBoneNode, not getNormalizedBoneNode —
+      // the normalized nodes are the walk's INPUT, the raw nodes are
+      // what the renderer shows.
+      let rawLegs: RawLegs | null = null
+      try {
+        const humanoid = vrm.humanoid
+        const hipL = humanoid.getRawBoneNode('leftUpperLeg')
+        const kneeL = humanoid.getRawBoneNode('leftLowerLeg')
+        const ankL = humanoid.getRawBoneNode('leftFoot')
+        const hipR = humanoid.getRawBoneNode('rightUpperLeg')
+        const kneeR = humanoid.getRawBoneNode('rightLowerLeg')
+        const ankR = humanoid.getRawBoneNode('rightFoot')
+        if (hipL && kneeL && ankL && hipR && kneeR && ankR) {
+          rawLegs = { hipL, kneeL, ankL, hipR, kneeR, ankR }
+        }
+      } catch {
+        rawLegs = null
+      }
+
       threeRef.current = {
         renderer,
         scene,
@@ -888,6 +1010,7 @@ export default function VrmModel({
         chestBaseRotationX,
         headBaseRotationX,
         walkRig,
+        rawLegs,
         handBook,
         readRig,
         readRest,
@@ -924,6 +1047,30 @@ export default function VrmModel({
       const readTmpQ = new THREE.Quaternion()
       const bookCarryIdle = new THREE.Quaternion()
       const bookCarryWant = new THREE.Quaternion()
+      // Walk-readout scratch (fix pass 8): raw-bone read-back, reused
+      // every frame — no allocation in the loop.
+      const rawHip = new THREE.Vector3()
+      const rawKnee = new THREE.Vector3()
+      const rawAnk = new THREE.Vector3()
+      const rawDirA = new THREE.Vector3()
+      const rawDirB = new THREE.Vector3()
+      /** True knee bend of one leg (degrees, 0 = straight) from the
+          RAW bones' world positions — the angle the render shows. */
+      const rawKneeBend = (hip: THREE.Object3D, knee: THREE.Object3D, ank: THREE.Object3D): number => {
+        hip.getWorldPosition(rawHip)
+        knee.getWorldPosition(rawKnee)
+        ank.getWorldPosition(rawAnk)
+        rawDirA.copy(rawHip).sub(rawKnee).normalize()
+        rawDirB.copy(rawAnk).sub(rawKnee).normalize()
+        return (
+          180 -
+          (Math.acos(THREE.MathUtils.clamp(rawDirA.dot(rawDirB), -1, 1)) * 180) / Math.PI
+        )
+      }
+      // Last frame's read-back bend (the debug block runs before the
+      // sync below, so it reports this; the DOM readout below reports
+      // the current frame's).
+      let kneeBendDeg = 0
       const loop = () => {
         if (cancelled) return
         raf = requestAnimationFrame(loop)
@@ -1023,19 +1170,36 @@ export default function VrmModel({
               // solved angle, so the step reads from the front camera
               // instead of hiding in depth. Returns to the solved
               // angle as lift falls to 0; the stance leg is untouched.
+              // Fix pass 8 — the bend signs are FLIPPED from passes
+              // 6–7 (measured — scripts/fix8-walk-probe.mjs): the old
+              // thigh −0.45 / knee +1.00 folded the leg BACKWARDS
+              // (knee 0.15 m away from the camera, foot forward), so
+              // the 55° 3D bend read as 169° — straight — in the
+              // front camera plane. Now the thigh swings FORWARD
+              // (+THIGH_LIFT) and the shin bends BACK (−KNEE_SWING):
+              // knee toward the camera (+0.15 m), foot behind it —
+              // the anatomical direction. The stepping SHIN also
+              // splays sideways opposite the thigh (SHIN_SPLAY), so
+              // the knee juts out across the frame: measured
+              // front-projected knee 138–149° (was 169°), foot lift
+              // 0.10–0.12 m. The stance shin is set to 0 explicitly.
               setZ(rig.leftUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
               setZ(rig.rightUpperLeg, stanceAngle)
-              setX(rig.leftUpperLeg, -THIGH_LIFT * lift)
-              setX(rig.leftLowerLeg, KNEE_SWING * lift)
+              setX(rig.leftUpperLeg, THIGH_LIFT * lift)
+              setX(rig.leftLowerLeg, -KNEE_SWING * lift)
+              setZ(rig.leftLowerLeg, -SHIN_SPLAY * lift * dir)
               setX(rig.rightLowerLeg, 0)
+              setZ(rig.rightLowerLeg, 0)
               if (rig.leftFoot) rig.leftFoot.rotation.x = (rig.baseX.get(rig.leftFoot) ?? 0) - 0.35 * lift * env
               if (rig.rightFoot) rig.rightFoot.rotation.x = rig.baseX.get(rig.rightFoot) ?? 0
             } else {
               setZ(rig.rightUpperLeg, swingAngle + SWING_SPLAY * lift * dir)
               setZ(rig.leftUpperLeg, stanceAngle)
-              setX(rig.rightUpperLeg, -THIGH_LIFT * lift)
-              setX(rig.rightLowerLeg, KNEE_SWING * lift)
+              setX(rig.rightUpperLeg, THIGH_LIFT * lift)
+              setX(rig.rightLowerLeg, -KNEE_SWING * lift)
+              setZ(rig.rightLowerLeg, -SHIN_SPLAY * lift * dir)
               setX(rig.leftLowerLeg, 0)
+              setZ(rig.leftLowerLeg, 0)
               if (rig.rightFoot) rig.rightFoot.rotation.x = (rig.baseX.get(rig.rightFoot) ?? 0) - 0.35 * lift * env
               if (rig.leftFoot) rig.leftFoot.rotation.x = rig.baseX.get(rig.leftFoot) ?? 0
             }
@@ -1075,28 +1239,11 @@ export default function VrmModel({
           }
         }
 
-        // Walk readout (MenuVita panel, fix pass 6): live walk state
-        // every frame — the cloud-browser check cannot open devtools,
-        // so the walk is observable as plain DOM text in the panel.
-        // The store only notifies on a displayed change, so the
-        // 60 fps writes do not re-render the panel 60 times a second.
-        // Live knee angle (fix pass 7): read BACK from the VRM's
-        // normalized leg nodes — the stepping knee's rotation.x in
-        // degrees. This is the runtime value, not the commanded
-        // constant: if the gait writes were lost anywhere, this
-        // reads 0 while walking. The panel shows it as DOM text.
-        const walkRig = three.walkRig
-        const kneeDeg = walkRig
-          ? (Math.max(walkRig.leftLowerLeg.rotation.x, walkRig.rightLowerLeg.rotation.x) * 180) / Math.PI
-          : 0
-        setWalkStatus({
-          walking: walkRef.current.t < WALK_DURATION,
-          step: walkStep,
-          steps: STEP_COUNT,
-          x: three.group.position.x,
-          tick: walkTickRef.current,
-          kneeDeg,
-        })
+        // Walk readout: moved BELOW, after humanoid.update() — it
+        // must be read BACK from the raw bones (fix pass 8, see the
+        // readout block after the sync). The old block here read the
+        // normalized nodes right after the walk wrote them, so it
+        // reported the commanded angle even if the sync was lost.
 
         const speaking = bridge.isSpeaking()
         if (speaking && !wasSpeaking) nodT = 0
@@ -1396,14 +1543,16 @@ export default function VrmModel({
             rig: !!wr,
             reducedMotion,
             hidden: document.hidden,
-            // Fix pass 7: live leg angles read back from the VRM's
-            // normalized nodes (radians) — the runtime proof the
-            // gait writes reach the bones. 0 at rest; knee ≈ 1.0,
-            // thigh ≈ −0.45 at full bend.
+            // Fix pass 7: live leg angles read from the VRM's
+            // normalized nodes (radians) — the COMMANDED pose, not
+            // the rendered bend. 0 at rest; knee ≈ −1.0, thigh
+            // ≈ +0.45 at full bend (signs flipped in fix pass 8).
+            // The rendered bend is kneeBendDeg (fix pass 8).
             kneeL: wr ? Math.round(wr.leftLowerLeg.rotation.x * 100) / 100 : 0,
             thighL: wr ? Math.round(wr.leftUpperLeg.rotation.x * 100) / 100 : 0,
             kneeR: wr ? Math.round(wr.rightLowerLeg.rotation.x * 100) / 100 : 0,
             thighR: wr ? Math.round(wr.rightUpperLeg.rotation.x * 100) / 100 : 0,
+            kneeBendDeg: Math.round(kneeBendDeg * 10) / 10,
           }
         }
 
@@ -1418,6 +1567,54 @@ export default function VrmModel({
         // disturb anything else.
         three.vrm.humanoid?.update()
 
+        // Walk readout (MenuVita panel, fix pass 6; read-back fixed
+        // in fix pass 8): live walk state every frame — the
+        // cloud-browser check cannot open devtools, so the walk is
+        // observable as plain DOM text in the panel. The store only
+        // notifies on a displayed change, so the 60 fps writes do
+        // not re-render the panel 60 times a second.
+        // Live knee angle — read BACK from the RAW leg bones AFTER
+        // the sync above (the true 3D bend, 0 = straight, ~62° at
+        // full bend with the pass-8 constants), never the normalized
+        // rotation.x the walk just wrote. The pass-7 readout read
+        // the normalized node right after writing it, so it reported
+        // the commanded 57° even when the sync was skipped entirely
+        // (measured — scripts/fix8-walk-probe.mjs run C) — and, with
+        // a drifted base, up to 115° for a bend that never existed.
+        // When there are no raw leg bones, fall back to the
+        // normalized nodes (still a live read, just pre-sync).
+        // The walk's tick is reported only while walking: once the
+        // walk ends the status resets to idle (tick 0), so the panel
+        // returns to "Vita est prête…" instead of going stale on a
+        // "Marche…" line — and the same idle write happens on
+        // unmount, so a reading that ends in a tab switch leaves no
+        // stale line behind either.
+        {
+          const walkingNow = walkRef.current.t < WALK_DURATION
+          const raw = three.rawLegs
+          kneeBendDeg = raw
+            ? Math.max(
+                rawKneeBend(raw.hipL, raw.kneeL, raw.ankL),
+                rawKneeBend(raw.hipR, raw.kneeR, raw.ankR),
+              )
+            : three.walkRig
+              ? (Math.max(
+                  Math.abs(three.walkRig.leftLowerLeg.rotation.x),
+                  Math.abs(three.walkRig.rightLowerLeg.rotation.x),
+                ) *
+                  180) /
+                Math.PI
+              : 0
+          setWalkStatus({
+            walking: walkingNow,
+            step: walkStep,
+            steps: STEP_COUNT,
+            x: three.group.position.x,
+            tick: walkingNow ? walkTickRef.current : 0,
+            kneeDeg: kneeBendDeg,
+          })
+        }
+
         three.renderer.render(three.scene, three.camera)
       }
       raf = requestAnimationFrame(loop)
@@ -1428,19 +1625,31 @@ export default function VrmModel({
       cancelled = true
       cancelAnimationFrame(raf)
       const three = threeRef.current
-      // Walk readout (fix pass 6): the loop stops writing on unmount,
-      // so report the rest state here — otherwise a tab switch
-      // mid-walk would leave the panel stuck on a stale "Marche…"
-      // line. The last lateral position is kept, so the panel still
-      // reads "Arrivée · x …" after the fact.
-      setWalkStatus({
-        walking: false,
-        step: 0,
-        steps: STEP_COUNT,
-        x: three?.group.position.x ?? walkRef.current.toX,
-        tick: walkTickRef.current,
-        kneeDeg: 0,
-      })
+      // Walk readout (fix pass 6, reset fixed in fix pass 8): the loop
+      // stops writing on unmount, so reset the store to idle here —
+      // otherwise a tab switch mid-walk (e.g. a reading ending in a
+      // big-book open) would leave the panel stuck on a stale
+      // "Marche…" line. resetWalkStatus() keeps the last lateral
+      // position and zeroes walking/step/tick/kneeDeg, so the panel
+      // shows "Vita est prête…".
+      resetWalkStatus()
+      // Fix pass 8: restore the SHARED VRM's walk bones to the
+      // mount's rest bases before detaching — a mount that unmounts
+      // mid-walk used to leave the normalized leg/arm nodes mid-pose,
+      // and the next mount captured that pose as its rest (the base
+      // drift behind the 76°/95°/115° readouts). The leg bases are
+      // already forced to the file rest (0) at rig build, but the
+      // arms/hips/feet still use the live capture, so they are
+      // restored here too. The next mount's first vrm.update()
+      // syncs the raw bones from these clean normalized nodes.
+      if (three?.walkRig) {
+        three.walkRig.baseX.forEach((base, node) => {
+          node.rotation.x = base
+        })
+        three.walkRig.baseZ.forEach((base, node) => {
+          node.rotation.z = base
+        })
+      }
       threeRef.current = null
       if (three) {
         // Fix pass 8: restore the SHARED cached VRM's reading arm to

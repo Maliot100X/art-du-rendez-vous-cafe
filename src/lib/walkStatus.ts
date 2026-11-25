@@ -12,8 +12,10 @@
  * The store notifies only when a displayed field changes (walking,
  * step, tick, or x rounded to the centimetre), so the 60 fps writes
  * from the render loop do not re-render the panel 60 times a second.
- * The last state persists at rest, so the check can read "Arrivée"
- * after the walk has finished too.
+ * When a walk ends the loop writes the idle state (tick 0), so the
+ * panel returns to "Vita est prête…" instead of going stale on a
+ * "Marche…" line — and resetWalkStatus() below does the same when a
+ * reading ends.
  */
 
 export interface WalkStatus {
@@ -25,13 +27,18 @@ export interface WalkStatus {
   steps: number
   /** Lateral group position in metres (WALK_LEFT -0.08 / WALK_RIGHT +0.14). */
   x: number
-  /** Walk trigger nonce (VrmModel walkTick); 0 before any walk. */
+  /** Walk trigger nonce (VrmModel walkTick); 0 before any walk, and 0
+      again once the walk has ended (idle) — the panel shows
+      "Vita est prête…" while tick is 0. */
   tick: number
   /** Stepping knee angle in degrees, read BACK live from the VRM's
-      normalized leg nodes (fix pass 7) — the cloud-browser check
-      reads it as DOM text, so the walk is provable without devtools:
-      ~57° at full bend, 0 at rest. If the gait writes were lost
-      anywhere, this reads 0 while walking. */
+      RAW leg bones after humanoid.update() (fix pass 8) — the true
+      3D bend, 0 = straight, ~62° at full bend with the pass-8
+      constants. The cloud-browser check reads it as DOM text, so the
+      walk is provable without devtools. The pass-7 version read the
+      NORMALIZED nodes right after the walk wrote them, so it reported
+      the commanded angle (57°, and up to 115° with a drifted base)
+      even when the rendered legs were straight. */
   kneeDeg: number
 }
 

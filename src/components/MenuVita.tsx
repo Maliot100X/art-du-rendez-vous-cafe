@@ -306,13 +306,15 @@ export function useVitaGuide({
   const onReadingEnd = useCallback(() => {
     const pending = pendingOpenRef.current
     // Fix pass 8: the VRM's reading is over — the walk line returns to
-    // "Vita est prête…". The React reading state is deliberately left
-    // alone here: a brain reply may still be in flight for this
-    // reading, and clearing it would make the reply's nonce guard
-    // drop the re-time + the spoken answer (see ask()/askBartender).
-    // The stale object is harmless — the reading effect only fires on
-    // a tick/category/seconds change, and the next ask or tap
-    // replaces it with a fresh nonce.
+    // "Vita est prête…". (The walk itself already ended, so the loop
+    // has written idle; this covers the case where the status was
+    // still showing a walk line when the reading finished.) The React
+    // reading state is deliberately left alone here: a brain reply may
+    // still be in flight for this reading, and clearing it would make
+    // the reply's nonce guard drop the re-time + the spoken answer
+    // (see ask()/askBartender). The stale object is harmless — the
+    // reading effect only fires on a tick/category/seconds change, and
+    // the next ask or tap replaces it with a fresh nonce.
     resetWalkStatus()
     if (pending && replyArrivedRef.current) {
       pendingOpenRef.current = null
