@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
@@ -66,12 +66,40 @@ function Dust() {
 }
 
 export default function HeroDust() {
+  const glRef = useRef<THREE.WebGLRenderer | null>(null)
+  // Fix pass 4: R3F disposes the scene on unmount but does NOT give the
+  // GL context back — every Home visit leaked a context, and a page
+  // that keeps creating contexts eventually hits the browser's limit
+  // (the next renderer creation fails and a stage goes black — the
+  // prime suspect for the Agent's Live2D failing after tab-hopping).
+  // forceContextLoss on unmount, like VrmModel / MenuBook already do.
+  useEffect(
+    () => () => {
+      const gl = glRef.current
+      glRef.current = null
+      if (!gl) return
+      try {
+        gl.forceContextLoss()
+      } catch {
+        // Context already lost — nothing to free.
+      }
+      try {
+        gl.dispose()
+      } catch {
+        // Already disposed — ignore.
+      }
+    },
+    [],
+  )
   return (
     <Canvas
       dpr={[1, pixelRatioCap()]}
       camera={{ position: [0, 0, 7], fov: 50 }}
       gl={{ antialias: true, alpha: true }}
       style={{ pointerEvents: 'none' }}
+      onCreated={({ gl }) => {
+        glRef.current = gl
+      }}
     >
       <Dust />
       <EffectComposer>

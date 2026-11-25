@@ -65,8 +65,21 @@ declare global {
       param3: number
       /** Whether model.expression('Henshin') resolved true. */
       expressionOk: boolean | null
+      /**
+       * The init failure, when status is 'failed' — the exact error
+       * message (fix pass 4: the old code swallowed it, so a failed
+       * stage gave no clue what broke). The cloud-browser check reads
+       * this to name the real cause instead of guessing.
+       */
+      error: string | null
     }
   }
+}
+
+/** Last Live2D init failure (module-level, for the retry + diagnostics). */
+let live2dError: string | null = null
+export function getLive2dError(): string | null {
+  return live2dError
 }
 
 const CORE_LOCAL = '/live2d/live2dcubismcore.min.js'
@@ -155,9 +168,16 @@ async function preloadLive2dOnce(): Promise<void> {
 
   let loaded = 0
   let knownTotal = 0
+  // Fix pass 4: one flaky file (tunnel hiccup) must not kill the whole
+  // prewarm — the stage re-fetches on mount anyway. Settle per file
+  // and warn once about the failures instead of rejecting.
+  const failures: string[] = []
   const track = async (url: string) => {
     const res = await fetch(url)
-    if (!res.ok) throw new Error(`Live2D preload fetch failed: ${res.status} ${url}`)
+    if (!res.ok) {
+      failures.push(`${res.status} ${url}`)
+      return
+    }
     if (!res.body) {
       await res.arrayBuffer()
       return
@@ -173,7 +193,8 @@ async function preloadLive2dOnce(): Promise<void> {
       }
     }
   }
-  await Promise.all(urls.map(track))
+  await Promise.allSettled(urls.map(track))
+  if (failures.length > 0) console.warn('Live2D prewarm: files failed (stage will retry on mount):', failures)
   setLive2dProgress(100, '')
 }
 
@@ -227,6 +248,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   const formRef = useRef<Form>('human')
   const fitRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  /** Retry nonce: the init effect re-runs on each increment, so the
+      failed stage can be retried in place instead of reloading the page. */
+  const [retryTick, setRetryTick] = useState(0)
   const [form, setForm] = useState<Form>('human')
   // Prewarm progress (fix pass 3): the idle preload's byte progress,
   // shown honestly while the stage loads — never a blank dark area.
@@ -259,6 +283,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
   useEffect(() => {
     let cancelled = false
     let app: import('pixi.js').Application | null = null
+    // The stage canvas, so a failed init (e.g. PIXI.Application
+    // throwing on context creation) never leaves an orphan canvas in
+    // the container for the retry to stack a second one onto.
+    let canvasEl: HTMLCanvasElement | null = null
 
     const init = async () => {
       const container = containerRef.current
@@ -277,6 +305,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         canvas.style.height = '100%'
         canvas.style.display = 'block'
         container.appendChild(canvas)
+        canvasEl = canvas
 
         app = new PIXI.Application({
           view: canvas,
@@ -323,6 +352,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             mouthScreenPx: [Math.round(w / 2), Math.round(stageY(0.528))],
             param3: window.__nekomiDebug?.param3 ?? -1,
             expressionOk: window.__nekomiDebug?.expressionOk ?? null,
+            error: window.__nekomiDebug?.error ?? null,
           }
         }
         fitRef.current = fit
@@ -420,8 +450,30 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           detachTicker()
           container.removeEventListener('pointermove', onPointer)
         }
-      } catch {
-        if (!cancelled) setStatus('failed')
+      } catch (err: unknown) {
+        if (!cancelled) {
+          // Fix pass 4: record the REAL error instead of swallowing it
+          // — the previous build failed with a bare "MODÈLE
+          // INDISPONIBLE" and no clue what broke. The cloud-browser
+          // check reads window.__nekomiDebug.error to name the cause
+          // (WebGL context limit, missing file, parse failure…).
+          const message = err instanceof Error ? err.message : String(err)
+          live2dError = message
+          window.__nekomiDebug = {
+            status: 'failed',
+            form: formRef.current,
+            stageW: containerRef.current?.clientWidth ?? 0,
+            stageH: containerRef.current?.clientHeight ?? 0,
+            bounds: { x: 0, y: 0, width: 0, height: 0 },
+            scale: 0,
+            eyeScreenPx: [0, 0],
+            mouthScreenPx: [0, 0],
+            param3: -1,
+            expressionOk: null,
+            error: message,
+          }
+          setStatus('failed')
+        }
       }
     }
 
@@ -448,8 +500,16 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // Already destroyed — nothing to free.
       }
       app = null
+      // Orphan canvas from an init that threw before the app existed
+      // (context creation): PIXI never got to remove it.
+      const container = containerRef.current
+      if (canvasEl && container && canvasEl.parentElement === container) {
+        container.removeChild(canvasEl)
+      }
+      canvasEl = null
     }
-  }, [bridge])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge, retryTick])
 
   const setHenshin = (next: Form) => {
     formRef.current = next
@@ -517,6 +577,19 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
               <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" />
               {status === 'loading' ? 'Modèle en cours de chargement' : 'Modèle indisponible'}
             </span>
+            {status === 'failed' && (
+              <button
+                type="button"
+                onClick={() => {
+                  live2dError = null
+                  setStatus('loading')
+                  setRetryTick((t) => t + 1)
+                }}
+                className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-bone px-6 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.03]"
+              >
+                ↻ Réessayer
+              </button>
+            )}
           </div>
         )}
         <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/85 backdrop-blur">
