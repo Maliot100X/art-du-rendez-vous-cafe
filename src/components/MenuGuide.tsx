@@ -355,7 +355,12 @@ export function MenuGuidePanel({ guide }: { guide: MenuGuide }) {
             <button
               type="button"
               onClick={guide.toggleMute}
-              aria-pressed={guide.muted}
+              // Fix 16: aria-pressed reports whether the feature
+              // the toggle controls (voice) is ON — so pressed is
+              // !muted, not muted (same inversion as the Agent chat
+              // toggle: pressed read true while the icon showed
+              // VolumeX / muted).
+              aria-pressed={!guide.muted}
               aria-label={guide.muted ? 'Activer la voix' : 'Couper la voix'}
               className={`flex min-h-11 min-w-11 items-center justify-center rounded-full border transition-colors duration-300 ${
                 guide.muted
