@@ -194,7 +194,17 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
     setInput('')
     const history = messages
       .slice(-6)
-      .map((m) => ({ role: m.role, text: m.text }) as { role: 'user' | 'assistant'; text: string })
+      .map(
+        (m): { role: 'user' | 'assistant'; text: string } => ({
+          // The chat stores bot turns as role 'bot', but the API only
+          // accepts user/assistant — passing 'bot' through (the old
+          // `as` cast) made every call answer 400 and fall back to
+          // the canned offline reply (fix 15). brain.ts normalises
+          // again at the boundary, so this mapping is the first line.
+          role: m.role === 'bot' ? 'assistant' : 'user',
+          text: m.text,
+        }),
+      )
     void askBrain(clean, history, { persona: 'nekomi' })
       .then(({ reply, source }) => {
         if (source === 'llm') setBrainLive(true)

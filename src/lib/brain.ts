@@ -143,26 +143,44 @@ export interface ChatMessage {
  * value) + reasoning_effort "instant", NO temperature, NO max_tokens.
  * Any other model: temperature 0.7 + max_completion_tokens 300, and
  * never reasoning_effort (a non-reasoning model would reject it).
+ * `maxTokensOverride` is only for the fix-15 content-null retry (a
+ * doubled budget on the second attempt); callers that omit it get
+ * exactly the proven default shape.
  */
 export function buildChatBody(
   model: string,
   baseUrl: string,
   messages: ChatMessage[],
+  maxTokensOverride?: number,
 ): Record<string, unknown> {
   if (isMercuryModel(model, baseUrl)) {
     return {
       model,
       reasoning_effort: 'instant',
-      max_completion_tokens: MERCURY_MAX_COMPLETION_TOKENS,
+      max_completion_tokens: maxTokensOverride ?? MERCURY_MAX_COMPLETION_TOKENS,
       messages,
     }
   }
   return {
     model,
     temperature: 0.7,
-    max_completion_tokens: DEFAULT_MAX_COMPLETION_TOKENS,
+    max_completion_tokens: maxTokensOverride ?? DEFAULT_MAX_COMPLETION_TOKENS,
     messages,
   }
+}
+
+/**
+ * Map any caller-side turn role to a valid OpenAI chat-completions
+ * role. The chat UI stores bot turns as role 'bot' — that string is
+ * NOT a valid chat-completions role, and sending it makes the API
+ * answer 400, which askBrain() then swallows as an offline fallback
+ * (fix 15: every Agent chat call failed this way — the initial bot
+ * greeting is always in the history, so even the first user message
+ * 400'd — and the brain never went live even with a key configured
+ * and CORS fine). Anything that is not the user is the assistant.
+ */
+export function apiChatRole(role: string): 'user' | 'assistant' {
+  return role === 'user' ? 'user' : 'assistant'
 }
 
 interface ChatCompletionsResponse {
@@ -179,31 +197,56 @@ async function callLlm(
   if (!key) throw new Error('no-key')
   if (!/^https?:\/\//.test(baseUrl)) throw new Error('bad-base-url')
 
-  const controller = new AbortController()
-  const timer = window.setTimeout(() => controller.abort(), LLM_TIMEOUT_MS)
+  // Exact URL the browser sends (no doubled /v1 — the base already
+  // ends in /v1): https://api.inceptionlabs.ai/v1/chat/completions
+  const url = `${baseUrl}/chat/completions`
+  const messages: ChatMessage[] = [
+    { role: 'system', content: brainSystemPrompt(persona) },
+    // History roles are normalised here (see apiChatRole): a caller
+    // passing role 'bot' must never reach the wire again.
+    ...history.slice(-6).map((t) => ({ role: apiChatRole(t.role), content: t.text })),
+    { role: 'user', content: message },
+  ]
+
+  // One attempt: POST the proven mercury-3 shape and parse the reply.
+  // Throws 'empty-reply' when choices[0].message.content is null or
+  // blank — the proven mercury-3 shape when reasoning eats the token
+  // budget (finish_reason "length", reasoning_details present).
+  const postOnce = async (maxTokens?: number): Promise<string> => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), LLM_TIMEOUT_MS)
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(buildChatBody(model, baseUrl, messages, maxTokens)),
+        signal: controller.signal,
+      })
+      if (!res.ok) throw new Error(`llm-${res.status}`)
+      const body = (await res.json()) as ChatCompletionsResponse
+      const content = body.choices?.[0]?.message?.content
+      if (typeof content !== 'string' || content.trim().length === 0) throw new Error('empty-reply')
+      return content.trim().slice(0, MAX_REPLY_CHARS)
+    } finally {
+      window.clearTimeout(timer)
+    }
+  }
+
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify(
-        buildChatBody(model, baseUrl, [
-          { role: 'system', content: brainSystemPrompt(persona) },
-          ...history.slice(-6).map((t) => ({ role: t.role, content: t.text })),
-          { role: 'user', content: message },
-        ]),
-      ),
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error(`llm-${res.status}`)
-    const body = (await res.json()) as ChatCompletionsResponse
-    const content = body.choices?.[0]?.message?.content
-    if (typeof content !== 'string' || content.trim().length === 0) throw new Error('empty-reply')
-    return content.trim().slice(0, MAX_REPLY_CHARS)
-  } finally {
-    window.clearTimeout(timer)
+    return await postOnce()
+  } catch (err) {
+    // mercury-3 content-null retry (fix 15): the first call can come
+    // back with content null when reasoning consumes the 512-token
+    // budget — retry ONCE with a doubled budget instead of silently
+    // falling back to the canned offline reply. Any other failure
+    // (no key, 4xx/5xx, timeout) still falls through to offline.
+    if (err instanceof Error && err.message === 'empty-reply' && isMercuryModel(model, baseUrl)) {
+      return await postOnce(MERCURY_MAX_COMPLETION_TOKENS * 2)
+    }
+    throw err
   }
 }
 
