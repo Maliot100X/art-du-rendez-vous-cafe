@@ -25,6 +25,7 @@ export const NAV = {
   links: [
     { label: 'La Carte', hash: '#carte' },
     { label: 'Ambiance', hash: '#ambiance' },
+    { label: 'Galerie', hash: '#galerie' },
     { label: 'Venir', hash: '#venir' },
     { label: 'Agent', hash: '#agent' },
   ],
@@ -232,6 +233,55 @@ export const ATMOSPHERE = {
   ],
 } as const;
 
+export const BOOK = {
+  eyebrow: 'Le livre de la carte',
+  title: 'Feuilletez la carte.',
+  lede: 'Sept familles, soixante-deux prix, un livre. Glissez pour tourner les pages — comme la carte imprimée au bar, mais en trois dimensions.',
+  coverHint: 'Glissez pour tourner la page',
+  prevLabel: 'Page précédente',
+  nextLabel: 'Page suivante',
+  pageLabel: 'Feuille',
+  ofLabel: 'sur',
+  webglFallbackNote: 'Votre navigateur n’affiche pas la 3D — la carte s’ouvre en pages fixes.',
+  reducedMotionNote: 'Mouvement réduit : la carte s’ouvre en pages fixes.',
+} as const;
+
+export const GALLERY = {
+  eyebrow: 'Galerie',
+  title: 'Le café, en images.',
+  lede: 'La façade au néon, le bar en bois, le café du matin, les cocktails de la terrasse — et la carte, en affiche.',
+  poster: {
+    src: '/images/menu-poster-wide-1920x1080.jpg',
+    alt: 'Affiche de la carte des boissons de l’Art du Rendez-Vous — les sept familles et leurs prix',
+    caption: 'La carte, en affiche — les sept familles et leurs prix',
+  },
+  items: [
+    {
+      src: '/images/exterior.jpg',
+      alt: 'Le café à la tombée du jour, briques, auvents rouges et néons',
+      caption: 'La façade, à la tombée du jour',
+    },
+    {
+      src: '/images/bar.jpg',
+      alt: 'Le bar en bois la nuit, verres et chandelles',
+      caption: 'Le bar, sous la lumière bleue',
+    },
+    {
+      src: '/images/coffee.jpg',
+      alt: 'Café en couches dans un grand verre, lumières du café derrière',
+      caption: 'Le café du matin',
+    },
+    {
+      src: '/images/cocktails.jpg',
+      alt: 'Deux cocktails à la menthe sur la terrasse au soleil',
+      caption: 'Cocktails à la menthe, sur la terrasse',
+    },
+  ],
+  lightboxClose: 'Fermer l’image',
+  lightboxPrev: 'Image précédente',
+  lightboxNext: 'Image suivante',
+} as const;
+
 export const VISIT = {
   eyebrow: 'Venir',
   title: 'Trouver le café.',
@@ -304,6 +354,7 @@ export const FOOTER = {
       links: [
         { label: 'La carte', hash: '#carte' },
         { label: 'Ambiance', hash: '#ambiance' },
+        { label: 'Galerie', hash: '#galerie' },
         { label: 'Venir', hash: '#venir' },
       ],
     },

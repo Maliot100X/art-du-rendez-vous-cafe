@@ -10,6 +10,8 @@ import { useReveal } from './lib/useReveal'
 // Below-fold sections load in their own chunks so the first paint stays
 // lean (Three.js + postprocessing already make the main bundle large).
 const Atmosphere = lazy(() => import('./components/Atmosphere'))
+const MenuBook = lazy(() => import('./components/MenuBook'))
+const Gallery = lazy(() => import('./components/Gallery'))
 const Agent = lazy(() => import('./components/Agent'))
 
 export default function App() {
@@ -33,7 +35,13 @@ export default function App() {
         <Hero />
         <MenuSection onAdd={addToOrder} />
         <Suspense fallback={null}>
+          <MenuBook />
+        </Suspense>
+        <Suspense fallback={null}>
           <Atmosphere />
+        </Suspense>
+        <Suspense fallback={null}>
+          <Gallery />
         </Suspense>
         <Visit />
         <Suspense fallback={null}>
