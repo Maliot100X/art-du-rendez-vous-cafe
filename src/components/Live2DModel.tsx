@@ -774,7 +774,20 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         writeParam3(model, param3Current)
         const applyHenshin = () => {
           const target = lastHenshinForm === 'furry' ? 1 : 0
-          param3Current += (target - param3Current) * 0.12
+          // Fix pass 15: measured on the real .moc3 (see
+          // scripts/fix15-nits-probe.mjs), the rig crossfades the two
+          // forms' opacities linearly over Param3 0.3–0.7 — below 0.3
+          // the human face reads, above 0.7 the furry face reads, and
+          // between them both sets are semi-transparent (at 0.5 both
+          // 0.5: a featureless double-exposed wash). The old 0.12
+          // exponential spent 7 frames in that band and its tail took
+          // 55 frames to land (0.9 s at 60 fps, ~1.8 s at 30 fps), so
+          // the morph read as a white blob. 0.25 crosses the band in
+          // 3 frames and the snap below lands exactly on the readable
+          // end (0 or 1) instead of lingering just short of it — the
+          // morph still dissolves, but it holds at a readable form.
+          param3Current += (target - param3Current) * 0.25
+          if (Math.abs(target - param3Current) < 0.02) param3Current = target
           writeParam3(model, param3Current)
         }
         const internalModelEmitter = model.internalModel as unknown as {
@@ -877,7 +890,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // be eased and written in this tick, but the value only becomes
         // visible when the model's own update runs inside _render — so
         // the form is now driven from inside that update by the
-        // `afterMotionUpdate` hook attached above (same 0.12 ease, so
+        // `afterMotionUpdate` hook attached above (same 0.25 ease, so
         // the switch still fades instead of snapping). This tick keeps
         // the expression presets + the live mouth value, which are
         // applied after the model's own update and before the render.

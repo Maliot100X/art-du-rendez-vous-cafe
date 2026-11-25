@@ -344,19 +344,27 @@ export function MenuGuidePanel({ guide }: { guide: MenuGuide }) {
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-bone">Nekomi vous guide</p>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={guide.toggleMute}
-            aria-pressed={guide.muted}
-            aria-label={guide.muted ? 'Activer la voix' : 'Couper la voix'}
-            className={`flex min-h-11 min-w-11 items-center justify-center rounded-full border transition-colors duration-300 ${
-              guide.muted
-                ? 'border-line text-mist hover:text-bone'
-                : 'border-amber/60 bg-amber/10 text-amber hover:bg-amber hover:text-ink'
-            }`}
-          >
-            {guide.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-          </button>
+          {/* Fix pass 15: this button's accessible name is "Couper la
+              voix" while unmuted, so it was present on LA CARTE before
+              any reading had started. It only renders while a reading
+              is active (reading is mirrored from the module-level
+              store, src/lib/readingStore.ts) — there is no voice to
+              cut before then. */}
+          {guide.reading && (
+            <button
+              type="button"
+              onClick={guide.toggleMute}
+              aria-pressed={guide.muted}
+              aria-label={guide.muted ? 'Activer la voix' : 'Couper la voix'}
+              className={`flex min-h-11 min-w-11 items-center justify-center rounded-full border transition-colors duration-300 ${
+                guide.muted
+                  ? 'border-line text-mist hover:text-bone'
+                  : 'border-amber/60 bg-amber/10 text-amber hover:bg-amber hover:text-ink'
+              }`}
+            >
+              {guide.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
+          )}
         </div>
       </div>
 
