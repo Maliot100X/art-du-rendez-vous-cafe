@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
+import ErrorBoundary from './ErrorBoundary'
 import { HERO } from '../content'
 import { onFrame, scrollToHash, useReducedMotion } from '../lib/scroll'
 import { clamp } from '../lib/math'
@@ -140,9 +141,14 @@ export default function Hero() {
 
   return (
     <section ref={sectionRef} id="top" className="relative overflow-clip pt-[86px] sm:pt-[104px]">
-      {/* 3D dust veil behind everything */}
+      {/* 3D dust veil behind everything. Decorative only: if WebGL is
+          unavailable (headless browsers, old devices) the boundary drops
+          the canvas instead of letting R3F's renderer throw unmount the
+          whole app. */}
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <DustScene />
+        <ErrorBoundary fallback={null}>
+          <DustScene />
+        </ErrorBoundary>
       </div>
       {/* Warm glow, low in the frame */}
       <div
