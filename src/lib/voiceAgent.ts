@@ -64,6 +64,7 @@ export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'ended'
 export type VoiceErrorReason =
   | 'no-token'
   | 'mic-denied'
+  | 'mic-missing'
   | 'worklet-unsupported'
   | 'socket-error'
   | 'settings-rejected'
@@ -86,9 +87,17 @@ function menuSummary(): string {
   ).join('\n')
 }
 
-function agentPrompt(): string {
+/** The agent's spoken/written name: 'vita' is the 3D barmaid, 'nekomi'
+    the Live2D form — one and the same person (see content.ts CHARACTER). */
+export type VoicePersona = 'vita' | 'nekomi'
+
+function personaName(persona: VoicePersona): string {
+  return persona === 'nekomi' ? 'Nekomi' : 'Vita'
+}
+
+function agentPrompt(persona: VoicePersona = 'vita'): string {
   return [
-    'Tu es Nekomi, l\u2019agent en direct de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.',
+    `Tu es ${personaName(persona)}, l\u2019agent en direct de l\u2019Art du Rendez-Vous, un café-bar à Bruxelles.`,
     'Tu parles français, avec chaleur et concision — une ou deux phrases par réponse.',
     `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
     'Horaires : à confirmer — aucun horaire n’est listé sur Google Maps pour ce lieu.',
@@ -100,7 +109,7 @@ function agentPrompt(): string {
   ].join('\n')
 }
 
-function settingsMessage(): Record<string, unknown> {
+function settingsMessage(persona: VoicePersona = 'vita'): Record<string, unknown> {
   return {
     type: 'Settings',
     audio: {
@@ -119,7 +128,7 @@ function settingsMessage(): Record<string, unknown> {
       },
       think: {
         provider: { type: 'open_ai', model: 'gpt-4o-mini', temperature: 0.7 },
-        prompt: agentPrompt(),
+        prompt: agentPrompt(persona),
         functions: [
           {
             name: 'add_to_order',
@@ -144,8 +153,7 @@ function settingsMessage(): Record<string, unknown> {
       speak: {
         provider: { type: 'deepgram', version: 'v2', model: 'flux-alexis-en' },
       },
-      greeting:
-        'Bonjour, bienvenue à l\u2019Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir.',
+      greeting: `Bonjour, je suis ${personaName(persona)}, bienvenue à l\u2019Art du Rendez-Vous. Un café, une bière, un apéritif ? Dites-moi ce qui vous ferait plaisir.`,
     },
   }
 }
@@ -210,9 +218,30 @@ function findMenuItem(name: string): VoiceOrderLine | null {
   return null
 }
 
+/**
+ * Map a getUserMedia failure to the honest reason. A refused permission
+ * (NotAllowedError, SecurityError) is 'mic-denied'; no microphone on the
+ * device — or one that cannot be read or satisfied (NotFoundError,
+ * NotReadableError, OverconstrainedError) — is 'mic-missing'. Anything
+ * unclassified keeps the old 'mic-denied' so no failure is ever silent.
+ * getUserMedia rejects with a DOMException (not an Error subclass), so
+ * the name is read off any object-like value.
+ */
+function micErrorReason(err: unknown): VoiceErrorReason {
+  const name =
+    typeof err === 'object' && err !== null && 'name' in err
+      ? String((err as { name: unknown }).name)
+      : ''
+  if (name === 'NotAllowedError' || name === 'SecurityError') return 'mic-denied'
+  if (name === 'NotFoundError' || name === 'NotReadableError' || name === 'OverconstrainedError')
+    return 'mic-missing'
+  return 'mic-denied'
+}
+
 export class DeepgramVoiceAgent {
   private callbacks: VoiceAgentCallbacks
   private bridge: AvatarBridge
+  private persona: VoicePersona
   private ws: WebSocket | null = null
   private ctx: AudioContext | null = null
   private micStream: MediaStream | null = null
@@ -231,9 +260,11 @@ export class DeepgramVoiceAgent {
   constructor(
     callbacks: VoiceAgentCallbacks,
     bridge: AvatarBridge = avatarBridge,
+    persona: 'vita' | 'nekomi' = 'vita',
   ) {
     this.callbacks = callbacks
     this.bridge = bridge
+    this.persona = persona
   }
 
   isRunning(): boolean {
@@ -245,18 +276,14 @@ export class DeepgramVoiceAgent {
     this.stopped = false
     this.callbacks.onStatus('connecting')
 
-    // 1. Microphone first, so a denial fails fast with a clear reason
-    //    before any token is spent.
-    let stream: MediaStream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch {
-      this.callbacks.onStatus('ended', 'mic-denied')
-      return
-    }
-    this.micStream = stream
-
-    // 2. Short-lived JWT (see the token note at the top of this file).
+    // 1. Short-lived JWT FIRST (see the token note at the top of this
+    //    file). There is no /api/deepgram/grant backend and production
+    //    has no key, so this fails with 'no-token' today — and it must
+    //    fail BEFORE the microphone is touched, so a mic-less or
+    //    denying browser never reports a mic error for what is really
+    //    a missing token. No mic stream exists yet at this point, so
+    //    there is nothing half-open to clean up; the cleanupMic() call
+    //    stays as a guard.
     let token: string
     try {
       token = await fetchGrantToken()
@@ -265,6 +292,22 @@ export class DeepgramVoiceAgent {
       this.callbacks.onStatus('ended', 'no-token')
       return
     }
+
+    // 2. Microphone — only once a token exists. A device with no mic
+    //    API at all has no microphone: 'mic-missing' without prompting.
+    //    Failures are told apart by error name (see micErrorReason).
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.callbacks.onStatus('ended', 'mic-missing')
+      return
+    }
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (err) {
+      this.callbacks.onStatus('ended', micErrorReason(err))
+      return
+    }
+    this.micStream = stream
 
     // 3. Playback chain: sources -> AnalyserNode tap -> gain -> speakers.
     const ctx = new AudioContext()
@@ -349,7 +392,7 @@ export class DeepgramVoiceAgent {
     }
     switch (msg.type) {
       case 'Welcome':
-        this.ws?.send(JSON.stringify(settingsMessage()))
+        this.ws?.send(JSON.stringify(settingsMessage(this.persona)))
         break
       case 'SettingsApplied':
         this.settingsApplied = true

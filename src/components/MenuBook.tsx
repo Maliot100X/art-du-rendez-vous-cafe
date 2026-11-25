@@ -835,9 +835,10 @@ function StaticSpread({
           />
         </div>
         <div className="p-6 sm:p-8">
-          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-[#9a6a1a]">
-            La carte — {String(MENU.indexOf(category) + 1).padStart(2, '0')} / {String(MENU.length).padStart(2, '0')}
-          </p>
+          {/* Fix pass 11: no "La carte — NN / 07" eyebrow here — the items
+              card carries the spread's single running head, and the canvas
+              intro page (bookPages.ts drawIntro) no longer prints it either.
+              The intro face keeps its title + blurb as the chapter opener. */}
           <h3 className="mt-3 font-display text-4xl font-bold sm:text-5xl">{category.label}</h3>
           <p className="mt-3 font-display text-xl italic text-ink/75">{category.blurb}</p>
           <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-[#8a7d6c]">Les prix — page suivante →</p>

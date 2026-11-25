@@ -175,7 +175,21 @@ function drawIntro(
   paperBase(ctx);
   const img = images.get(page.category.image);
   const imgTop = 0;
-  const imgH = 780;
+  // Fix pass 11: the photo band was 780px, pushing the title block to
+  // canvas y 900–1114 (63–78% of the page) — in the first viewport that
+  // block landed at the bottom edge, below the facing items list, and
+  // read as a duplicated "LA CARTE — NN / 07 / <label>" header (the
+  // items face prints the same running head at y=130). A leaf peek was
+  // ruled out first: on desktop the framed window (half-width 1.11
+  // units) exceeds the book (±1.0) and the next leaf sits directly
+  // behind the visible page, fully occluded — so the second header was
+  // this face's own, not a peek. The fix: the intro face no longer
+  // prints the "LA CARTE — NN / 07" eyebrow (the items face keeps the
+  // spread's single running head), and the shorter photo band moves
+  // the title block up to y ~754–850 (53–60%, mid-page, directly
+  // under the photo) so it reads as the chapter opener, never as a
+  // stray header at the bottom edge.
+  const imgH = 620;
   if (img) {
     // Cover-crop the photo into the top band.
     const scale = Math.max(PAGE_W / img.naturalWidth, imgH / img.naturalHeight);
@@ -198,14 +212,11 @@ function drawIntro(
   }
 
   ctx.textAlign = 'left';
-  ctx.fillStyle = AMBER_DARK;
-  ctx.font = '500 30px "Martian Mono", monospace';
-  ctx.fillText(`LA CARTE — ${String(page.index + 1).padStart(2, '0')} / ${String(MENU.length).padStart(2, '0')}`, 72, 900);
   ctx.fillStyle = INK;
   ctx.font = '700 96px "Bodoni Moda Variable", "Bodoni Moda", Georgia, serif';
   const labelLines = wrapText(ctx, page.category.label, PAGE_W - 144);
-  labelLines.forEach((line, i) => ctx.fillText(line, 72, 1010 + i * 104));
-  const blurbY = 1010 + labelLines.length * 104 + 40;
+  labelLines.forEach((line, i) => ctx.fillText(line, 72, 850 + i * 104));
+  const blurbY = 850 + labelLines.length * 104 + 40;
   ctx.fillStyle = 'rgba(23,18,16,0.75)';
   ctx.font = 'italic 400 38px "Bodoni Moda Variable", "Bodoni Moda", Georgia, serif';
   wrapText(ctx, page.category.blurb, PAGE_W - 144).forEach((line, i) => {

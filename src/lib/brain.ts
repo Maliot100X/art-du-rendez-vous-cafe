@@ -96,10 +96,18 @@ function menuSummary(): string {
 
 /** System prompt — built from the site's own data, never retyped. The
     persona comes from the character card (src/content.ts CHARACTER):
-    Vita in 3D, Nekomi in Live2D — one and the same barmaid. */
-export function brainSystemPrompt(): string {
+    Vita in 3D, Nekomi in Live2D — one and the same barmaid. The first
+    line always leads with the selected name: 'vita' (default) is
+    addressed as Vita, 'nekomi' as Nekomi — with the note that in 3D
+    she is called Vita, the same person. */
+export function brainSystemPrompt(persona: 'vita' | 'nekomi' = 'vita'): string {
+  const name = persona === 'nekomi' ? CHARACTER.live2dName : CHARACTER.name
+  const firstLine =
+    persona === 'nekomi'
+      ? `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles. (en 3D, on t’appelle ${CHARACTER.name} — c’est la même personne)`
+      : `Tu es ${name}, ${CHARACTER.role}, un café-bar à Bruxelles.`
   return [
-    `Tu es ${CHARACTER.name}, ${CHARACTER.role}, un café-bar à Bruxelles. En forme Live2D, on t’appelle ${CHARACTER.live2dName} — c’est la même personne.`,
+    firstLine,
     CHARACTER.personality,
     CHARACTER.scenario,
     `Adresse : ${CAFE.address} (sur Google Maps, le lieu est listé sous « Casa da Santana »).`,
@@ -117,7 +125,11 @@ interface ChatCompletionsResponse {
 }
 
 /** One OpenAI-compatible chat-completions call. Throws on any failure. */
-async function callLlm(message: string, history: ChatTurn[]): Promise<string> {
+async function callLlm(
+  message: string,
+  history: ChatTurn[],
+  persona: 'vita' | 'nekomi' = 'vita',
+): Promise<string> {
   const { key, baseUrl, model } = brainConfig()
   if (!key) throw new Error('no-key')
   if (!/^https?:\/\//.test(baseUrl)) throw new Error('bad-base-url')
@@ -136,7 +148,7 @@ async function callLlm(message: string, history: ChatTurn[]): Promise<string> {
         temperature: 0.7,
         max_tokens: 300,
         messages: [
-          { role: 'system', content: brainSystemPrompt() },
+          { role: 'system', content: brainSystemPrompt(persona) },
           ...history.slice(-6).map((t) => ({ role: t.role, content: t.text })),
           { role: 'user', content: message },
         ],
@@ -160,12 +172,16 @@ async function callLlm(message: string, history: ChatTurn[]): Promise<string> {
  * The `actions` (tap-to-add buttons) come from the offline brain's read
  * of the same message: the LLM names the drinks, the buttons add them.
  */
-export async function askBrain(message: string, history: ChatTurn[] = []): Promise<BrainResult> {
+export async function askBrain(
+  message: string,
+  history: ChatTurn[] = [],
+  opts?: { persona?: 'vita' | 'nekomi' },
+): Promise<BrainResult> {
   const clean = message.trim()
   if (!clean) return { reply: botReply(''), source: 'offline' }
   const offline = botReply(clean)
   try {
-    const text = await callLlm(clean, history)
+    const text = await callLlm(clean, history, opts?.persona ?? 'vita')
     brainLive = true
     return {
       reply: {
