@@ -43,7 +43,7 @@ check(
     /unsubscribe/.test(warmType),
   warmType.replace(/\s+/g, ' '),
 )
-check('cold init publishes the cache after the model is built', /warmStage = \{ app, model, canvas, unsubscribe \}/.test(src))
+check('cold init publishes the cache after the model is built', /warmStage = \{ app, model, canvas, unsubscribe,?[^}]*\}/.test(src))
 
 // --- (c) status initialises from cache presence ---
 check(

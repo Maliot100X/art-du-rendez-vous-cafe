@@ -11,9 +11,11 @@ import { pixelRatioCap } from '../lib/perf'
  *
  * Facts from the agent-kits report: the model is a cat-girl with a Henshin
  * transform on parameter Param3 (1 = furry, 0 = human). Param3 defaults to
- * 0 in the .moc3, so the site starts human and the Henshin expression is
- * never played on load; the toggle plays the expression (furry) or resets
- * the expression manager (human). Motions: Idle (breath only,
+ * 0 in the .moc3, so the site starts human; the toggle records the chosen
+ * form (persisted module-level, see lastHenshinForm) and the model's own
+ * update eases Param3 toward it via an `afterMotionUpdate` hook (fix pass
+ * 14 — the expression call is a no-op: no ExpressionManager exists for
+ * this model, see the module-level note). Motions: Idle (breath only,
  * loops) and Nodd (head-nod sway, the "Dance" trigger). Eye blink is
  * automatic — the model defines the EyeBlink group. The Cubism Core is
  * served locally from /live2d/live2dcubismcore.min.js (Live2D's
@@ -38,6 +40,58 @@ type Form = 'human' | 'furry'
 let lastHenshinForm: Form = 'human'
 
 /**
+ * Fix pass 14, Group A — Henshin root cause (the picture never changed).
+ *
+ * The toggle only ever changed React state + the module-level form: the
+ * actual transform rides on parameter Param3, and the ONLY live writer
+ * was the app-ticker `tick` in the cold init (the expression path is
+ * dead — see below). That tick writes Param3 into the core model's
+ * parameter array, but the value only becomes visible when the model's
+ * own update runs: pixi-live2d-display 0.5.0-beta does the whole update
+ * dance (motion → saveParameters → expression → eyeBlink/focus/breath/
+ * physics → core update → loadParameters) inside Live2DModel._render,
+ * on the app ticker, gated by `deltaTime` accumulated on the shared
+ * ticker by the Automator (which only does `deltaTime += dt`). So the
+ * form lived or died with a write made on one loop being consumed by a
+ * render on another — and the warm remount (fix pass 13) only restarted
+ * the app ticker, never re-applied the form to the rendered instance:
+ * the line-647 claim "needs no re-apply here" was wrong, because
+ * nothing re-wrote Param3 to the cached model after a remount and the
+ * tick's eased value was never re-asserted on the instance the stage
+ * renders. The fix drives Param3 from INSIDE the model's own update
+ * instead: an `afterMotionUpdate` handler on the cached internalModel
+ * (emitted after the motion update, before saveParameters, so the
+ * written value is saved, rendered by the core update in the same
+ * pass, and restored by loadParameters). The handler lives with the
+ * cached model across warm remounts, and the warm path additionally
+ * writes the current eased value straight into the cached model's
+ * core, so the first frame after a return already shows the form.
+ *
+ * Side finding (same investigation, NOT changed here): the expression
+ * path is dead by construction. CubismModelSettingsJson reads
+ * `json.FileReferences.Expressions` / `.Motions`, but Furry.model3.json
+ * declares both at TOP level — so settings.expressions is undefined,
+ * no ExpressionManager is ever created, model.expression('Henshin')
+ * resolves false, and model.motion('Idle') is a no-op too. The tick
+ * (now this hook) is therefore the sole carrier of the transform; the
+ * expression call in setHenshin is kept as a harmless no-op.
+ */
+let param3Current = 0
+
+/** Guarded Param3 write to a model's core (Param absent → ignore). */
+function writeParam3(model: Live2DModelType | null, value: number): void {
+  try {
+    const core = (
+      model?.internalModel as unknown as {
+        coreModel?: { setParameterValueById: (id: string, value: number) => void }
+      }
+    )?.coreModel
+    core?.setParameterValueById('Param3', value)
+  } catch {
+    // Param absent on this rig — ignore.
+  }
+}
+/**
  * Fix pass 13, bug 3: the parsed Live2D stage survives an Agent remount.
  * The tab shell unmounts Live2DModel on every tab leave, and the old
  * cleanup destroyed the PIXI Application + parsed model, so every
@@ -54,6 +108,9 @@ type WarmStage = {
   model: Live2DModelType
   canvas: HTMLCanvasElement
   unsubscribe: () => void
+  /** Fix pass 14: removes the Henshin `afterMotionUpdate` hook from the
+      cached internalModel when the stage is really discarded. */
+  unapplyHenshin: () => void
 }
 let warmStage: WarmStage | null = null
 
@@ -66,6 +123,11 @@ function dropWarmStage(): void {
   const stage = warmStage
   warmStage = null
   if (!stage) return
+  try {
+    stage.unapplyHenshin()
+  } catch {
+    // Hook already gone — nothing to free.
+  }
   try {
     stage.unsubscribe()
   } catch {
@@ -475,6 +537,14 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           container.appendChild(stage.canvas)
           appRef.current = stage.app
           modelRef.current = stage.model
+          // Fix pass 14: re-apply the form to the rendered instance.
+          // The `afterMotionUpdate` hook (attached to this cached model
+          // at cold init) keeps easing Param3 on every model update,
+          // but the first frame after the return must already show the
+          // form — write the current eased value straight into the
+          // cached model's core now. This is the re-apply the old
+          // "needs no re-apply here" comment wrongly skipped.
+          writeParam3(stage.model, param3Current)
           pointerContainerRef.current = container
           container.addEventListener('pointermove', onPointer)
           fitRef.current = fit
@@ -566,6 +636,39 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // effect call it while `model` was still in its dead zone).
         fitRef.current = fit
 
+        // Fix pass 14: drive Param3 from INSIDE the model's own update.
+        // `afterMotionUpdate` fires after the motion update and before
+        // saveParameters, so the value written here is saved, rendered
+        // by the core update in the same pass, and restored by
+        // loadParameters — the form becomes part of the model's own
+        // update instead of a write on a second loop hoping the
+        // render's update consumes it. The handler lives on the cached
+        // internalModel, so it survives warm remounts with the stage
+        // (removed in dropWarmStage via unapplyHenshin).
+        // NOTE: the shipped pixi-live2d-display types use
+        // `utils.EventEmitter` without importing `utils`, so `on`/`off`
+        // do not exist on the InternalModel type — cast to the emitter
+        // interface, same pattern as the coreModel cast in this file.
+        param3Current = formRef.current === 'furry' ? 1 : 0
+        writeParam3(model, param3Current)
+        const applyHenshin = () => {
+          const target = lastHenshinForm === 'furry' ? 1 : 0
+          param3Current += (target - param3Current) * 0.12
+          writeParam3(model, param3Current)
+        }
+        const internalModelEmitter = model.internalModel as unknown as {
+          on: (event: 'afterMotionUpdate', fn: () => void) => void
+          off: (event: 'afterMotionUpdate', fn: () => void) => void
+        }
+        internalModelEmitter.on('afterMotionUpdate', applyHenshin)
+        const unapplyHenshin = () => {
+          try {
+            internalModelEmitter.off('afterMotionUpdate', applyHenshin)
+          } catch {
+            // Already gone — nothing to free.
+          }
+        }
+
         // Human is the default form: Param3 defaults to 0 in the .moc3 and
         // the expression is never played on load, so nothing to set here —
         // unless the visitor already picked the furry form while loading.
@@ -601,13 +704,14 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         }
         let current: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
         let target: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
-        // Henshin form, driven directly (see setHenshin): the expression
-        // manager is the proper path, but the toggle was observed doing
-        // nothing in the browser — so Param3 is ALSO written here, every
-        // frame, after the model's own update and before the render, which
-        // puts it in effect at render time by construction. Eased like
-        // the presets so the switch still fades instead of snapping.
-        let param3Current = formRef.current === 'furry' ? 1 : 0
+        // Fix pass 14: Param3 is NOT written here any more. It used to
+        // be eased and written in this tick, but the value only becomes
+        // visible when the model's own update runs inside _render — so
+        // the form is now driven from inside that update by the
+        // `afterMotionUpdate` hook attached above (same 0.12 ease, so
+        // the switch still fades instead of snapping). This tick keeps
+        // the expression presets + the live mouth value, which are
+        // applied after the model's own update and before the render.
         const unsubscribe = bridge.subscribe((state) => {
           target = { ...EXPRESSION_PRESETS[state.expression] }
         })
@@ -618,9 +722,6 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             setParam(key, current[key])
           }
           setParam('ParamMouthOpenY', bridge.getMouthOpen())
-          const param3Target = formRef.current === 'furry' ? 1 : 0
-          param3Current += (param3Target - param3Current) * 0.12
-          setParam('Param3', param3Current)
           if (window.__nekomiDebug) {
             let readback = -1
             try {
@@ -644,10 +745,12 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
 
         // Publish the warm cache now that the stage is fully built:
         // the next mount re-attaches this app/model/canvas instead
-        // of re-loading. The Henshin form needs no re-apply here —
-        // it is already applied (the tick keeps writing Param3 every
-        // frame from formRef), the warm path just re-fits.
-        warmStage = { app, model, canvas, unsubscribe }
+        // of re-loading. Fix pass 14: the Henshin form DOES need a
+        // re-apply on that remount — the warm path writes the current
+        // eased Param3 into the cached model's core (see above), and
+        // the `afterMotionUpdate` hook attached here keeps driving it
+        // on every model update, so the form survives with the stage.
+        warmStage = { app, model, canvas, unsubscribe, unapplyHenshin }
 
         setStatus('ready')
       } catch (err: unknown) {
@@ -724,13 +827,17 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     if (!model) return
     // The expression API is the toggle: playing Henshin sets Param3 = 1,
     // resetting the expression manager returns it to the human default
-    // (Param3 = 0). A direct parameter write would be overwritten while an
-    // expression is active, so it is not used here — EXCEPT that the tick
-    // ALSO writes Param3 directly every frame (see above): the toggle was
-    // observed doing nothing in the browser, and the direct write is the
-    // guarantee the render actually shows the chosen form. The result of
-    // the expression call is recorded in the debug object so a future
-    // check can tell which path worked.
+    // (Param3 = 0). Fix pass 14: in practice the expression path is dead
+    // — no ExpressionManager exists for this model (see the module-level
+    // note: the model3.json declares Expressions top-level, not under
+    // FileReferences), so model.expression('Henshin') resolves false and
+    // the transform is carried entirely by the `afterMotionUpdate` hook,
+    // which eases Param3 toward lastHenshinForm on every model update.
+    // The direct write lives in that hook, not here: setHenshin only
+    // records the chosen form (module-level + ref + state) and the hook
+    // picks it up on the next model update. The result of the expression
+    // call is recorded in the debug object so a future check can tell
+    // which path worked.
     if (next === 'furry') {
       void model
         .expression('Henshin')
