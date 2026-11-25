@@ -95,8 +95,12 @@ export function scrollToHash(hash: string) {
   }
 
   const scrollToEl = (el: HTMLElement) => {
+    // No explicit offset: every section carries scroll-mt-24 (96px) and
+    // Lenis honours scroll-margin — passing offset -96 as well landed
+    // the target 192px down (measured), showing the previous section's
+    // tail under the nav.
     const go = () => {
-      if (lenis) lenis.scrollTo(el, { duration: 1.6, offset: -SCROLL_OFFSET });
+      if (lenis) lenis.scrollTo(el, { duration: 1.6 });
       else el.scrollIntoView();
     };
     go();
@@ -108,7 +112,7 @@ export function scrollToHash(hash: string) {
       const drift = el.getBoundingClientRect().top - SCROLL_OFFSET;
       const userTookOver = Math.abs(window.scrollY - glideEndY) > 120;
       if (Math.abs(drift) > 80 && !userTookOver) {
-        if (lenis) lenis.scrollTo(el, { duration: 0.7, offset: -SCROLL_OFFSET });
+        if (lenis) lenis.scrollTo(el, { duration: 0.7 });
         else window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - SCROLL_OFFSET });
       }
     }, 1900);

@@ -48,7 +48,13 @@ export default function Visit() {
   }, [reducedMotion])
 
   return (
-    <section id="venir" ref={sectionRef} className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36">
+    <section id="venir" ref={sectionRef} className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 pb-28 pt-16 sm:px-6 sm:pb-32 sm:pt-24 md:pb-40 md:pt-36">
+      {/* Bottom padding is deliberately deeper than the 96px anchor
+          offset: the day-timeline's last "ÉTAPE 04 / 04" label sits at
+          the very bottom of this section, and an anchor landing on the
+          agent section below used to show it peeking under the nav.
+          With >96px of empty space below the timeline, that landing
+          shows only blank padding — no label can peek through. */}
       <div data-reveal>
         <p className="font-mono text-label uppercase text-amber">{VISIT.eyebrow}</p>
         <h2 className="mt-3 font-display text-display text-bone">{VISIT.title}</h2>

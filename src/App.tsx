@@ -49,17 +49,17 @@ export default function App() {
       <main className="relative z-10">
         <Hero />
         <MenuSection onAdd={addToOrder} />
-        <Suspense fallback={<div className="min-h-[100svh]" aria-hidden="true" />}>
+        <Suspense fallback={<div className="min-h-[113svh]" aria-hidden="true" />}>
           <MenuBook />
         </Suspense>
         <Suspense fallback={<div className="min-h-[420svh]" aria-hidden="true" />}>
           <Atmosphere />
         </Suspense>
-        <Suspense fallback={<div className="min-h-[170svh]" aria-hidden="true" />}>
+        <Suspense fallback={<div className="min-h-[175svh]" aria-hidden="true" />}>
           <Gallery />
         </Suspense>
         <Visit />
-        <Suspense fallback={<div className="min-h-[170svh]" aria-hidden="true" />}>
+        <Suspense fallback={<div className="min-h-[245svh]" aria-hidden="true" />}>
           <Agent order={order} onAdd={addToOrder} onRemove={removeFromOrder} onClear={clearOrder} />
         </Suspense>
       </main>
