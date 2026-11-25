@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { ATMOSPHERE } from '../content'
-import { onFrame } from '../lib/scroll'
+import { onFrame, useReducedMotion } from '../lib/scroll'
 import { clamp, easeOutCubic, pinProgress, range } from '../lib/math'
+import { gsap, ScrollTrigger } from '../lib/motion'
 
 const N = ATMOSPHERE.chapters.length
 
@@ -17,7 +18,45 @@ export default function Atmosphere() {
   const copyRefs = useRef<(HTMLDivElement | null)[]>([])
   const railFillRef = useRef<HTMLDivElement>(null)
   const railLabelRef = useRef<HTMLParagraphElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef(-1)
+  const reducedMotion = useReducedMotion()
+
+  // GSAP: the chapter rail fill + the header copy's scroll-away. The photo
+  // layers and chapter copy stay on the rAF path below — GSAP never touches
+  // those nodes. Reduced motion: rail drawn full, header stays put.
+  useEffect(() => {
+    if (reducedMotion) {
+      gsap.set(railFillRef.current, { scaleY: 1 })
+      return
+    }
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        railFillRef.current,
+        { scaleY: 0 },
+        {
+          scaleY: 1,
+          ease: 'none',
+          scrollTrigger: { trigger: sectionRef.current, start: 'top top', end: 'bottom bottom', scrub: 0.5 },
+        },
+      )
+      gsap.to(headerRef.current, {
+        y: -32,
+        autoAlpha: 0,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: 'top top',
+          end: () => `+=${Math.round((sectionRef.current?.offsetHeight ?? 0) * 0.16)}`,
+          scrub: 0.5,
+        },
+      })
+    }, sectionRef)
+    // This section lazy-mounts below the fold: re-measure every trigger
+    // (Visit's were created before this section existed).
+    ScrollTrigger.refresh()
+    return () => ctx.revert()
+  }, [reducedMotion])
 
   useEffect(() => {
     return onFrame(() => {
@@ -46,9 +85,6 @@ export default function Atmosphere() {
         copy.style.transform = `translateY(${(1 - easeOutCubic(clamp((local - 0.1) / 0.3))) * 28}px)`
       }
 
-      if (railFillRef.current) {
-        railFillRef.current.style.transform = `scaleY(${p})`
-      }
       const active = Math.min(N - 1, Math.max(0, Math.floor(p * N)))
       if (active !== activeRef.current) {
         activeRef.current = active
@@ -87,8 +123,8 @@ export default function Atmosphere() {
           </div>
         ))}
 
-        {/* Header copy */}
-        <div className="absolute inset-x-0 top-0 px-4 pt-[104px] sm:px-6">
+        {/* Header copy — GSAP fades it away as the chapters take over */}
+        <div ref={headerRef} className="absolute inset-x-0 top-0 px-4 pt-[104px] will-change-transform sm:px-6">
           <div className="mx-auto max-w-[1400px]">
             <p className="font-mono text-label uppercase text-amber">{ATMOSPHERE.eyebrow}</p>
             <h2 className="mt-3 max-w-xl font-display text-display text-bone">{ATMOSPHERE.title}</h2>

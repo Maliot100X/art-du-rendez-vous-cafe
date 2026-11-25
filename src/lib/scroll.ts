@@ -1,9 +1,12 @@
 import Lenis from 'lenis';
+import { ScrollTrigger } from './motion';
 
 /**
- * One rAF loop for the whole page. Lenis advances first, then every
- * scroll-driven component reads its own rect and writes styles directly —
- * nothing here goes through React state, so scrolling never re-renders.
+ * One rAF loop for the whole page. Lenis advances first, then ScrollTrigger
+ * is told the scroll position moved, then every scroll-driven component
+ * reads its own rect and writes styles directly — nothing here goes through
+ * React state, so scrolling never re-renders. Still exactly one loop:
+ * ScrollTrigger does not run its own ticker here.
  */
 
 type Tick = (time: number) => void;
@@ -16,9 +19,15 @@ export function startScroll(reducedMotion: boolean): () => void {
     lenis = new Lenis({ lerp: 0.09, smoothWheel: true, wheelMultiplier: 0.9 });
   }
 
+  // Font swaps shift layout; re-measure every ScrollTrigger once they land.
+  if (typeof document !== 'undefined' && document.fonts) {
+    document.fonts.ready.then(() => ScrollTrigger.refresh()).catch(() => undefined);
+  }
+
   let raf = 0;
   const loop = (time: number) => {
     lenis?.raf(time);
+    ScrollTrigger.update();
     subscribers.forEach((fn) => fn(time));
     raf = requestAnimationFrame(loop);
   };

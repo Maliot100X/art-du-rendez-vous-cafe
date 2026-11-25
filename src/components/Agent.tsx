@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { MessageSquareText, Mic, MicOff, PhoneCall, Plus, ScanLine, Sparkles, Trash2, X } from 'lucide-react'
 import { AGENT, agentConnected } from '../content'
 import { botReply, orderTotal, type BotAction } from '../lib/agentBrain'
 import type { OrderLine } from './MenuSection'
 import Live2DModel from './Live2DModel'
+import { EASE_SILK, ScrollTrigger } from '../lib/motion'
 
 interface ChatMsg {
   role: 'user' | 'bot'
@@ -25,9 +27,16 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   const [qrFailed, setQrFailed] = useState(false)
   const [voice, setVoice] = useState<'idle' | 'listening' | 'denied'>('idle')
   const [confirmed, setConfirmed] = useState(false)
+  const reducedMotion = useReducedMotion()
   const listRef = useRef<HTMLDivElement>(null)
   const levelRef = useRef<HTMLDivElement>(null)
   const voiceStopRef = useRef<(() => void) | null>(null)
+
+  // This section lazy-mounts at the bottom of the page: re-measure every
+  // ScrollTrigger (Visit's were created before this section existed).
+  useEffect(() => {
+    ScrollTrigger.refresh()
+  }, [])
 
   // QR code for the agent chat — generated in the browser from content.
   useEffect(() => {
@@ -263,27 +272,43 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
                 <p className="mt-3 text-sm text-mist">{AGENT.orderEmpty}</p>
               ) : (
                 <>
-                  <ul className="mt-3 space-y-2">
-                    {order.map((line, i) => (
-                      <li key={`${line.name}-${i}`} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="text-bone">
-                          {line.name} <span className="font-mono text-amber">{line.price}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onRemove(i)}
-                          aria-label={`Retirer ${line.name}`}
-                          className="text-mist transition-colors hover:text-ember"
+                  {/* Layout animations: a line slides into place when added
+                      and slides out when removed; the total glides up. */}
+                  <motion.ul layout className="mt-3 space-y-2">
+                    <AnimatePresence initial={false} mode="popLayout">
+                      {order.map((line, i) => (
+                        <motion.li
+                          key={`${line.name}-${i}`}
+                          layout
+                          initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 32 }}
+                          transition={{ duration: reducedMotion ? 0 : 0.4, ease: EASE_SILK }}
+                          className="flex items-center justify-between gap-2 text-sm"
                         >
-                          <X size={15} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-4 flex justify-between border-t border-line pt-3 font-mono text-sm text-bone">
+                          <span className="text-bone">
+                            {line.name} <span className="font-mono text-amber">{line.price}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onRemove(i)}
+                            aria-label={`Retirer ${line.name}`}
+                            className="text-mist transition-colors hover:text-ember"
+                          >
+                            <X size={15} />
+                          </button>
+                        </motion.li>
+                      ))}
+                    </AnimatePresence>
+                  </motion.ul>
+                  <motion.p
+                    layout
+                    transition={{ duration: reducedMotion ? 0 : 0.45, ease: EASE_SILK }}
+                    className="mt-4 flex justify-between border-t border-line pt-3 font-mono text-sm text-bone"
+                  >
                     <span>{AGENT.orderTotal}</span>
                     <span className="text-amber">{orderTotal(order)}</span>
-                  </p>
+                  </motion.p>
                   <div className="mt-4 flex gap-2">
                     <button
                       type="button"
@@ -304,7 +329,20 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
                       <Trash2 size={15} />
                     </button>
                   </div>
-                  {confirmed && <p className="mt-3 text-sm font-bold text-amber">✓ {AGENT.orderConfirmed}</p>}
+                  <AnimatePresence initial={false}>
+                    {confirmed && (
+                      <motion.p
+                        key="order-confirmed"
+                        initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: reducedMotion ? 0 : 0.4, ease: EASE_SILK }}
+                        className="mt-3 text-sm font-bold text-amber"
+                      >
+                        ✓ {AGENT.orderConfirmed}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
                 </>
               )}
             </div>

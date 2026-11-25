@@ -3,8 +3,9 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { HERO } from '../content'
-import { onFrame, scrollToHash } from '../lib/scroll'
+import { onFrame, scrollToHash, useReducedMotion } from '../lib/scroll'
 import { clamp } from '../lib/math'
+import { gsap, GSAP_EASE_SILK } from '../lib/motion'
 
 /** Dust motes drifting over the hero — the selene dust veil, as real 3D. */
 function Dust() {
@@ -81,6 +82,38 @@ export default function Hero() {
   const imgRef = useRef<HTMLImageElement>(null)
   const titleRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
+  const introRef = useRef<HTMLDivElement>(null)
+  const badgeRef = useRef<HTMLDivElement>(null)
+  const reducedMotion = useReducedMotion()
+
+  // GSAP: entrance + scroll-away reinforcement for the intro block and the
+  // frame badge. The title/frame parallax itself stays on the rAF path
+  // below (direct DOM writes, per the Scrolltide grammar) — GSAP never
+  // touches those nodes, so the two systems can't fight over a transform.
+  // Reduced motion: no GSAP at all, everything stays fully visible.
+  useEffect(() => {
+    if (reducedMotion) return
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        '.hero-entrance',
+        { y: 28, autoAlpha: 0 },
+        { y: 0, autoAlpha: 1, duration: 1, ease: GSAP_EASE_SILK, stagger: 0.1, delay: 0.15 },
+      )
+      gsap.to(introRef.current, {
+        y: -48,
+        autoAlpha: 0,
+        ease: 'none',
+        scrollTrigger: { trigger: sectionRef.current, start: 'top top', end: 'bottom top', scrub: 0.6 },
+      })
+      gsap.to(badgeRef.current, {
+        y: -24,
+        autoAlpha: 0,
+        ease: 'none',
+        scrollTrigger: { trigger: sectionRef.current, start: 'top top', end: 'bottom top', scrub: 0.6 },
+      })
+    }, sectionRef)
+    return () => ctx.revert()
+  }, [reducedMotion])
 
   // Scroll-driven frame parallax — direct DOM writes, never React state.
   useEffect(() => {
@@ -116,13 +149,14 @@ export default function Hero() {
       />
 
       <div className="relative mx-auto max-w-[1400px] px-3 sm:px-6">
-        <div className="flex flex-col items-center text-center" data-reveal>
-          <p className="inline-flex items-center gap-2 rounded-full border border-line bg-ink-2/70 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-bone/80">
+        {/* No data-reveal here: GSAP owns this block's entrance + scroll-away. */}
+        <div ref={introRef} className="flex flex-col items-center text-center will-change-transform">
+          <p className="hero-entrance inline-flex items-center gap-2 rounded-full border border-line bg-ink-2/70 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-bone/80">
             <span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-ember" />
             {HERO.eyebrow}
           </p>
-          <p className="mt-6 max-w-2xl text-lead text-bone/75">{HERO.sub}</p>
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <p className="hero-entrance mt-6 max-w-2xl text-lead text-bone/75">{HERO.sub}</p>
+          <div className="hero-entrance mt-7 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => scrollToHash(HERO.ctaPrimaryHash)}
@@ -157,7 +191,10 @@ export default function Hero() {
             aria-hidden="true"
             style={{ background: 'linear-gradient(180deg, rgba(13,10,8,0.15), transparent 35%, transparent 55%, rgba(13,10,8,0.72))' }}
           />
-          <div className="absolute left-4 top-4 rounded-full border border-white/25 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/90 backdrop-blur sm:left-6 sm:top-6">
+          <div
+            ref={badgeRef}
+            className="absolute left-4 top-4 rounded-full border border-white/25 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/90 backdrop-blur will-change-transform sm:left-6 sm:top-6"
+          >
             Bruxelles — 1020
           </div>
         </div>

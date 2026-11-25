@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { CAFE, FOOTER } from '../content'
 import { scrollToHash } from '../lib/scroll'
+import { EASE_SILK } from '../lib/motion'
 
 /** Probe-fit wordmark: render at 100px, measure, scale to the container. */
 function useFitText(text: string) {
@@ -30,12 +32,15 @@ export default function Footer() {
   const { wrapRef, probeRef } = useFitText('ART DU RENDEZ-VOUS')
   const [email, setEmail] = useState('')
   const [done, setDone] = useState(false)
+  const reducedMotion = useReducedMotion()
 
   const subscribe = (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.includes('@')) return
     setDone(true)
   }
+
+  const swapTransition = { duration: reducedMotion ? 0 : 0.4, ease: EASE_SILK }
 
   return (
     <footer className="relative border-t border-line bg-ink-2">
@@ -44,32 +49,49 @@ export default function Footer() {
           <div data-reveal>
             <h2 className="font-display text-display text-bone">{FOOTER.subscribeTitle}</h2>
             <p className="mt-3 max-w-sm text-body text-bone/70">{FOOTER.subscribeText}</p>
-            {done ? (
-              <p className="mt-6 inline-flex items-center gap-2 rounded-full border border-amber/50 bg-amber/10 px-5 py-3 text-sm font-bold text-amber">
-                ✓ {FOOTER.subscribeDone}
-              </p>
-            ) : (
-              <form onSubmit={subscribe} className="mt-6 flex max-w-sm items-center gap-2 rounded-full border border-line bg-ink p-1.5">
-                <label htmlFor="newsletter-email" className="sr-only">
-                  {FOOTER.subscribePlaceholder}
-                </label>
-                <input
-                  id="newsletter-email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={FOOTER.subscribePlaceholder}
-                  className="min-w-0 flex-1 bg-transparent px-3 text-sm text-bone placeholder:text-mist focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  className="shrink-0 rounded-full bg-bone px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.04]"
+            <AnimatePresence mode="wait" initial={false}>
+              {done ? (
+                <motion.p
+                  key="subscribed"
+                  initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={swapTransition}
+                  className="mt-6 inline-flex items-center gap-2 rounded-full border border-amber/50 bg-amber/10 px-5 py-3 text-sm font-bold text-amber"
                 >
-                  {FOOTER.subscribeCta}
-                </button>
-              </form>
-            )}
+                  ✓ {FOOTER.subscribeDone}
+                </motion.p>
+              ) : (
+                <motion.form
+                  key="subscribe-form"
+                  initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={swapTransition}
+                  onSubmit={subscribe}
+                  className="mt-6 flex max-w-sm items-center gap-2 rounded-full border border-line bg-ink p-1.5"
+                >
+                  <label htmlFor="newsletter-email" className="sr-only">
+                    {FOOTER.subscribePlaceholder}
+                  </label>
+                  <input
+                    id="newsletter-email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={FOOTER.subscribePlaceholder}
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm text-bone placeholder:text-mist focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="shrink-0 rounded-full bg-bone px-5 py-2.5 text-sm font-bold text-ink transition-transform duration-300 ease-[cubic-bezier(0.2,0.7,0.1,1)] hover:scale-[1.04]"
+                  >
+                    {FOOTER.subscribeCta}
+                  </button>
+                </motion.form>
+              )}
+            </AnimatePresence>
           </div>
 
           {FOOTER.columns.map((col) => (

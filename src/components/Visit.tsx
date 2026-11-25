@@ -1,24 +1,51 @@
 import { useEffect, useRef } from 'react'
 import { MapPin, Star } from 'lucide-react'
 import { CAFE, VISIT } from '../content'
-import { onFrame } from '../lib/scroll'
-import { pinProgress } from '../lib/math'
+import { useReducedMotion } from '../lib/scroll'
+import { gsap, GSAP_EASE_SILK } from '../lib/motion'
 
-/** Visit: address, hours, map link, and a day-timeline drawn by scroll. */
+/**
+ * Visit: address, hours, map link, and a day-timeline drawn by scroll.
+ * The draw + the stops' stagger are GSAP ScrollTrigger (scrub / once);
+ * nothing here uses the rAF path any more. Reduced motion: the line is
+ * drawn full and the stops stay visible, no animation.
+ */
 export default function Visit() {
   const sectionRef = useRef<HTMLElement>(null)
+  const timelineRef = useRef<HTMLDivElement>(null)
   const lineRef = useRef<HTMLDivElement>(null)
+  const reducedMotion = useReducedMotion()
 
   useEffect(() => {
-    return onFrame(() => {
-      const section = sectionRef.current
-      const line = lineRef.current
-      if (!section || !line) return
-      const { p, rect, vh } = pinProgress(section)
-      if (rect.bottom < 0 || rect.top > vh) return
-      line.style.transform = `scaleX(${p})`
-    })
-  }, [])
+    if (reducedMotion) {
+      gsap.set(lineRef.current, { scaleX: 1 })
+      return
+    }
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        lineRef.current,
+        { scaleX: 0 },
+        {
+          scaleX: 1,
+          ease: 'none',
+          scrollTrigger: { trigger: timelineRef.current, start: 'top 85%', end: 'bottom 60%', scrub: 0.5 },
+        },
+      )
+      gsap.fromTo(
+        '.visit-stop',
+        { y: 20, autoAlpha: 0 },
+        {
+          y: 0,
+          autoAlpha: 1,
+          duration: 0.8,
+          ease: GSAP_EASE_SILK,
+          stagger: 0.09,
+          scrollTrigger: { trigger: timelineRef.current, start: 'top 85%', once: true },
+        },
+      )
+    }, sectionRef)
+    return () => ctx.revert()
+  }, [reducedMotion])
 
   return (
     <section id="venir" ref={sectionRef} className="relative mx-auto max-w-[1400px] px-4 py-24 sm:px-6 md:py-36">
@@ -60,7 +87,7 @@ export default function Visit() {
       </div>
 
       {/* The day, drawn as you scroll (selene Trajectory grammar) */}
-      <div className="mt-20" data-reveal>
+      <div ref={timelineRef} className="mt-20" data-reveal>
         <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mist">Une journée au café</p>
         <div className="relative mt-8 h-px bg-bone/15">
           <div
@@ -71,7 +98,7 @@ export default function Visit() {
         </div>
         <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {VISIT.dayTimeline.map((stop, i) => (
-            <div key={stop.time} className="border-l border-line pl-4">
+            <div key={stop.time} className="visit-stop border-l border-line pl-4">
               <p className="font-mono text-sm tabular-nums text-amber">{stop.time}</p>
               <p className="mt-2 text-body text-bone/80">{stop.label}</p>
               <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.16em] text-mist">
