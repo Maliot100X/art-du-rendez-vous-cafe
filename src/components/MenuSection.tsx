@@ -16,6 +16,19 @@ import { EASE_SILK, gsap, GSAP_EASE_SILK } from '../lib/motion'
  */
 let lastMenuCategory = MENU[0].id
 
+/**
+ * Fix pass 9: the lifted category in App's MenuTab must initialise
+ * from this same value (see getLastMenuCategory). MenuTab used to
+ * initialise to MENU[0] ('chaudes') while MenuSection initialised
+ * from here, so on every return MenuSection's mount effect reported
+ * the preserved category and the change 'chaudes' -> preserved fired
+ * useVitaGuide's category effect past its first-mount guard — a
+ * spurious walk + read on every tab return.
+ */
+export function getLastMenuCategory(): string {
+  return lastMenuCategory
+}
+
 export interface OrderLine {
   name: string
   price: string

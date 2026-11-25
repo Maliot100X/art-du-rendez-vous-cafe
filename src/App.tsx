@@ -3,7 +3,7 @@ import { BookOpen, Bot, Coffee, Home, Images, MapPin, Sparkles } from 'lucide-re
 import { lazyWithRetry } from './lib/lazyRetry'
 import Nav from './components/Nav'
 import Hero from './components/Hero'
-import MenuSection, { type OrderLine } from './components/MenuSection'
+import MenuSection, { getLastMenuCategory, type OrderLine } from './components/MenuSection'
 import Visit from './components/Visit'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -271,7 +271,20 @@ function TabSurface({ tab, children }: { tab: TabId; children: ReactNode }) {
  * exactly once.
  */
 function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOpenBook: (catId: string) => void }) {
-  const [categoryId, setCategoryId] = useState(MENU[0].id)
+  /**
+   * Fix pass 9: initialise from the module-level preserved category
+   * (MenuSection's lastMenuCategory), NOT from MENU[0]. MenuTab
+   * unmounts on every tab switch, so MENU[0] re-initialised the
+   * lifted category to 'chaudes' on each return; MenuSection then
+   * reported its preserved category in its mount effect and the
+   * 'chaudes' -> preserved change fired useVitaGuide's category
+   * effect past its first-mount guard — a walk + read + pending
+   * big-book open on every return. With both initialised from the
+   * same module value the mount report is a same-value no-op, so no
+   * effect fires. A manual tap still changes the value and walks;
+   * the first mount still greets without walking (guard untouched).
+   */
+  const [categoryId, setCategoryId] = useState(() => getLastMenuCategory())
   const [itemEvent, setItemEvent] = useState<MenuVitaItemEvent | null>(null)
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
