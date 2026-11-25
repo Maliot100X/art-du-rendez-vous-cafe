@@ -1,4 +1,5 @@
 import { AGENT, MENU, VISIT, CAFE } from '../content'
+import type { AvatarExpression } from './avatarBridge'
 
 /**
  * Offline concierge for the live-agent chat panel. It answers from the
@@ -16,6 +17,24 @@ export interface BotAction {
 export interface BotReply {
   text: string
   actions?: BotAction[]
+  /** Face the Live2D stage should ease toward for this reply. */
+  expression?: AvatarExpression
+}
+
+/**
+ * Reply tone -> expression preset. The Soul-of-Waifu 28-emotion idea,
+ * reduced to the small preset set the Nekomi stage can actually show
+ * (see src/lib/avatarBridge.ts). Keyword matching on the normalised
+ * French text; neutral when nothing matches.
+ */
+export function expressionForReply(text: string): AvatarExpression {
+  const n = norm(text)
+  if (/(desole|pardon|malheureusement|ferme|indisponible|pas possible)/.test(n)) return 'sad'
+  if (/(surprise|incroyable|wow|oh|vraiment|formidable|magnifique)/.test(n)) return 'surprised'
+  if (/(je regarde|je verifie|un instant|laissez-moi|reflechir|je cherche)/.test(n)) return 'thinking'
+  if (/(avec plaisir|ravi|parfait|excellent|merci|bienvenue|super|delicieux)/.test(n)) return 'happy'
+  if (/(doucement|calme|soir|tendre|doux|profitez|prenez votre temps)/.test(n)) return 'tender'
+  return 'neutral'
 }
 
 const norm = (s: string) =>
@@ -45,7 +64,7 @@ function findItems(message: string) {
   return hits.filter((h, i) => hits.findIndex((x) => x.name === h.name) === i)
 }
 
-export function botReply(message: string): BotReply {
+function botReplyInner(message: string): BotReply {
   const n = norm(message)
 
   if (/(bonjour|salut|coucou|hello|hey|bonsoir)/.test(n)) {
@@ -119,6 +138,12 @@ export function botReply(message: string): BotReply {
   return {
     text: 'Je peux vous aider avec la carte et les prix, les horaires, l’adresse, et préparer votre commande. Essayez par exemple « un café », « vos horaires ? » ou « je veux commander ».',
   }
+}
+
+/** Every reply carries the expression the stage should ease toward. */
+export function botReply(message: string): BotReply {
+  const reply = botReplyInner(message)
+  return { ...reply, expression: expressionForReply(reply.text) }
 }
 
 export function orderTotal(lines: { price: string }[]): string {

@@ -321,6 +321,19 @@ export const AGENT = {
     'La voix en direct arrive avec la connexion Deepgram. Pour l’instant, le micro sert uniquement à voir votre niveau de voix — aucune donnée ne quitte votre appareil.',
   voiceListening: 'Je vous écoute…',
   voiceDenied: 'Micro non autorisé — le chat texte reste disponible.',
+  voiceConnecting: 'Connexion à l’agent vocal…',
+  voiceSpeaking: 'Nekomi parle…',
+  // Honest offline states for the Deepgram voice call (Phase 4). The
+  // stored Deepgram key is still rejected (401), so the voice call cannot
+  // connect until a working key is re-entered — the UI says so plainly.
+  voiceNoToken:
+    'La voix en direct n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
+  voiceWorklet:
+    'Votre navigateur ne permet pas la capture audio en direct — le chat texte reste disponible.',
+  voiceSocketError:
+    'La connexion vocale a été interrompue. Réessayez, ou utilisez le chat texte.',
+  voiceSettingsError:
+    'La configuration vocale a été refusée par le service. Le chat texte reste disponible.',
   orderTitle: 'Votre commande',
   orderEmpty: 'Rien pour l’instant — ajoutez une boisson depuis la carte ou depuis le chat.',
   orderConfirm: 'Confirmer la commande',

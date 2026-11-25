@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Live2DModel as Live2DModelType } from 'pixi-live2d-display/cubism4'
 import { AGENT } from '../content'
+import { avatarBridge, EXPRESSION_PRESETS, type AvatarBridge } from '../lib/avatarBridge'
 
 /**
  * Nekomi — Live2D Cubism 3 model, rendered with pixi-live2d-display
@@ -53,7 +54,7 @@ async function ensureCore(): Promise<void> {
   if (!window.Live2DCubismCore) throw new Error('Cubism Core did not load')
 }
 
-export default function Live2DModel() {
+export default function Live2DModel({ bridge = avatarBridge }: { bridge?: AvatarBridge }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const modelRef = useRef<Live2DModelType | null>(null)
   const formRef = useRef<Form>('human')
@@ -119,6 +120,47 @@ export default function Live2DModel() {
         fit(model)
         void model.motion('Idle').catch(() => undefined)
 
+        // Voice + expression drive (Phase 4): per-frame ticker, in the
+        // YuriOS avatar.js order — ease the expression preset, then
+        // override ParamMouthOpenY with the live TTS mouth value from
+        // the avatar bridge. This ticker was registered after the
+        // model's own ticker work, so the mouth override wins each
+        // frame. Every parameter write is defensive: the Nekomi rig
+        // may not expose every Hiyori parameter, and an absent param
+        // must not break the stage. Pointer focus (ParamAngleX/Y) and
+        // auto-blink stay with pixi-live2d-display's own handling.
+        const core = (
+          model.internalModel as unknown as {
+            coreModel?: { setParameterValueById: (id: string, value: number) => void }
+          }
+        ).coreModel
+        const setParam = (id: string, value: number) => {
+          try {
+            core?.setParameterValueById(id, value)
+          } catch {
+            // Param absent on this rig — ignore.
+          }
+        }
+        let current: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
+        let target: Record<string, number> = { ...EXPRESSION_PRESETS.neutral }
+        const unsubscribe = bridge.subscribe((state) => {
+          target = { ...EXPRESSION_PRESETS[state.expression] }
+        })
+        const tick = () => {
+          for (const key of Object.keys(target)) {
+            const from = current[key] ?? 0
+            current[key] = from + (target[key] - from) * 0.15
+            setParam(key, current[key])
+          }
+          setParam('ParamMouthOpenY', bridge.getMouthOpen())
+        }
+        app.ticker.add(tick)
+
+        const detachTicker = () => {
+          app?.ticker.remove(tick)
+          unsubscribe()
+        }
+
         const onPointer = (e: PointerEvent) => {
           const rect = container.getBoundingClientRect()
           model.focus(e.clientX - rect.left, e.clientY - rect.top)
@@ -129,7 +171,10 @@ export default function Live2DModel() {
         ro.observe(container)
 
         setStatus('ready')
-        return () => container.removeEventListener('pointermove', onPointer)
+        return () => {
+          detachTicker()
+          container.removeEventListener('pointermove', onPointer)
+        }
       } catch {
         if (!cancelled) setStatus('failed')
       }
@@ -148,7 +193,7 @@ export default function Live2DModel() {
       app?.destroy(true, { children: true })
       app = null
     }
-  }, [])
+  }, [bridge])
 
   const setHenshin = (next: Form) => {
     formRef.current = next
