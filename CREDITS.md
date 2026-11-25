@@ -20,7 +20,12 @@ Copied verbatim as commit 1, then content-swapped. Still running:
 | `src/gl/carteScene.ts`, `CarteReel.tsx` | SELENE zip `MissionLog.tsx` mechanics | Pin/counter/progress/category index now drive a three.js carousel wheel of all 59 drinks with lacquer-floor reflections |
 | `src/gl/bookScene.ts`, `Livre.tsx` | own code; Visor mask idea | Page-curl book (arc-bent sheets in the vertex shader), drag/swipe, circular mask reveal |
 | `src/gl/host.ts` + `src/vendor/three-vrm.js` | @pixiv/three-vrm 3.6.0 (MIT © pixiv Inc.), idle techniques studied in YuriOS / utsuwa / airi / Soul-of-Waifu | VRM loader + MToon vendored; idle/blink/look-at/lip-sync hooks written from scratch |
-| `public/models/host.vrm` | VRoid AvatarSample_B (pixiv; commercial use allowed, credit not required, modification allowed) | Café host avatar |
+| `public/host-l2d/` (player + `nori.l2d`) | JagTheHero/layer2d viewer (MIT © 2026 Layer2D Contributors) and its "Nori — Cafe-Pop Calico Cat" avatar (MIT) | Default café host: transparent same-origin frame; agent audio handed to its phoneme lip-sync (`L2DHost.tsx`) |
+| `src/gl/galleryScene.ts`, `Galerie.tsx` | own code | Framed photos on easels along a spline walk |
+| `src/gl/mapScene.ts`, `Venir.tsx` | own code; tiles © OpenStreetMap contributors (ODbL) | Tiles stitched on a 3D slab with a gold cup-pin |
+| `src/lib/router.ts`, `Curtain.tsx` | own code | Hash tabs with circular curtain transition |
+| `qrcode` (node_modules, copied) | soldair/node-qrcode 1.5.4 (MIT) | QR to the agent on the Commande tab |
+| `public/models/host.vrm` (opt-in `?host=vrm`) | VRoid AvatarSample_B (pixiv; commercial use allowed, credit not required, modification allowed) | Café host avatar |
 | `server/deepgram.mjs`, `src/lib/voice.ts` | Deepgram docs (auth/grant, Voice Agent v1) | Server-side token broker; browser never sees the key |
 | `Hotspot.tsx` | Visor zip `CinematicHeroVideo.tsx` | Dot + drawn leader line + glass card, here pinned to a projected 3D point |
 | Title-behind-cup | Visor zip occlusion idea | Done with real depth: the name is a plane in the 3D scene behind the cup |
