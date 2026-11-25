@@ -1,5 +1,6 @@
 import Lenis from 'lenis';
 import { ScrollTrigger } from './motion';
+import { isTabHash, setTab, tabFromHash } from './tabs';
 
 /**
  * One rAF loop for the whole page. Lenis advances first, then ScrollTrigger
@@ -70,11 +71,24 @@ export function onFrame(fn: Tick): () => void {
   };
 }
 
+/** Scroll back to the very top (used on tab switches). Lenis owns the
+    scroll position when it is running, so go through it. */
+export function scrollToTop() {
+  if (lenis) lenis.scrollTo(0, { immediate: true })
+  else window.scrollTo(0, 0)
+}
+
 /** The nav pill height the scroll target should clear. */
 const SCROLL_OFFSET = 96;
 
 /**
  * Smooth-scrolls to an in-page hash like `#carte`, or to the top for `#top`.
+ *
+ * Tab hashes first: the site is a tab shell now, so `#menu`, `#book`,
+ * `#agent` (and the legacy section anchors `#carte`, `#livre`, …) switch
+ * tabs instead of scrolling — the target section only exists while its
+ * tab is active, so scrolling to it would wait 6 s and find nothing.
+ * The tab shell itself scrolls to the top of the new panel on switch.
  *
  * Two failure modes this guards against (both measured on the live site):
  * 1. The target section is a lazy chunk that has not mounted yet — the
@@ -87,6 +101,12 @@ const SCROLL_OFFSET = 96;
  *    glides once more to the corrected position.
  */
 export function scrollToHash(hash: string) {
+  // Tab shell: a tab hash (or a legacy section anchor) switches tabs.
+  if (isTabHash(hash)) {
+    const tab = tabFromHash(hash)
+    if (tab) setTab(tab)
+    return
+  }
   history.replaceState(null, '', hash);
   if (hash === '#top') {
     if (lenis) lenis.scrollTo(0, { duration: 1.2 });

@@ -4,6 +4,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import useDimensions from 'react-cool-dimensions'
 import { avatarBridge, type AvatarBridge } from '../lib/avatarBridge'
+import { pixelRatioCap } from '../lib/perf'
+import { useReducedMotion } from '../lib/scroll'
 
 /**
  * Vita — VRM 0.x full-body model (CC0, VRoid sample), rendered with
@@ -62,8 +64,21 @@ function rotateBoneWorld(bone: THREE.Object3D, axis: THREE.Vector3, angle: numbe
 
 const MODEL_URL = '/vrm/vita.vrm'
 const FOV = 30
+/** One walk cycle: two steps, ~0.7 s per step. */
+const WALK_DURATION = 1.4
 
-type Framing = 'full' | 'face'
+type Framing = 'full' | 'half' | 'face'
+
+/** Bones the procedural walk drives, with their rest-pose rotation.x. */
+interface WalkRig {
+  leftUpperLeg: THREE.Object3D
+  rightUpperLeg: THREE.Object3D
+  leftLowerLeg: THREE.Object3D
+  rightLowerLeg: THREE.Object3D
+  leftUpperArm: THREE.Object3D
+  rightUpperArm: THREE.Object3D
+  baseX: Map<THREE.Object3D, number>
+}
 
 interface VrmDebug {
   status: string
@@ -100,23 +115,41 @@ interface ThreeStage {
   eyePos: THREE.Vector3
   chestBaseRotationX: number
   headBaseRotationX: number
+  walkRig: WalkRig | null
 }
 
 export default function VrmModel({
   bridge = avatarBridge,
   onFailed,
+  compact = false,
+  walkTick = 0,
 }: {
   bridge?: AvatarBridge
   onFailed?: () => void
+  /**
+   * Compact menu stage: shorter, defaults to the head-to-knees framing
+   * so the face stays large on a phone and the walk stays visible.
+   */
+  compact?: boolean
+  /**
+   * Walk trigger: every increment starts one procedural walk cycle
+   * (legs + arms swing, hips bob). No walk VRMA exists on disk —
+   * utsuwa's VRMA_01–07 are emotes (Show Full Body, Greeting, Peace
+   * Sign, Shoot, Spin, Model Pose, Squat) and idle_*.vrma are idle
+   * loops — so the walk is bone-driven here, not a clip.
+   */
+  walkTick?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const threeRef = useRef<ThreeStage | null>(null)
-  const framingRef = useRef<Framing>('full')
+  const framingRef = useRef<Framing>(compact ? 'half' : 'full')
+  const walkRef = useRef({ t: Infinity })
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [progress, setProgress] = useState(0)
-  const [framing, setFraming] = useState<Framing>('full')
+  const [framing, setFraming] = useState<Framing>(compact ? 'half' : 'full')
   const { observe, width: stageW, height: stageH } = useDimensions<HTMLDivElement>()
   const failedRef = useRef(false)
+  const reducedMotion = useReducedMotion()
 
   const setStageRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -127,6 +160,11 @@ export default function VrmModel({
   )
 
   framingRef.current = framing
+
+  /* ---- Walk trigger: each increment starts one cycle. ---- */
+  useEffect(() => {
+    if (walkTick > 0 && !reducedMotion) walkRef.current.t = 0
+  }, [walkTick, reducedMotion])
 
   /* ---- Framing: measured box + stage size -> camera. ---- */
   const layout = useCallback(() => {
@@ -149,6 +187,12 @@ export default function VrmModel({
       targetY = eyePos.y - 0.1
       framedH = 0.62
       framedW = 0.55
+    } else if (framingRef.current === 'half') {
+      // Head to knees: the face stays ~2x larger than full-body on a
+      // phone, and the legs (and the walk) stay in frame.
+      targetY = eyePos.y - 0.28
+      framedH = 0.95
+      framedW = 0.6
     } else {
       targetY = centre.y
       framedH = size.y * 1.03
@@ -197,8 +241,6 @@ export default function VrmModel({
     let raf = 0
     let renderer: THREE.WebGLRenderer | null = null
     const clock = new THREE.Clock()
-    const reducedMotion =
-      typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
     const fail = () => {
       if (cancelled || failedRef.current) return
@@ -230,7 +272,7 @@ export default function VrmModel({
         fail()
         return
       }
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap()))
       renderer.setClearColor(0x000000, 0)
       renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;'
       renderer.domElement.setAttribute('aria-hidden', 'true')
@@ -387,6 +429,29 @@ export default function VrmModel({
       const chestBaseRotationX = chestNode ? chestNode.rotation.x : 0
       const headBaseRotationX = headNode ? headNode.rotation.x : 0
 
+      // Walk rig: the six bones the procedural walk drives, with their
+      // rest-pose rotation.x so the cycle can add swing on top and
+      // return exactly to rest afterwards.
+      let walkRig: WalkRig | null = null
+      try {
+        const humanoid = vrm.humanoid
+        const nodes = {
+          leftUpperLeg: humanoid.getNormalizedBoneNode('leftUpperLeg'),
+          rightUpperLeg: humanoid.getNormalizedBoneNode('rightUpperLeg'),
+          leftLowerLeg: humanoid.getNormalizedBoneNode('leftLowerLeg'),
+          rightLowerLeg: humanoid.getNormalizedBoneNode('rightLowerLeg'),
+          leftUpperArm: humanoid.getNormalizedBoneNode('leftUpperArm'),
+          rightUpperArm: humanoid.getNormalizedBoneNode('rightUpperArm'),
+        } as Record<keyof Omit<WalkRig, 'baseX'>, THREE.Object3D | null>
+        if (Object.values(nodes).every(Boolean)) {
+          const baseX = new Map<THREE.Object3D, number>()
+          Object.values(nodes).forEach((n) => baseX.set(n as THREE.Object3D, (n as THREE.Object3D).rotation.x))
+          walkRig = { ...(nodes as Omit<WalkRig, 'baseX'>), baseX }
+        }
+      } catch {
+        // No walk rig — the model still renders, it just never walks.
+      }
+
       threeRef.current = {
         renderer,
         scene,
@@ -399,6 +464,7 @@ export default function VrmModel({
         eyePos,
         chestBaseRotationX,
         headBaseRotationX,
+        walkRig,
       }
       layout()
       setStatus('ready')
@@ -412,11 +478,47 @@ export default function VrmModel({
       const loop = () => {
         if (cancelled) return
         raf = requestAnimationFrame(loop)
+        // Hidden tab: skip the work entirely (rAF already throttles in
+        // background tabs, but the guard also covers a hidden iframe).
+        if (document.hidden) return
         const dt = Math.min(clock.getDelta(), 0.1)
         const t = clock.elapsedTime
         const three = threeRef.current
         if (!three) return
         three.vrm.update(dt)
+
+        // Procedural walk: while the cycle runs, legs and arms swing in
+        // opposition and the hips bob; the envelope fades in and out so
+        // the cycle starts and ends exactly at the rest pose.
+        const rig = three.walkRig
+        if (rig) {
+          const wt = walkRef.current.t
+          if (wt < WALK_DURATION) {
+            walkRef.current.t = wt + dt
+            const phase = (wt / 0.7) * Math.PI * 2
+            const env = Math.min(1, wt / 0.15) * Math.min(1, (WALK_DURATION - wt) / 0.25)
+            const s = Math.sin(phase)
+            const setX = (node: THREE.Object3D, v: number) => {
+              node.rotation.x = (rig.baseX.get(node) ?? 0) + v * env
+            }
+            // Forward swing is negative rotation.x (legs point down, the
+            // model faces +Z): left leg forward while right arm forward.
+            setX(rig.leftUpperLeg, -0.5 * s)
+            setX(rig.rightUpperLeg, 0.5 * s)
+            setX(rig.leftLowerLeg, 0.28 * Math.max(0, Math.sin(phase + Math.PI / 2)))
+            setX(rig.rightLowerLeg, 0.28 * Math.max(0, Math.sin(phase - Math.PI / 2)))
+            setX(rig.leftUpperArm, 0.35 * s)
+            setX(rig.rightUpperArm, -0.35 * s)
+            three.group.position.y = 0.03 * Math.abs(s) * env
+          } else if (walkRef.current.t !== Infinity) {
+            // Cycle finished: restore the rest pose exactly, once.
+            walkRef.current.t = Infinity
+            rig.baseX.forEach((base, node) => {
+              node.rotation.x = base
+            })
+            three.group.position.y = 0
+          }
+        }
 
         const speaking = bridge.isSpeaking()
         if (speaking && !wasSpeaking) nodT = 0
@@ -499,7 +601,9 @@ export default function VrmModel({
     <div className="min-w-0 overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
       <div
         ref={setStageRef}
-        className="relative h-[520px] touch-pan-y sm:h-[540px] lg:h-[560px]"
+        className={`relative touch-pan-y ${
+          compact ? 'h-[260px] sm:h-[300px] lg:h-[480px]' : 'h-[520px] sm:h-[540px] lg:h-[560px]'
+        }`}
         style={{
           background:
             'radial-gradient(70% 70% at 50% 30%, rgba(232,163,61,0.14), transparent 70%), #171210',
@@ -510,7 +614,9 @@ export default function VrmModel({
             <img
               src="/images/nekomi-icon.png"
               alt="Nekomi — portrait de l’agent"
-              className="h-48 w-48 rounded-full border border-amber/40 object-cover shadow-2xl shadow-black/50 sm:h-56 sm:w-56"
+              className={`rounded-full border border-amber/40 object-cover shadow-2xl shadow-black/50 ${
+                compact ? 'h-24 w-24 sm:h-28 sm:w-28' : 'h-48 w-48 sm:h-56 sm:w-56'
+              }`}
             />
             <p className="mt-5 font-display text-2xl italic text-bone">Vita</p>
             <p className="mt-2 max-w-xs text-sm leading-relaxed text-mist">
@@ -525,7 +631,7 @@ export default function VrmModel({
           </div>
         )}
         <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/30 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/85 backdrop-blur">
-          VRM · Vita · corps entier
+          {compact ? 'Vita · 3D' : 'VRM · Vita · corps entier'}
         </div>
         {status === 'ready' && (
           <div
@@ -536,6 +642,7 @@ export default function VrmModel({
             {(
               [
                 { id: 'full', label: 'Corps entier' },
+                { id: 'half', label: 'Mi-corps' },
                 { id: 'face', label: 'Visage' },
               ] as const
             ).map((opt) => (
@@ -555,7 +662,9 @@ export default function VrmModel({
         )}
       </div>
       <p className="border-t border-line px-4 py-2.5 text-xs leading-relaxed text-mist sm:px-5 sm:py-3">
-        Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.
+        {compact
+          ? 'Vita — elle marche vers la catégorie choisie et vous lit les prix à voix haute.'
+          : 'Vita — modèle 3D en pied. Elle parle, hoche la tête et respire ; « Visage » zoome sur son visage.'}
       </p>
     </div>
   )

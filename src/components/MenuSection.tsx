@@ -9,7 +9,24 @@ export interface OrderLine {
   price: string
 }
 
-export default function MenuSection({ onAdd }: { onAdd: (line: OrderLine) => void }) {
+export default function MenuSection({
+  onAdd,
+  onActiveChange,
+  onItemAdd,
+  barTopClass = 'top-[128px] sm:top-[136px]',
+}: {
+  onAdd: (line: OrderLine) => void
+  /**
+   * The menu Vita (MenuVita) listens: a category change makes her walk
+   * over and read the category aloud; an item tap makes her walk and
+   * speak that item. The tab shell also passes barTopClass so the
+   * sticky category bar sits under the tab bar (and, on a phone, under
+   * the sticky Vita stage above it).
+   */
+  onActiveChange?: (catId: string) => void
+  onItemAdd?: (line: OrderLine) => void
+  barTopClass?: string
+}) {
   const [active, setActive] = useState(MENU[0].id)
   const [added, setAdded] = useState<string | null>(null)
   const category = MENU.find((c) => c.id === active) ?? MENU[0]
@@ -20,8 +37,15 @@ export default function MenuSection({ onAdd }: { onAdd: (line: OrderLine) => voi
   const rowsCtx = useRef<ReturnType<typeof gsap.context> | null>(null)
   const safetyRef = useRef<number | null>(null)
 
+  // Report the active category outward (initial + every change) so the
+  // Vita can react without owning the menu state.
+  useEffect(() => {
+    onActiveChange?.(active)
+  }, [active, onActiveChange])
+
   const add = (name: string, price: string) => {
     onAdd({ name, price })
+    onItemAdd?.({ name, price })
     setAdded(name)
     window.setTimeout(() => setAdded((cur) => (cur === name ? null : cur)), 900)
   }
@@ -104,7 +128,7 @@ export default function MenuSection({ onAdd }: { onAdd: (line: OrderLine) => voi
           data-reveal here: a reveal that fails to fire must never hide
           the tabs, and the bar must stay reachable while the list is
           long. The inner row scrolls sideways; the outer wrapper sticks. */}
-      <div className="sticky top-20 z-30 -mx-4 mt-8 bg-ink/90 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6">
+      <div className={`sticky z-30 -mx-4 mt-8 bg-ink/90 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 ${barTopClass}`}>
         <div
           className="flex flex-nowrap gap-2 overflow-x-auto"
           role="tablist"
