@@ -36,8 +36,10 @@
  *    any prediction drift at every word boundary.
  * 4. The clock is STOPPED by polling too: when the beats are done
  *    AND `speechSynthesis.speaking` is false, the mouth closes.
- *    A watchdog closes it if speech never starts (voice missing /
- *    blocked) so the mouth never flaps silently.
+ *    Fix pass 13: if the engine never starts, the clock starts
+ *    open-loop ~800 ms after queueing and stops when the beats are
+ *    done — the old 2500 ms kill-watchdog that closed the mouth
+ *    before it ever opened is gone; see speech.ts.
  *
  * Pure + testable: no `window`, no `speechSynthesis` in here — the
  * caller owns the clock (performance.now) and the speaking poll.
@@ -233,6 +235,19 @@ export class SpeechViseme {
       this.startedAtMs = nowMs
       this.shiftMs = 0
     }
+  }
+
+  /**
+   * Fix pass 13: restart the clock from `nowMs`, even if already
+   * started. Used when the engine starts speaking late while an
+   * open-loop run is already going — the real audio is at its
+   * beginning, so the mouth must re-sync to it, not keep the
+   * predicted offset. Unlike `start()` (a no-op once started),
+   * this always re-anchors and clears any boundary shift.
+   */
+  restart(nowMs: number): void {
+    this.startedAtMs = nowMs
+    this.shiftMs = 0
   }
 
   /**
