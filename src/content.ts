@@ -359,6 +359,10 @@ export const AGENT = {
   title: 'Parlez à Nekomi.',
   lede: "Notre agent connaît toute la carte et le café. Demandez un conseil, composez votre commande — elle la note ici, prête à montrer au bar.",
   statusOffline: 'Agent — chat disponible · voix et cerveau bientôt en ligne',
+  // Fix pass 16, group 3: the connected pill says exactly this —
+  // the old wording (with the live-broadcast phrase) is gone from
+  // the whole site.
+  statusOnline: 'Cerveau connecté',
   statusHint:
     'Le service vocal et le cerveau de l’agent se branchent bientôt. En attendant, le chat ci-dessous répond déjà avec la carte et l’adresse.',
   chatPlaceholder: 'Écrivez ici… ex. « un café et un Aperol Spritz »',
@@ -378,21 +382,22 @@ export const AGENT = {
   // stored Deepgram key is still rejected (401), so the voice call cannot
   // connect until a working key is re-entered — the UI says so plainly.
   voiceNoToken:
-    'La voix en direct n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
+    'La voix n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
   // Fix pass 16, group 4: the grant fetch reports the REAL failure
   // instead of the generic line above. These are the sentence heads —
   // Agent.tsx appends the HTTP status when there is one and the
   // attempt count, e.g. "…n’a pas répondu (3 tentatives)".
+  // (Fix 16, group 3: same live-wording rule as voiceNoToken.)
   voiceGrantNetwork:
-    'La voix en direct n’est pas connectée : le serveur de jetons n’a pas répondu',
+    'La voix n’est pas connectée : le serveur de jetons n’a pas répondu',
   voiceGrantTimeout:
-    'La voix en direct n’est pas connectée : le serveur de jetons a mis trop de temps à répondre',
+    'La voix n’est pas connectée : le serveur de jetons a mis trop de temps à répondre',
   voiceGrantHttp:
-    'La voix en direct n’est pas connectée : le serveur de jetons a renvoyé une erreur',
+    'La voix n’est pas connectée : le serveur de jetons a renvoyé une erreur',
   voiceGrantEmpty:
-    'La voix en direct n’est pas connectée : le serveur de jetons a renvoyé une réponse vide',
+    'La voix n’est pas connectée : le serveur de jetons a renvoyé une réponse vide',
   voiceWorklet:
-    'Votre navigateur ne permet pas la capture audio en direct — le chat texte reste disponible.',
+    'Votre navigateur ne permet pas la capture audio — le chat texte reste disponible.',
   voiceSocketError:
     'La connexion vocale a été interrompue. Réessayez, ou utilisez le chat texte.',
   voiceSettingsError:

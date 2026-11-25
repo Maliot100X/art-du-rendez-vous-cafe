@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookOpen, Send, Volume2, VolumeX } from 'lucide-react'
 import { CHARACTER, MENU } from '../content'
 import { askBrain } from '../lib/brain'
+import { useAgentStatus } from '../lib/agentStatus'
 import {
   getGuideLine,
   getPendingOpen,
@@ -134,8 +135,11 @@ export interface MenuGuide {
    */
   askBartender: () => void
   openBook: () => void
-  /** True only after the LLM brain has actually answered once — the
-      footnote below must not claim the brain is live before that. */
+  /** True only after the LLM brain has actually answered once — read
+      from the single shared store (src/lib/agentStatus.ts), the same
+      truth the Agent pill reads. The footnote below must not claim
+      the brain is live before that, and must agree with the pill
+      after it. */
   brainLive: boolean
   /** Current reading aloud (null when she is not reading). */
   reading: ReadingState | null
@@ -161,13 +165,20 @@ export function useMenuGuide({
    * from the store, so the line does not reset to the greeting and
    * the "Lecture en cours…" indicator comes back with the true
    * category (Livre label follows the actual reading category).
-   * `line` is mirrored the same way for the same reason; `input`,
-   * `muted` and `brainLive` are per-mount UI and stay local.
+   * `line` is mirrored the same way for the same reason; `input` and
+   * `muted` are per-mount UI and stay local. `brainLive` is NOT
+   * local either (fix pass 16, group 3): it comes from the single
+   * shared agent-status store, so the banner below agrees with the
+   * Agent pill and survives a tab switch.
    */
   const [line, setLineState] = useState<string>(() => getGuideLine() ?? CHARACTER.greetings.menu)
   const [input, setInput] = useState('')
   const [muted, setMutedState] = useState(isSpeechMuted())
-  const [brainLive, setBrainLive] = useState(false)
+  // Fix pass 16, group 3: the brain state is the shared store's, not
+  // a per-mount copy — the old useState(false) here is how the LA
+  // CARTE banner kept saying "hors ligne" after the Agent chat had
+  // already gone live, and how it reset on every tab switch.
+  const { brainLive } = useAgentStatus()
   const [reading, setReadingState] = useState<ReadingState | null>(() => getReading())
   const firstCategoryRef = useRef(true)
 
@@ -264,8 +275,9 @@ export function useMenuGuide({
     if (catId) {
       const nonce = startReading(catId, 12)
       setPendingOpen(catId)
-      void askBrain(clean).then(({ reply, source }) => {
-        if (source === 'llm') setBrainLive(true)
+      void askBrain(clean).then(({ reply }) => {
+        // Fix pass 16, group 3: askBrain() marks the shared store
+        // itself on an LLM reply — no local setBrainLive any more.
         setGuideLine(reply.text)
         // Only re-time (and speak) the reading THIS ask started —
         // the store refuses the re-time outright when the reading
@@ -278,8 +290,7 @@ export function useMenuGuide({
       })
       return
     }
-    void askBrain(clean).then(({ reply, source }) => {
-      if (source === 'llm') setBrainLive(true)
+    void askBrain(clean).then(({ reply }) => {
       setGuideLine(reply.text)
       if (isSpeechSupported()) speak(reply.text)
     })
@@ -305,8 +316,7 @@ export function useMenuGuide({
     // the brain answers.
     if (isSpeechSupported()) speak(text)
     const request = `Lis-moi la page ${cat.label} à voix haute`
-    void askBrain(request).then(({ reply, source }) => {
-      if (source === 'llm') setBrainLive(true)
+    void askBrain(request).then(({ reply }) => {
       if (getPendingOpen() !== categoryId) return
       // Only re-time (and speak) the reading THIS press started —
       // the store refuses the re-time when the reading has
