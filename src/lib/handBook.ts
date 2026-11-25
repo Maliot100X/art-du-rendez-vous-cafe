@@ -250,14 +250,15 @@ function buildSpreads(category: MenuCategory): HandBookSpread[] {
 export interface HandBookRig {
   group: THREE.Group
   /**
-   * The CLOSED book she carries at her side when idle — one page wide
-   * (13 cm), green cover out, gold spine. The open spread is 26 cm
-   * wide even with its cover shut (the cover only covers the right
-   * page, the left page stays bare paper), so showing the spread at
-   * rest reads as a flat half-green billboard hanging below her hand.
-   * The render loop shows the carry prop while blend < 0.5 and the
-   * open spread while blend >= 0.5, both at the same hand-relative
-   * centre, so the swap is a shape change in place, not a jump.
+   * The CLOSED book she would carry at her side when idle — one page
+   * wide (13 cm), green cover out, gold spine. Fix pass 6: it is built
+   * but NEVER SHOWN (VrmModel sets carry.visible = false every frame).
+   * At rest it read as a flat half-green billboard hanging below her
+   * hand — the open spread is 26 cm wide even with its cover shut (the
+   * cover only covers the right page, the left page stays bare paper),
+   * so showing the spread at rest reads as a flat slab at her hip, and
+   * the closed carry reads no better. Hands empty at idle beats a
+   * slab; the open spread during reading is the book that matters.
    */
   carry: THREE.Group
   coverPivot: THREE.Group

@@ -33,17 +33,16 @@ import { loadVrm } from '../lib/vrmCache'
  * head dips when speaking starts.
  *
  * Hand book (menu tab, `withBook`): a small 3D book prop parented to
- * her leftHand bone (src/lib/handBook.ts). At rest she carries the
- * CLOSED book at her side — its centre 6 cm below the hand and 1 cm
- * BEHIND it, so the hand renders in front of the cover's top edge and
- * the book reads as gripped, not floating (the old +3 cm forward put
- * the cover in front of the hand and hid it). On a reading trigger
- * (`readingTick` + `readingCategory`) the left arm raises it to chest
- * height AND toward the midline (adduction +0.5) — hand (-0.01, 1.10,
- * 0.32), book centre 1.19 m, book top 1.28 m, 12 cm clear of her chin
- * (1.40 m) — the cover opens and the pages turn (~every 4 s) while
- * she speaks; when she finishes, the arm eases back and the book
- * closes. The pose is composed ABSOLUTELY every frame (upper arm
+ * her leftHand bone (src/lib/handBook.ts). At rest she carries NOTHING
+ * in her hand — the closed carry prop is built but hidden (fix pass 6:
+ * at rest it read as a flat green slab at her hip, and three passes
+ * failed to make it read as a gripped book; hands empty at idle beats
+ * a slab). On a reading trigger (`readingTick` + `readingCategory`) the
+ * left arm raises it to chest height AND toward the midline (adduction
+ * +0.5) — hand (-0.01, 1.10, 0.32), book centre 1.19 m, book top
+ * 1.28 m, 12 cm clear of her chin (1.40 m) — the cover opens and the
+ * pages turn (~every 4 s) while she speaks; when she finishes, the arm
+ * eases back and the book closes. The pose is composed ABSOLUTELY every frame (upper arm
  * from its stored rest base, elbow as a world-axis bend from its
  * stored rest quaternion): the old code added `rotation.x +=` every
  * frame, which accumulated — the forearm spun from the first frame
@@ -168,7 +167,7 @@ interface VrmDebug {
   /** Projected full-body height in stage pixels. */
   bodyHeightPx: number
   /** Hand-book prop, when attached: world position + reading state. */
-  book: { world: [number, number, number]; reading: boolean; blend: number; prop: 'open' | 'carry' } | null
+  book: { world: [number, number, number]; reading: boolean; blend: number; prop: 'open' | 'none' } | null
   /** Walk state, for the cloud-browser check (see layout() + the walk effect). */
   walk: { tick: number; t: number; x: number; rig: boolean; reducedMotion: boolean; hidden: boolean }
 }
@@ -1048,8 +1047,14 @@ export default function VrmModel({
               // One prop at a time: closed while she carries it, open
               // while she reads. The swap happens mid-transit, when
               // both props already share centre and facing.
+              // Fix pass 6: the closed carry prop is NEVER shown — at
+              // rest it reads as a flat green slab at her hip (passes
+              // 3, 4 and 5 all failed to make it read as a gripped
+              // book), and the reading pose is the one that matters.
+              // Hands empty at idle beats a slab. The carry prop stays
+              // in the rig (built + oriented as before) but invisible.
               hb.group.visible = blend >= 0.5
-              hb.carry.visible = blend < 0.5
+              hb.carry.visible = false
             }
             // Cover opens once the arm is on its way up — swung BEHIND
             // the book (+2.6), so the open spread stays readable.
@@ -1098,7 +1103,7 @@ export default function VrmModel({
                 world: [bookWorld.x, bookWorld.y, bookWorld.z],
                 reading: read.active,
                 blend: Math.round(blend * 100) / 100,
-                prop: blend >= 0.5 ? 'open' : 'carry',
+                prop: blend >= 0.5 ? 'open' : 'none',
               }
             }
           }
