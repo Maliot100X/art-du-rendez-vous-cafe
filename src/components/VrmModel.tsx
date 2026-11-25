@@ -237,6 +237,20 @@ function stepLift(u: number): number {
 type Framing = 'full' | 'half' | 'face'
 
 /**
+ * Fix pass 9: the selected framing survives unmount. It used to live
+ * only in the component's useState, and only the active tab mounts —
+ * so every return to La Carte (or Livre) remounted VrmModel at the
+ * default 'half' and the visitor had to re-select "Corps entier".
+ * Same module-level pattern as MenuSection's lastMenuCategory, keyed
+ * by the `compact` prop: the Menu + Livre stages are both compact
+ * (default 'half') and share one slot, while the Agent tab's
+ * full-stage mount (default 'full') has its own — a framing picked
+ * in one kind of stage never leaks into the other.
+ */
+let lastFramingCompact: Framing = 'half'
+let lastFramingStage: Framing = 'full'
+
+/**
  * Bones the procedural walk drives, with their rest-pose rotation.x/z.
  * The pelvis + feet are optional (hip sway + foot levelling); the six
  * core bones are required.
@@ -441,7 +455,10 @@ export default function VrmModel({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const threeRef = useRef<ThreeStage | null>(null)
-  const framingRef = useRef<Framing>(compact ? 'half' : 'full')
+  // Fix pass 9: initialise from the persisted framing (see the
+  // module-level lastFraming* above), not from the bare default —
+  // otherwise a remount forgets the visitor's "Corps entier".
+  const framingRef = useRef<Framing>(compact ? lastFramingCompact : lastFramingStage)
   const walkRef = useRef({ t: Infinity, fromX: 0, toX: 0, step: -1, footL: -HIP_HALF, footR: HIP_HALF })
   /** True while a walk is running — layout() pulls the camera back to
       the full-body walk window for its duration (see layout). */
@@ -452,7 +469,21 @@ export default function VrmModel({
   walkTickRef.current = walkTick
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [progress, setProgress] = useState(0)
-  const [framing, setFraming] = useState<Framing>(compact ? 'half' : 'full')
+  const [framing, setFramingState] = useState<Framing>(() => (compact ? lastFramingCompact : lastFramingStage))
+  /**
+   * Fix pass 9: every framing pick is written back to the
+   * module-level slot (keyed by `compact`, like the initialiser
+   * above) as well as to state, so the next mount restores it. The
+   * buttons below call this, never setFramingState directly.
+   */
+  const setFraming = useCallback(
+    (next: Framing) => {
+      if (compact) lastFramingCompact = next
+      else lastFramingStage = next
+      setFramingState(next)
+    },
+    [compact],
+  )
   const { observe, width: stageW, height: stageH } = useDimensions<HTMLDivElement>()
   const failedRef = useRef(false)
   const reducedMotion = useReducedMotion()
