@@ -1,5 +1,5 @@
 import { CAFE, CHARACTER, MENU } from '../content'
-import { botReply, expressionForReply, type BotReply } from './agentBrain'
+import { actionsForReplyText, botReply, expressionForReply, parseBudget, type BotReply } from './agentBrain'
 
 /**
  * LLM-brain adapter for the café live agent (text chat).
@@ -254,8 +254,13 @@ async function callLlm(
  * Ask the brain. Returns the LLM reply when the key is configured and
  * the call succeeds; otherwise the offline rule-based reply — same
  * shape, so the expression + lip-sync path never changes.
- * The `actions` (tap-to-add buttons) come from the offline brain's read
- * of the same message: the LLM names the drinks, the buttons add them.
+ * The `actions` (tap-to-add buttons) come from the LLM reply's own
+ * text when it names menu items (fix 16: the LLM text already
+ * respects a stated budget, so the chips must be a subset of what it
+ * lists — the old code took the offline brain's actions, whose fixed
+ * favourites ignored the budget entirely); otherwise they fall back
+ * to the offline brain's read of the same message, which is itself
+ * budget-filtered (see agentBrain.botReply).
  */
 export async function askBrain(
   message: string,
@@ -268,10 +273,12 @@ export async function askBrain(
   try {
     const text = await callLlm(clean, history, opts?.persona ?? 'nekomi')
     brainLive = true
+    const budget = parseBudget(clean)
+    const fromText = actionsForReplyText(text, budget)
     return {
       reply: {
         text,
-        actions: offline.actions,
+        actions: fromText.length > 0 ? fromText : offline.actions,
         expression: expressionForReply(text),
       },
       source: 'llm',
