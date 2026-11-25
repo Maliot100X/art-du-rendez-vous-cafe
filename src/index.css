@@ -69,6 +69,10 @@ html.lenis body {
     -webkit-text-size-adjust: 100%;
     background: var(--color-ink);
     scroll-behavior: auto;
+    /* No sideways scroll, ever: decorative bleed (glows, scaled photos)
+       is clipped at the viewport instead of widening the document.
+       `clip` (not `hidden`) keeps position: sticky working. */
+    overflow-x: clip;
   }
   body {
     margin: 0;

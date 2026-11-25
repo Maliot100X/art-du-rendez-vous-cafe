@@ -393,7 +393,7 @@ export default function MenuBook() {
         onPointerCancel={() => {
           swipeRef.current = null;
         }}
-        className="relative mx-auto mt-12 w-full touch-pan-y select-none"
+        className="relative mx-auto mt-12 w-full touch-pan-y select-none overflow-hidden"
         style={{
           maxWidth: singlePage ? 480 : 960,
           aspectRatio: stageAspect,
