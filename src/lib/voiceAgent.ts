@@ -19,11 +19,14 @@
  * The browser cannot set an Authorization header on a WebSocket, so
  * the client authenticates with a short-lived JWT minted by
  * POST /v1/auth/grant, passed as the Sec-WebSocket-Protocol value
- * (["bearer", jwt]). This static site has no backend, so the token
- * provider is honest about that:
- *   (a) it first tries a same-origin POST /api/deepgram/grant endpoint
- *       — a TODO for the deploy phase. No such backend exists yet, so
- *       it 404s today and the voice button stays in its offline state.
+ * (["bearer", jwt]). The JWT comes from a same-origin
+ * POST /api/deepgram/grant endpoint (fix pass 15, group 6):
+ * locally that is the tiny grant server (server/grant.mjs,
+ * `npm run grant`, 127.0.0.1:8787) reached through the vite preview
+ * proxy; on the deploy it is the Vercel function
+ * (api/deepgram/grant.ts). The server reads DEEPGRAM_API_KEY from
+ * its own environment only — the key is never in the bundle, never
+ * in a file, and never sent to the agent socket.
  *   (b) it NEVER sends the raw Deepgram API key to the agent socket
  *       and NEVER embeds it in the shipped bundle as socket auth. The
  *       only other path is local development: when import.meta.env.DEV
@@ -33,9 +36,8 @@
  *       builds. A production build must NOT set VITE_DEEPGRAM_API_KEY.
  * When no token can be obtained, start() fails with reason 'no-token'
  * and the UI shows the honest offline state; the text chat keeps
- * working. The stored Deepgram key is currently rejected (401), so
- * voice is OFFLINE until Minir re-enters a working key — never claim
- * otherwise.
+ * working. Voice stays OFFLINE until the grant server runs with a
+ * valid key — never claim otherwise.
  *
  * THINK — Inception mercury-3 (fix pass 14, group E):
  * The agent's brain is Inception's mercury-3, reached as a Deepgram
@@ -254,9 +256,10 @@ interface GrantResponse {
 }
 
 /**
- * Mint a short-lived JWT. Same-origin grant endpoint first (deploy
- * phase — does not exist yet); dev-only API-key grant second; otherwise
- * throw, so the caller can show the honest offline state.
+ * Mint a short-lived JWT. Same-origin grant endpoint first
+ * (server/grant.mjs locally, api/deepgram/grant.ts on Vercel);
+ * dev-only API-key grant second; otherwise throw, so the caller can
+ * show the honest offline state.
  */
 async function fetchGrantToken(): Promise<string> {
   try {
@@ -367,8 +370,8 @@ export class DeepgramVoiceAgent {
     this.callbacks.onStatus('connecting')
 
     // 1. Short-lived JWT FIRST (see the token note at the top of this
-    //    file). There is no /api/deepgram/grant backend and production
-    //    has no key, so this fails with 'no-token' today — and it must
+    //    file). If the grant endpoint is unreachable or the server
+    //    has no valid key, this fails with 'no-token' — and it must
     //    fail BEFORE the microphone is touched, so a mic-less or
     //    denying browser never reports a mic error for what is really
     //    a missing token. No mic stream exists yet at this point, so
