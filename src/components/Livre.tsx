@@ -7,6 +7,9 @@ import {clamp, pinProgress} from '../lib/math';
 import {onFrame} from '../lib/scroll';
 import {startAgent, type Agent} from '../lib/voice';
 import {useReducedMotion} from '../hooks/useReducedMotion';
+import {L2DHost, type L2DHandle} from './L2DHost';
+
+const USE_VRM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('host') === 'vrm';
 
 /**
  * Le livre: the whole carte as a 3D book on the bar (gl/bookScene.ts) with a
@@ -23,6 +26,7 @@ export function Livre() {
   const sceneRef = useRef<ReturnType<typeof createBookScene> | null>(null);
   const hostRef = useRef<Host | null>(null);
   const voiceRef = useRef<Agent | null>(null);
+  const l2dRef = useRef<L2DHandle>(null);
   const pages = useMemo(() => paginate(categories), []);
   const [spread, setSpread] = useState(0);
   const [ready, setReady] = useState(false);
@@ -43,6 +47,7 @@ export function Livre() {
     try {
       scene = createBookScene(canvasRef.current!, {
         reduced,
+        vrm: USE_VRM,
         pages,
         drinks,
         fmt,
@@ -52,6 +57,7 @@ export function Livre() {
           setReady(true);
         },
         onPageChange: (s) => {
+          if (!USE_VRM) setReady(true);
           setSpread(s);
           const line = lineFor(s);
           setSay(line);
@@ -113,7 +119,7 @@ export function Livre() {
       return;
     }
     try {
-      voiceRef.current = await startAgent({mic: true, onLevel: (v) => hostRef.current?.setMouth(v), onState: setVoice, onText: (_r, t) => setSay(t)});
+      voiceRef.current = await startAgent({mic: true, onLevel: (v) => hostRef.current?.setMouth(v), onState: setVoice, onText: (_r, t) => setSay(t), onStream: (st) => !USE_VRM && !!l2dRef.current?.attachVoice(st)});
     } catch {
       setVoice('voix indisponible');
     }
@@ -135,12 +141,14 @@ export function Livre() {
           </div>
         </div>
 
+        {!USE_VRM && <L2DHost ref={l2dRef} className="absolute bottom-0 left-[-4%] h-[78svh] w-[44vw] max-md:left-[-18%] max-md:h-[52svh] max-md:w-[90vw]" />}
+
         {/* host speech bubble */}
         <div
           className={`pointer-events-none absolute top-[24%] left-[4%] max-w-[17rem] rounded-[18px] rounded-bl-[4px] border border-cream/20 bg-ink/65 px-4 py-3 text-[14px] text-cream backdrop-blur-md transition-opacity duration-500 md:top-[30%] md:left-[8%] ${say && ready ? 'opacity-100' : 'opacity-0'}`}
           aria-live="polite"
         >
-          <span className="label mb-1 block text-gold-light">Margaux · votre hôte</span>
+          <span className="label mb-1 block text-gold-light">Nori · votre hôte</span>
           {say}
         </div>
 

@@ -7,6 +7,9 @@ import {startAgent, type Agent} from '../lib/voice';
 import {createHostStage} from '../gl/hostStage';
 import type {Host} from '../gl/host';
 import {useReducedMotion} from '../hooks/useReducedMotion';
+import {L2DHost, type L2DHandle} from './L2DHost';
+
+const USE_VRM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('host') === 'vrm';
 
 type Msg = {role: 'user' | 'assistant'; text: string};
 const SUGGEST = ['cafe-latte', 'cappuccino-chantilly', 'aperol-spritz', 'orval', 'chocolat-chaud', 'kir-royal'];
@@ -24,8 +27,9 @@ export function Commande() {
   const hostRef = useRef<Host | null>(null);
   const agentRef = useRef<Agent | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const l2dRef = useRef<L2DHandle>(null);
   const [state, setState] = useState('');
-  const [msgs, setMsgs] = useState<Msg[]>([{role: 'assistant', text: 'Bonjour ! Je suis Margaux. Dites-moi ce qui vous ferait plaisir, je l’ajoute à votre commande.'}]);
+  const [msgs, setMsgs] = useState<Msg[]>([{role: 'assistant', text: 'Bonjour ! Je suis Nori. Dites-moi ce qui vous ferait plaisir, je l’ajoute à votre commande.'}]);
   const [text, setText] = useState('');
   const [sent, setSent] = useState<string | null>(null);
 
@@ -34,6 +38,7 @@ export function Commande() {
     try {
       st = createHostStage(canvasRef.current!, {
         reduced,
+        vrm: USE_VRM,
         onHost: (h) => {
           hostRef.current = h;
           (window as unknown as {__host: Host}).__host = h;
@@ -60,6 +65,7 @@ export function Commande() {
 
   const handlers = {
     onLevel: (v: number) => hostRef.current?.setMouth(v),
+    onStream: (s: MediaStream) => !USE_VRM && !!l2dRef.current?.attachVoice(s),
     onState: setState,
     onText: (role: 'user' | 'assistant', t: string) => {
       if (role === 'assistant') setMsgs((m) => [...m, {role, text: t}]);
@@ -67,7 +73,7 @@ export function Commande() {
     },
   };
   const ensure = async (mic: boolean) => {
-    if (agentRef.current && agentRef.current.mic === mic) return agentRef.current;
+    if (agentRef.current && !agentRef.current.closed && agentRef.current.mic === mic) return agentRef.current;
     agentRef.current?.stop();
     agentRef.current = await startAgent({mic, ...handlers});
     return agentRef.current;
@@ -106,12 +112,13 @@ export function Commande() {
   return (
     <section id="commande" aria-labelledby="commande-title" className="relative min-h-svh">
       <canvas ref={canvasRef} className="fixed inset-0 -z-0 size-full" aria-hidden="true" />
+      {!USE_VRM && <L2DHost ref={l2dRef} className="fixed bottom-[22svh] left-[8%] z-0 h-[70svh] w-[40vw] max-md:left-0 max-md:bottom-[40svh] max-md:h-[42svh] max-md:w-full" />}
       <div className="relative z-10 mx-auto grid max-w-[1680px] gap-6 px-5 pt-24 pb-16 md:grid-cols-[1fr_minmax(0,26rem)] md:px-10 md:pt-28">
         <div className="flex flex-col justify-between gap-6">
           <div>
             <p className="label text-gold-light">Commande · au comptoir ou à table</p>
             <h1 id="commande-title" className="display mt-2 text-[clamp(36px,4.6vw,80px)] text-[#fff6ea]">
-              Margaux <em className="text-gold-light">prend votre commande</em>
+              Nori <em className="text-gold-light">prend votre commande</em>
             </h1>
           </div>
 
@@ -150,7 +157,7 @@ export function Commande() {
             <span className="label text-cream/50">{count} boisson{count === 1 ? '' : 's'}</span>
           </div>
           {lines.length === 0 ? (
-            <p className="mt-4 text-[14px] text-cream/60">Rien pour l’instant. Ajoutez une boisson ci-dessous, depuis la carte, ou demandez à Margaux.</p>
+            <p className="mt-4 text-[14px] text-cream/60">Rien pour l’instant. Ajoutez une boisson ci-dessous, depuis la carte, ou demandez à Nori.</p>
           ) : (
             <ul className="mt-4 divide-y divide-cream/10">
               {lines.map((d) => (
@@ -204,7 +211,7 @@ export function Commande() {
             <canvas ref={qrRef} width={132} height={132} className="rounded-lg" aria-label="QR code vers l’agent" />
             <p className="text-[13px] text-cream/70">
               <span className="label block text-gold-light">Sur votre téléphone</span>
-              Scannez pour parler à Margaux depuis votre table.
+              Scannez pour parler à Nori depuis votre table.
             </p>
           </div>
         </aside>

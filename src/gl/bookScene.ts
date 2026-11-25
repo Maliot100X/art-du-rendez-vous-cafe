@@ -214,7 +214,7 @@ function paintPage(page: Page, idx: number, imgs: Map<string, HTMLImageElement>,
 
 export function createBookScene(
   canvas: HTMLCanvasElement,
-  opts: {reduced: boolean; pages: Page[]; drinks: Drink[]; fmt: Fmt; onHost?: (h: Host) => void; onPageChange?: (spread: number) => void},
+  opts: {reduced: boolean; vrm?: boolean; pages: Page[]; drinks: Drink[]; fmt: Fmt; onHost?: (h: Host) => void; onPageChange?: (spread: number) => void},
 ) {
   const renderer = makeRenderer(canvas);
   const {scene, key, look, tick, dispose: disposeStudio} = makeStudio(renderer, {table: 0, glowDir: [0.3, 0.2, -1]});
@@ -309,7 +309,7 @@ export function createBookScene(
 
   // Host
   let host: Host | null = null;
-  loadHost('/models/host.vrm').then((h) => {
+  if (opts.vrm) loadHost('/models/host.vrm').then((h) => {
     host = h;
     h.object.scale.setScalar(2.35);
     h.object.position.set(-3.1, -2.55, -1.1);
@@ -393,9 +393,9 @@ export function createBookScene(
     // camera: dolly in on entry, parallax on the cursor
     const portrait = W / H < 0.8;
     const e = 1 - Math.pow(1 - THREE.MathUtils.clamp(enter, 0, 1), 3);
-    const dist = THREE.MathUtils.lerp(portrait ? 17 : 13.5, portrait ? 12.5 : 9.6, e);
-    camera.position.set(-0.4 + mouse.x * 0.5, THREE.MathUtils.lerp(7.5, 5.6, e) + mouse.y * 0.3, dist);
-    camera.lookAt(portrait ? -0.6 : -0.7, portrait ? 0.9 : 1.05, 0.2);
+    const dist = THREE.MathUtils.lerp(portrait ? 16 : 12.5, portrait ? 11.5 : 8.4, e);
+    camera.position.set((portrait ? 1.1 : 0.2) + mouse.x * 0.5, THREE.MathUtils.lerp(7.5, 5.6, e) + mouse.y * 0.3, dist);
+    camera.lookAt(portrait ? 1.15 : 0.5, portrait ? 0.4 : 0.55, 0.6);
 
     if (host) {
       // look at the reader's cursor, or at the page while it turns

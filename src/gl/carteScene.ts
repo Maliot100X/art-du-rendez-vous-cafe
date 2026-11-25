@@ -81,18 +81,13 @@ export function createCarteScene(
   // Lacquer floor
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(60, 96),
-    new THREE.MeshPhysicalMaterial({color: '#140c08', roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.05, metalness: 0.2, envMapIntensity: 0.7, transparent: true, opacity: 0.88}),
+    new THREE.MeshPhysicalMaterial({color: '#2a0d05', roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.08, metalness: 0, envMapIntensity: 0.12, transparent: true, opacity: 0.8}),
   );
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
-  const ringBrass = new THREE.Mesh(new THREE.TorusGeometry(1, 0.03, 8, 240), new THREE.MeshPhysicalMaterial({color: '#d9a650', metalness: 1, roughness: 0.22}));
-  ringBrass.rotation.x = Math.PI / 2;
 
   const N = opts.drinks.length;
   const R = (N * (CW + 0.32)) / (Math.PI * 2);
-  ringBrass.scale.setScalar(R - 0.5);
-  ringBrass.position.y = 0.02;
-  scene.add(ringBrass);
 
   const wheel = new THREE.Group();
   scene.add(wheel);

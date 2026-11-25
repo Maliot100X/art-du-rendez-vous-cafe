@@ -11,8 +11,8 @@
 import {categories, drinks} from '../data/store.js';
 import {bagStore} from './bag';
 
-export type Agent = {send(text: string): void; stop(): void; mic: boolean};
-type Handlers = {onLevel(v: number): void; onState(s: string): void; onText(role: 'user' | 'assistant', text: string): void};
+export type Agent = {send(text: string): void; stop(): void; mic: boolean; readonly closed: boolean};
+type Handlers = {onLevel(v: number): void; onState(s: string): void; onText(role: 'user' | 'assistant', text: string): void; onStream?(s: MediaStream): boolean};
 
 const prompt = () => {
   const lines = categories.map(
@@ -20,7 +20,7 @@ const prompt = () => {
       `${c.title.fr}: ` +
       c.drinks.map((d) => `${d.name.fr} [id ${d.id}] ${d.priceList.map((p) => (p.key ? p.key + ' ' : '') + p.value.toFixed(2).replace('.', ',') + ' €').join(' / ')}`).join('; '),
   );
-  return `Tu es Margaux, l'hôte du café "Art du Rendez-Vous", Rue des Artistes 1A, 1020 Laeken, Bruxelles (à côté de la gare de Bockstael). Horaires: lun-mer 8h-2h, jeu 8h-minuit, ven-dim 24h/24. Réponds dans la langue du client (français par défaut), en une ou deux phrases chaleureuses. Quand le client veut commander, appelle add_to_order avec l'id exact. N'invente jamais de boisson ni de prix. Carte complète (${drinks.length} boissons):\n${lines.join('\n')}`;
+  return `Tu es Nori, l'hôte du café "Art du Rendez-Vous", Rue des Artistes 1A, 1020 Laeken, Bruxelles (à côté de la gare de Bockstael). Horaires: lun-mer 8h-2h, jeu 8h-minuit, ven-dim 24h/24. Réponds dans la langue du client (français par défaut), en une ou deux phrases chaleureuses. Quand le client veut commander, appelle add_to_order avec l'id exact. N'invente jamais de boisson ni de prix. Carte complète (${drinks.length} boissons):\n${lines.join('\n')}`;
 };
 
 export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent> {
@@ -34,7 +34,10 @@ export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent
   const ctx = new AudioContext({sampleRate: 24000});
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
-  analyser.connect(ctx.destination);
+  // If the avatar player takes the stream, it plays the audio (delayed for lip look-ahead); else play it here.
+  const dest = ctx.createMediaStreamDestination();
+  analyser.connect(dest);
+  if (!opts.onStream?.(dest.stream)) analyser.connect(ctx.destination);
   let playAt = 0;
   let raf = 0;
   let sources: AudioBufferSourceNode[] = [];
@@ -147,12 +150,14 @@ export async function startAgent(opts: {mic: boolean} & Handlers): Promise<Agent
   };
   ws.onerror = () => onState('erreur');
   ws.onclose = () => onState('terminé');
-  const keepAlive = window.setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({type: 'KeepAlive'})), 8000);
+  const keepAlive = window.setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({type: 'KeepAlive'})), 4000);
 
   return {
     mic: opts.mic,
+    get closed() {
+      return ws.readyState > 1;
+    },
     send(text) {
-      onText('user', text);
       if (ready) ws.send(JSON.stringify({type: 'InjectUserMessage', content: text}));
       else queue.push(text);
     },

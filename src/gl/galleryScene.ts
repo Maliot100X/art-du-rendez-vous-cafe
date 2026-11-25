@@ -34,7 +34,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
   opts.shots.forEach((s, i) => {
     const side = i % 2 ? 1 : -1;
     const z = -i * STEP;
-    const x = side * 3.2 + Math.sin(i * 0.9) * 0.6;
+    const x = side * 4.8 + Math.sin(i * 0.9) * 0.4;
     const g = new THREE.Group();
     g.position.set(x, 0, z);
     g.rotation.y = -side * 0.55;
@@ -73,7 +73,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     g.add(photo, back, rear);
     scene.add(g);
     frames.push({g, side, mat, base: -side * 0.55});
-    pathPts.push(new THREE.Vector3(-side * 0.6, 2.3 + Math.sin(i) * 0.2, z + 3.2));
+    pathPts.push(new THREE.Vector3(-side * 0.5, 2.4 + Math.sin(i) * 0.2, z + 5.4));
   });
   pathPts.push(new THREE.Vector3(0, 2.6, -(N - 1) * STEP - 4));
   const path = new THREE.CatmullRomCurve3(pathPts, false, 'catmullrom', 0.3);
@@ -121,7 +121,7 @@ export function createGalleryScene(canvas: HTMLCanvasElement, opts: {reduced: bo
     look.y = 2.6;
     const fp = new THREE.Vector3(fr.g.position.x, 3.1, fr.g.position.z);
     const near = 1 - Math.min(1, Math.abs(f - i) * 1.6);
-    look.lerp(fp, 0.55 + near * 0.35);
+    look.lerp(fp, 0.45 + near * 0.3);
     camera.lookAt(look);
     frames.forEach((F, j) => {
       const d = Math.max(0, 1 - Math.abs(f - j));

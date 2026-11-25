@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import {disposeScene, lathe, makeRenderer, makeStudio, marbleTexture} from './kit';
 import {loadHost, type Host} from './host';
 
-export function createHostStage(canvas: HTMLCanvasElement, opts: {reduced: boolean; onHost?: (h: Host) => void}) {
+export function createHostStage(canvas: HTMLCanvasElement, opts: {reduced: boolean; vrm?: boolean; onHost?: (h: Host) => void}) {
   const renderer = makeRenderer(canvas);
   const {scene, tick, dispose: disposeStudio} = makeStudio(renderer, {glowDir: [-0.3, 0.2, -1]});
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 120);
@@ -40,7 +40,7 @@ export function createHostStage(canvas: HTMLCanvasElement, opts: {reduced: boole
   scene.add(lamp);
 
   let host: Host | null = null;
-  loadHost('/models/host.vrm').then((h) => {
+  if (opts.vrm) loadHost('/models/host.vrm').then((h) => {
     host = h;
     h.object.position.set(0, 0, 0);
     h.object.scale.setScalar(1.85);
