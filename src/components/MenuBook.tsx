@@ -632,7 +632,7 @@ export default function MenuBook({
     <section
       id="livre"
       ref={sectionRef}
-      className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-4 sm:px-6 sm:py-10 md:py-36"
+      className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 pb-10 pt-4 sm:px-6 sm:py-10 md:py-36"
       aria-label="Le livre de la carte"
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:gap-6" data-reveal>

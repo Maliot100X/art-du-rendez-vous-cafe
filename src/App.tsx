@@ -463,13 +463,17 @@ export default function App() {
 
   return (
     // pb clears the fixed mobile bottom tab bar so the footer (and the
-    // last panel content) can scroll fully above it on phones.
-    <div className="min-h-screen bg-ink pb-[76px] font-sans text-bone md:pb-0">
+    // last panel content) can scroll fully above it on phones. The bar
+    // is 60 px + the safe-area inset (home indicator) — the old flat
+    // 76 px left ~18 px of content hiding under it on notched phones.
+    <div className="min-h-screen bg-ink pb-[calc(76px+env(safe-area-inset-bottom,0px))] font-sans text-bone md:pb-0">
       <div className="grain" aria-hidden="true" />
       <FluidFallbackDiv />
       <Nav />
-      {/* pt clears the fixed nav pill; the tab bar sticks under it. */}
-      <main className="relative z-10 pt-[64px] sm:pt-[72px]">
+      {/* pt clears the fixed nav pill; the tab bar sticks under it.
+          The nav grows by the safe-area inset on notched phones, so the
+          top padding grows with it. */}
+      <main className="relative z-10 pt-[calc(64px+env(safe-area-inset-top,0px))] sm:pt-[calc(72px+env(safe-area-inset-top,0px))]">
         <TabBar active={activeTab} onSelect={setTab} />
         {activeTab === 'home' && (
           <TabSurface tab="home">

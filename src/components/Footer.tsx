@@ -20,6 +20,13 @@ function useFitText(text: string) {
       probe.style.fontSize = `${(100 * w) / pw}px`
     }
     fit()
+    // The display font lands after first paint: measuring with the
+    // fallback font under-measures (it is narrower), so the computed
+    // size is too big and the wordmark overflows its hidden wrap —
+    // the footer showed only "ART DU". Re-fit once the fonts arrive.
+    if (typeof document !== 'undefined' && document.fonts) {
+      document.fonts.ready.then(fit).catch(() => undefined)
+    }
     const ro = new ResizeObserver(fit)
     if (wrapRef.current) ro.observe(wrapRef.current)
     return () => ro.disconnect()

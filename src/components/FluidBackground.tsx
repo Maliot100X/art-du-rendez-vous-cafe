@@ -30,9 +30,16 @@ export default function FluidBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [failed, setFailed] = useState(false)
   const reducedMotion = useReducedMotion()
+  // Phones: the live sim is a still background, not a shaking one.
+  // The canvas is fixed full-viewport, and on a phone the viewport
+  // height changes every time the URL bar shows or hides while
+  // scrolling — each resize re-initialises the sim's framebuffers and
+  // the background jumps. The static gradient is the same café palette.
+  const coarsePointer =
+    typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
 
   useEffect(() => {
-    if (reducedMotion) return
+    if (reducedMotion || coarsePointer) return
     const canvas = canvasRef.current
     if (!canvas) return
     let destroy: (() => void) | undefined
@@ -47,9 +54,9 @@ export default function FluidBackground() {
       setFailed(true)
     }
     return () => destroy?.()
-  }, [reducedMotion])
+  }, [reducedMotion, coarsePointer])
 
-  if (reducedMotion || failed) return <FluidFallback />
+  if (reducedMotion || coarsePointer || failed) return <FluidFallback />
 
   return (
     <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">

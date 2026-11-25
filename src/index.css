@@ -186,6 +186,16 @@ html.lenis body {
       animation: none;
     }
   }
+
+  /* Phones: the grain stays as a static texture — the 0.6 s stepped
+     jitter is a full-screen fixed layer jumping forever, and on a phone
+     it reads as the whole page shaking (worst at the bottom, over the
+     dark footer). A still background beats a shaking one. */
+  @media (pointer: coarse) {
+    .grain {
+      animation: none;
+    }
+  }
 }
 
 @keyframes grain-jitter {

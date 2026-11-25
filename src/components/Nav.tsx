@@ -29,7 +29,7 @@ export default function Nav() {
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-6 sm:pt-4">
+      <header className="fixed inset-x-0 top-0 z-50 px-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] sm:px-6 sm:pt-[calc(1rem+env(safe-area-inset-top,0px))]">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between rounded-full border border-line bg-ink/75 py-2 pl-5 pr-2 backdrop-blur-xl">
           <button
             type="button"
