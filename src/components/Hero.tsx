@@ -180,7 +180,7 @@ export default function Hero() {
         {/* The frame — visor grammar: 16:9, rounded, giant type overlapping it */}
         <div
           ref={frameRef}
-          className="relative mt-10 aspect-[16/9] min-h-[380px] w-full overflow-hidden rounded-[2rem] shadow-2xl shadow-black/60 sm:mt-12"
+          className="relative mt-10 aspect-[16/9] min-h-[380px] w-full overflow-hidden rounded-[2rem] shadow-2xl shadow-black/60 sm:mt-12 lg:aspect-[16/7] lg:min-h-[440px]"
         >
           <div
             ref={photoWrapRef}
@@ -202,7 +202,7 @@ export default function Hero() {
         </div>
 
         {/* Giant overlapping type */}
-        <div ref={titleRef} className="relative z-10 -mt-[clamp(64px,9vw,150px)] text-center will-change-transform">
+        <div ref={titleRef} className="relative z-10 -mt-[clamp(64px,9vw,150px)] text-center will-change-transform lg:-mt-[210px]">
           <h1 className="font-display font-black leading-[0.86] tracking-[-0.02em] text-bone">
             <span className="block text-hero drop-shadow-[0_6px_30px_rgba(0,0,0,0.55)]">{HERO.titleA}</span>
             <span className="block text-hero drop-shadow-[0_6px_30px_rgba(0,0,0,0.55)]">{HERO.titleB}</span>

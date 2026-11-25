@@ -168,7 +168,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
   }
 
   return (
-    <section id="agent" className="relative mx-auto max-w-[1400px] px-4 py-24 sm:px-6 md:py-36">
+    <section id="agent" className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36">
       <div className="max-w-3xl" data-reveal>
         <p className="font-mono text-label uppercase text-amber">{AGENT.eyebrow}</p>
         <h2 className="mt-3 font-display text-display text-bone">{AGENT.title}</h2>
@@ -184,11 +184,13 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         {!agentConnected && <p className="mt-3 max-w-xl text-sm text-mist">{AGENT.statusHint}</p>}
       </div>
 
-      <div className="mt-12 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 lg:grid-cols-[1fr_1.1fr]">
         {/* Live 2D stage */}
         <div data-reveal>
           <Live2DModel bridge={avatarBridge} />
-          <ul className="mt-6 space-y-3">
+          {/* Guidance — full list on desktop, collapsed on a phone so
+              the agent section stays compact. */}
+          <ul className="mt-6 hidden space-y-3 sm:block">
             {AGENT.guidance.map((g) => (
               <li key={g} className="flex items-start gap-3 text-body text-bone/80">
                 <Sparkles size={15} className="mt-1 shrink-0 text-amber" />
@@ -196,10 +198,23 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               </li>
             ))}
           </ul>
+          <details className="mt-4 sm:hidden">
+            <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.16em] text-amber">
+              Ce que Nekomi peut faire
+            </summary>
+            <ul className="mt-3 space-y-2">
+              {AGENT.guidance.map((g) => (
+                <li key={g} className="flex items-start gap-3 text-sm text-bone/80">
+                  <Sparkles size={14} className="mt-0.5 shrink-0 text-amber" />
+                  <span>{g}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         </div>
 
         {/* Chat + voice + QR */}
-        <div className="flex flex-col gap-6" data-reveal style={{ ['--d' as string]: '120ms' }}>
+        <div className="flex flex-col gap-4 sm:gap-6" data-reveal style={{ ['--d' as string]: '120ms' }}>
           <div className="overflow-hidden rounded-[1.75rem] border border-line bg-ink-2">
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-bone">
@@ -208,7 +223,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
               <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-mist">Répond hors-ligne pour l’instant</span>
             </div>
 
-            <div ref={listRef} className="h-[320px] space-y-4 overflow-y-auto px-5 py-5">
+            <div ref={listRef} className="h-[240px] space-y-4 overflow-y-auto px-5 py-5 sm:h-[320px]">
               {messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
@@ -279,7 +294,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           </div>
 
           {/* Voice */}
-          <div className="rounded-[1.75rem] border border-line bg-ink-2 p-5">
+          <div className="rounded-[1.75rem] border border-line bg-ink-2 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-bone">
                 <PhoneCall size={15} className="text-amber" /> {AGENT.voiceTitle}
@@ -313,7 +328,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
           </div>
 
           {/* Order + QR */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
             <div className="rounded-[1.75rem] border border-line bg-ink-2 p-5">
               <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-bone">{AGENT.orderTitle}</p>
               {order.length === 0 ? (
@@ -396,7 +411,7 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
             </div>
 
             <div className="flex items-center gap-4 rounded-[1.75rem] border border-line bg-ink-2 p-5">
-              <div className="flex h-[120px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-bone">
+              <div className="flex h-[96px] w-[96px] shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-bone sm:h-[120px] sm:w-[120px]">
                 {qr ? (
                   <img src={qr} alt="QR code vers le chat de l’agent" className="h-full w-full object-contain" />
                 ) : (

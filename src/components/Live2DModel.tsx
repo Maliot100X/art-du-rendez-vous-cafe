@@ -272,7 +272,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 sm:px-5 sm:py-4">
         <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-bone/80">{AGENT.henshinLabel}</p>
         <div className="flex rounded-full border border-line p-1" role="group" aria-label="Forme du modèle">
           {(
@@ -295,7 +295,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           ))}
         </div>
       </div>
-      <p className="border-t border-line px-5 py-3 text-xs leading-relaxed text-mist">{AGENT.modelNote}</p>
+      <p className="border-t border-line px-4 py-2.5 text-xs leading-relaxed text-mist sm:px-5 sm:py-3">{AGENT.modelNote}</p>
     </div>
   )
 }

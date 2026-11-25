@@ -48,7 +48,7 @@ export default function Visit() {
   }, [reducedMotion])
 
   return (
-    <section id="venir" ref={sectionRef} className="relative mx-auto max-w-[1400px] px-4 py-24 sm:px-6 md:py-36">
+    <section id="venir" ref={sectionRef} className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36">
       <div data-reveal>
         <p className="font-mono text-label uppercase text-amber">{VISIT.eyebrow}</p>
         <h2 className="mt-3 font-display text-display text-bone">{VISIT.title}</h2>

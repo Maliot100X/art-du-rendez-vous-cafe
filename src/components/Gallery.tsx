@@ -71,7 +71,7 @@ export default function Gallery() {
   const lightboxTransition = { duration: reducedMotion ? 0 : 0.4, ease: EASE_SILK };
 
   return (
-    <section id="galerie" ref={sectionRef} className="relative mx-auto max-w-[1400px] px-4 py-24 sm:px-6 md:py-36">
+    <section id="galerie" ref={sectionRef} className="relative mx-auto max-w-[1400px] scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24 md:py-36">
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between" data-reveal>
         <div>
           <p className="font-mono text-label uppercase text-amber">{GALLERY.eyebrow}</p>
