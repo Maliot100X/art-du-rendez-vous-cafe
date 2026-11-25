@@ -46,8 +46,7 @@
 // Exit 0 = all checks pass, 1 = at least one fails.
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -243,10 +242,21 @@ defineGlobal('cancelAnimationFrame', () => {})
 // to the shipped file.
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
-const outDir = mkdtempSync(join(tmpdir(), 'fix16-voice-probe-'))
+// Fix 16 (merge): temp dir lives INSIDE the repo root, not /tmp —
+// brain.ts now imports agentStatus (single status store), which
+// imports 'react' (useSyncExternalStore), and Node can only resolve
+// that from a path under the repo's node_modules. Same pattern as
+// fix14-think-probe / fix15-brain-probe. Cleaned up before exit.
+const outDir = mkdtempSync(join(root, '.fix16-voice-probe-'))
+// The tsc output below is CommonJS (see --module commonjs), but the
+// repo root package.json says "type": "module" — without this, Node
+// would load the transpiled files as ESM and `exports` would be
+// undefined. (When the temp dir lived in /tmp there was no parent
+// package.json, so CommonJS was the silent default.)
+writeFileSync(join(outDir, 'package.json'), JSON.stringify({ type: 'commonjs' }))
 const probeSrc = join(outDir, 'src')
 mkdirSync(join(probeSrc, 'lib'), { recursive: true })
-for (const rel of ['src/content.ts', 'src/lib/voiceAgent.ts', 'src/lib/avatarBridge.ts', 'src/lib/brain.ts', 'src/lib/agentBrain.ts']) {
+for (const rel of ['src/content.ts', 'src/lib/voiceAgent.ts', 'src/lib/avatarBridge.ts', 'src/lib/brain.ts', 'src/lib/agentBrain.ts', 'src/lib/agentStatus.ts']) {
   const orig = readFileSync(join(root, rel), 'utf8')
   const copy = orig.replaceAll('import.meta.env', '({ DEV: false } as Record<string, unknown>)')
   writeFileSync(join(outDir, rel), copy)
@@ -261,6 +271,7 @@ await new Promise((resolve, reject) => {
   execFile(
     join(root, 'node_modules', '.bin', 'tsc'),
     [
+      '--ignoreConfig',
       join(probeSrc, 'lib', 'voiceAgent.ts'),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -446,4 +457,5 @@ check(
 )
 
 console.log(failures === 0 ? '\nAll fix16-voice probe checks passed.' : `\n${failures} check(s) FAILED.`)
+rmSync(outDir, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)
