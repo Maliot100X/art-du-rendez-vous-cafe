@@ -200,10 +200,18 @@ export default function Agent({ order, onAdd, onRemove, onClear }: AgentProps) {
         if (source === 'llm') setBrainLive(true)
         avatarBridge.setExpression(reply.expression ?? 'neutral')
         setMessages((prev) => [...prev, { role: 'bot', text: reply.text, actions: reply.actions }])
+        // Fix pass 15: clear the thinking flag in the SAME batch as
+        // the reply append — the old .finally() ran a microtask later,
+        // so one committed render showed the reply AND "Nekomi
+        // réfléchit…" with the input still disabled. askBrain never
+        // rejects (it falls back to the offline brain), so the .catch
+        // below only covers a throw inside this handler — the input
+        // must never stay disabled forever.
+        setAnswering(false)
         // Live speaking: the reply is spoken (short, French voice) unless muted.
         if (isSpeechSupported()) speak(reply.text)
       })
-      .finally(() => setAnswering(false))
+      .catch(() => setAnswering(false))
   }
 
   // ---- Book reaction (bookEvents): the model describes the category
