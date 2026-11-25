@@ -23,6 +23,20 @@
  * A watchdog closes the mouth if speech never starts (voice missing
  * or blocked), so it never flaps silently. Nekomi (Live2D) reads the
  * same avatarBridge value, so her mouth moves with the voice.
+ *
+ * Fix pass 13 — open-loop fallback: that watchdog was the bug. In
+ * browsers where speech never starts (no voices installed / headless
+ * — the pixel check heard "Nothing played" in 12 s), the clock never
+ * started and the 2500 ms watchdog killed the tick, so the mouth
+ * stayed 0 for the whole reading even though the reading timer ran
+ * and the "Lecture en cours…" panel was up. Now, if the engine has
+ * not reported speaking within ~800 ms of queueing, the clock starts
+ * ANYWAY (open-loop mode) and runs until the word-timed beats are
+ * done — the clock is timed from the text itself, so it is the
+ * correct fallback when audio is unavailable. If the engine DOES
+ * start later, the clock restarts from now (re-sync to the real
+ * audio) and switches back to engine mode. The kill-watchdog is
+ * gone: it can never kill an open-loop run.
  */
 
 import { avatarBridge, smoothMouthOpen } from './avatarBridge'
@@ -38,6 +52,18 @@ let cachedVoices: SpeechSynthesisVoice[] = []
 let viseme: SpeechViseme | null = null
 let visemeStarted = false
 let speakQueuedAt = 0
+/** Fix pass 13: true while the viseme clock runs open-loop (started
+    without the engine reporting speaking, because audio never
+    started). In this mode the run ends when the beats are done,
+    regardless of the engine flag; if the engine starts later the
+    clock re-syncs and this flips back to false (engine mode). */
+let openLoop = false
+/** Fix pass 13: how long to wait for the real engine before falling
+    back to open-loop. A normal engine starts well within this, so on
+    a real phone the clock still starts from the real audio (no
+    visible lead); only when audio truly never starts does open-loop
+    take over. */
+const OPEN_LOOP_AFTER_MS = 800
 /** Fix pass 10: hold the utterance so Chrome cannot garbage-collect
     it mid-speech (a known cause of dropped `onend`). */
 let utterRef: SpeechSynthesisUtterance | null = null
@@ -72,6 +98,9 @@ function pickVoice(): SpeechSynthesisVoice | null {
  * it polls `speechSynthesis.speaking` (the real engine state, even
  * when `onstart`/`onend` never fire on Android) to start the viseme
  * clock, sample the mouth, and stop when the voice is really done.
+ * Fix pass 13: if the engine never reports speaking within
+ * OPEN_LOOP_AFTER_MS, the clock starts anyway (open-loop) so the
+ * mouth moves during readings even with no audio at all.
  */
 function tickSpeaking() {
   const now = performance.now()
@@ -85,9 +114,28 @@ function tickSpeaking() {
   if (!visemeStarted && engineSpeaking && viseme) {
     viseme.start(now)
     visemeStarted = true
+    openLoop = false
     speaking = true
     avatarBridge.setExpression('happy')
     avatarBridge.setSpeaking(true)
+  } else if (!visemeStarted && viseme && now - speakQueuedAt >= OPEN_LOOP_AFTER_MS) {
+    // Fix pass 13 — open-loop fallback: the engine never started
+    // (no voices / headless / blocked). Start the word-timed clock
+    // anyway and keep it running until the beats are done. The old
+    // 2500 ms kill-watchdog lived here and is deliberately gone:
+    // it must never kill an open-loop run.
+    viseme.start(now)
+    visemeStarted = true
+    openLoop = true
+    speaking = true
+    avatarBridge.setExpression('happy')
+    avatarBridge.setSpeaking(true)
+  } else if (visemeStarted && openLoop && engineSpeaking && viseme) {
+    // Fix pass 13 — re-sync: the engine started late while
+    // open-loop was running. The real audio is at its beginning,
+    // so restart the clock from now and switch back to engine mode.
+    viseme.restart(now)
+    openLoop = false
   }
 
   if (visemeStarted && viseme) {
@@ -95,18 +143,18 @@ function tickSpeaking() {
     prevMouth = smoothMouthOpen(frame.mouth, prevMouth, dt)
     avatarBridge.setMouthOpen(prevMouth)
     avatarBridge.setMouthVowel(frame.vowel)
-    // End: the beats are done AND the engine is quiet. The poll —
-    // not `onend` — is what closes the mouth on Android.
-    if (frame.done && !engineSpeaking) {
+    // End: in open-loop mode the beats finishing is enough (the
+    // engine flag may never move); in engine mode keep the existing
+    // end (beats done AND the engine quiet). The poll — not
+    // `onend` — is what closes the mouth on Android.
+    if (frame.done && (openLoop || !engineSpeaking)) {
       endSpeaking()
       return
     }
-  } else if (!visemeStarted && now - speakQueuedAt > 2500) {
-    // Watchdog: the voice never started (no voice / blocked) — stop
-    // instead of flapping the mouth silently forever.
-    endSpeaking()
-    return
   }
+  // NOTE: no kill-watchdog here any more (fix pass 13). Before the
+  // 800 ms open-loop start the tick simply keeps polling; after it
+  // the clock runs until the beats finish.
 
   // Keep polling while an utterance is in flight — the loop must NOT
   // stop on `speaking` (still false while the voice is queued, and
@@ -130,6 +178,7 @@ function endSpeaking() {
   avatarBridge.setExpression('neutral')
   viseme = null
   visemeStarted = false
+  openLoop = false
   utterRef = null
 }
 
@@ -161,6 +210,7 @@ export function speak(text: string): void {
   // The viseme clock is built from the exact text being spoken.
   viseme = new SpeechViseme(short, utter.rate)
   visemeStarted = false
+  openLoop = false
   speakQueuedAt = performance.now()
   utterRef = utter
   utter.onstart = () => {
@@ -169,11 +219,19 @@ export function speak(text: string): void {
     if (viseme && !visemeStarted) {
       viseme.start(performance.now())
       visemeStarted = true
+      openLoop = false
       speaking = true
       lastT = performance.now()
       prevMouth = 0
       avatarBridge.setExpression('happy')
       avatarBridge.setSpeaking(true)
+    } else if (viseme && visemeStarted && openLoop) {
+      // Fix pass 13: the engine fired onstart late while open-loop
+      // was running — re-sync the clock to the real audio now (the
+      // poll would catch this on the next frame too; this is the
+      // same switch, just one frame earlier).
+      viseme.restart(performance.now())
+      openLoop = false
     }
   }
   utter.onboundary = (e) => {
