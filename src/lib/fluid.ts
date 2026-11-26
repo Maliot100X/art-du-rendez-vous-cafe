@@ -98,8 +98,15 @@ const BACK_COLOR: RGB = { r: 13, g: 10, b: 8 }
 function generateColor(): RGB {
   const [r, g, b] = PALETTE[Math.floor(Math.random() * PALETTE.length)]
   // Dim like the original (×0.15): the dye is a glow on near-black, never
-  // a bright wash — text stays legible over it.
-  const s = 0.16 * (0.8 + Math.random() * 0.4)
+  // a bright wash — text stays legible over it. Fix 19: ×0.16 → ×0.24
+  // (the fix-18 cloud check proved the ×0.16 field too dim and smooth
+  // for a pan to read on pixels — a 42 px shift changed most pixels by
+  // a few levels), then ×0.24 → ×0.30 after the first fix-19 probe run
+  // (Home full-viewport mean 2.36–3.51 straddled the gate — the dye
+  // amplitude is what the pan has to work with). Still a dark glow
+  // (brightest amber ≈ 83/59/22 over near-black #0d0a08), so
+  // legibility is unchanged.
+  const s = 0.3 * (0.8 + Math.random() * 0.4)
   return { r: (r / 255) * s, g: (g / 255) * s, b: (b / 255) * s }
 }
 
@@ -1072,6 +1079,27 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
     splat(pointer.texcoordX, pointer.texcoordY, dx, dy, pointer.color)
   }
 
+  // Fix 19 — the 6 opening splats used to land at fully random
+  // positions, so on any given load a corner of the viewport could have
+  // no dye at all: the pan then moved an empty field there and the
+  // pixel check read ~0 in that region (Home top-left 6.6 → 2.8 → 1.1
+  // across three probe runs of the SAME build, while VENIR — bare fluid
+  // everywhere — stayed 3.6–5.3). The splats now land spread over the
+  // viewport (one per region, corners included) with small random
+  // jitter, so every region has dye to pan on every load. Same 6
+  // splats, same soft marbled look, same random colours and impulses —
+  // only the placement is spread instead of a lottery. On a full-speed
+  // GPU the wanderers swamp the opening field within seconds anyway,
+  // so the visible difference there is nil.
+  const OPENING_SPREAD: ReadonlyArray<readonly [number, number]> = [
+    [0.15, 0.18],
+    [0.85, 0.15],
+    [0.5, 0.35],
+    [0.18, 0.78],
+    [0.82, 0.8],
+    [0.5, 0.62],
+  ]
+
   function multipleSplats(amount: number): void {
     for (let i = 0; i < amount; i++) {
       const color = generateColor()
@@ -1086,8 +1114,9 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
       color.r *= 1.5
       color.g *= 1.5
       color.b *= 1.5
-      const x = Math.random()
-      const y = Math.random()
+      const [sx, sy] = OPENING_SPREAD[i % OPENING_SPREAD.length]
+      const x = Math.min(0.94, Math.max(0.06, sx + (Math.random() - 0.5) * 0.12))
+      const y = Math.min(0.94, Math.max(0.06, sy + (Math.random() - 0.5) * 0.12))
       const dx = 1000 * (Math.random() - 0.5)
       const dy = 1000 * (Math.random() - 0.5)
       splat(x, y, dx, dy, color)
