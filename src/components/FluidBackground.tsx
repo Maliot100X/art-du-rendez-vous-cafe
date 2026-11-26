@@ -24,9 +24,18 @@ import './FluidBackground.css'
  * region over 8s) — its cycles are now ~2x faster with ~1.6x larger
  * travel and tighter gradients (see FluidBackground.css).
  *
+ * Fix pass 17: this component is mounted ONCE at the app root
+ * (src/App.tsx), fixed behind EVERY tab — it used to mount inside
+ * the Home branch only, so VENIR and every other tab showed nothing
+ * but the static gradient and the cloud pixel check measured exactly
+ * zero change over 22s at 1920x1000 on VENIR. The desktop sim was
+ * never dead; it was never mounted there. The canvas is
+ * `pointer-events: none` and z-0 under main (z-10); the tab surfaces
+ * are transparent gradients, so the field shows through on all tabs.
+ *
  * Failure can never blank the page (the lesson of the Hero R3F canvas):
  * - prefers-reduced-motion → static gradient, no canvas at all. This
- *   is the ONLY case that ever shows a still background on the Home tab.
+ *   is the ONLY case that ever shows a still background (on any tab).
  * - WebGL context creation / shader / FBO failure → the init throws,
  *   the component swaps to the ANIMATED CSS fallback (moving coloured
  *   blobs in the same café palette) — never a flat static gradient.
