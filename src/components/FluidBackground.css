@@ -47,6 +47,84 @@
  * the static gradient instead), but the animation is also killed by
  * the media query below as belt-and-braces. */
 
+/* Fix 18 — WALL-CLOCK positional drift of the whole fluid field.
+ *
+ * Root cause (diagnosed, not guessed): in the browser the cloud pixel
+ * check uses, the WebGL sim steps at ~0.5 fps at 1920x1000, so 22 s
+ * of wall time is ~11 frames = ~0.18 s of sim time — the wanderers
+ * never emit, the opening splats barely move, and the field is
+ * effectively frozen (the 15–36% pixel diff the check measured is the
+ * grain jitter). No sim-frame-gated tuning can fix a 22 s wall check
+ * at 0.5 fps, and even at full speed the dye blooms/fades in place
+ * rather than translating (corr(0,0) ≈ 0.00–0.10 over ~2 s sim time,
+ * no coherent shift). So the drift runs on the compositor's clock:
+ * the whole wrapper — canvas + underlay — pans ±6vw/±4vh on a 120 s
+ * linear alternate cycle. That is ~2 px/s at 1920 wide (~42 px in
+ * 22 s, ~115 px a minute): calm, but the marbled pattern visibly
+ * crosses the screen on every tab, with no input, in every browser,
+ * at any sim fps. Linear (not ease-in-out) so there is no slow zone
+ * near the turnarounds — the field is always moving at the same rate.
+ * The canvas and underlay are oversized to 114% (inset -7%) so the
+ * pan never exposes an edge: 6vw is 6% of the width < 7%, 4vh is 4%
+ * of the height < 7%, at any aspect ratio. Transform-only animation:
+ * compositor work, no layout, and it cannot disturb the GL context.
+ * Reduced motion never mounts the canvas, but the animation is also
+ * killed by the media query below as belt-and-braces.
+ *
+ * Two implementation gotchas found by the fix-18 probe, both
+ * documented so the next pass does not repeat them:
+ * - A <canvas> is a REPLACED element: `inset` alone does NOT stretch
+ *   it — with width/height auto it keeps its intrinsic 300x150 size
+ *   and the field becomes a 300x150 patch at the top-left (the rest
+ *   of the viewport then shows only the static underlay). Explicit
+ *   width/height (114% here) are required.
+ * - In a SwiftShader/headless browser the compositor produces frames
+ *   rarely (the WebGL canvas costs seconds per frame), so the CSS
+ *   animation clock — which tracks the last produced frame's
+ *   timestamp — lags wall time badly there, and screenshots can
+ *   capture a stale surface. The probe therefore reads the wrapper's
+ *   computed transform right after a produced sim frame (freshness
+ *   gate) instead of trusting wall time alone, and the cloud check
+ *   (which does produce frames — it measured 15–36% pixel diff) is
+ *   the arbiter for the real visual drift. */
+
+.fluid-drift {
+  animation: fluid-pan 120s linear infinite alternate;
+  will-change: transform;
+}
+
+.fluid-canvas {
+  /* A <canvas> is a REPLACED element: `inset` alone does NOT stretch
+   * it — with width/height auto it keeps its intrinsic 300x150 size
+   * (caught by the fix-18 probe: the field was a 300x150 patch at the
+   * top-left and the rest of the viewport showed only the static
+   * underlay). Explicit width/height are required; the pre-fix
+   * `h-full w-full` Tailwind classes did this, and the fix-18
+   * oversize needs the same treatment at 114%. */
+  inset: -7%;
+  width: 114%;
+  height: 114%;
+}
+
+.fluid-underlay {
+  inset: -7%;
+}
+
+@keyframes fluid-pan {
+  from {
+    transform: translate3d(-6vw, -4vh, 0);
+  }
+  to {
+    transform: translate3d(6vw, 4vh, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fluid-drift {
+    animation: none;
+  }
+}
+
 .fluid-animated-fallback {
   overflow: hidden;
   background: #0d0a08;

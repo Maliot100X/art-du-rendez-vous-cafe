@@ -156,7 +156,7 @@ export interface FluidConfig {
  * so the field converged to empty. Now dissipation is 0.12/0.35 and
  * the ambient input is 1–3 slow wandering emitters (see the wanderer
  * block in update()) laying a continuous dye trail every 0.9s
- * (1.6s mobile) at 1.5–1.8x the pointer splat radius, so injection
+ * (1.6s mobile) at 1.5x the pointer splat radius, so injection
  * beats decay at a visible equilibrium.
  * (2) Hover never stirred: onPointerMove re-ran updatePointerDownData
  * on every move with no button down, resetting prev=pos, so delta was
@@ -170,7 +170,7 @@ export function resolveFluidConfig(mobile: boolean): FluidConfig {
     SIM_RESOLUTION: mobile ? 80 : 128,
     DYE_RESOLUTION: mobile ? 384 : 1024,
     DENSITY_DISSIPATION: 0.12,
-    VELOCITY_DISSIPATION: 0.35,
+    VELOCITY_DISSIPATION: 0.3,
     PRESSURE: 0.25,
     PRESSURE_ITERATIONS: mobile ? 10 : 20,
     CURL: 10,
@@ -180,7 +180,7 @@ export function resolveFluidConfig(mobile: boolean): FluidConfig {
     DPR_CAP: mobile ? 1 : 1.5,
     AMBIENT_INTERVAL: mobile ? 1.6 : 0.9,
     AMBIENT_WANDERERS: mobile ? 1 : 3,
-    AMBIENT_RADIUS_SCALE: mobile ? 1.5 : 1.8,
+    AMBIENT_RADIUS_SCALE: mobile ? 1.5 : 1.5,
   }
 }
 
@@ -1201,7 +1201,7 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
    * not sustain the field: with DENSITY_DISSIPATION 0.3 the opening
    * splats were gone in ~5s of sim time and each ambient blob faded
    * before the next arrived (measured steady state: 0.0% of pixels
-   * above background+10). A wanderer crosses the field in ~20s and
+   * above background+10). A wanderer crosses the field in ~12s and
    * emits every AMBIENT_INTERVAL, so consecutive blobs overlap into
    * a continuous ribbon; the along-heading velocity kick (600, vs the
    * old ±350 random kick) keeps the dye advecting between emissions.
@@ -1209,8 +1209,8 @@ export function createFluid(canvas: HTMLCanvasElement, opts: FluidOptions = {}):
    * a line across the whole field. Recolours on bounce so the trail
    * changes palette as it wanders.
    */
-  const WANDERER_SPEED = 0.05 // UV units per second
-  const WANDERER_PUSH = 600 // velocity kick along the heading
+  const WANDERER_SPEED = 0.08 // UV units per second (fix 18: was 0.05)
+  const WANDERER_PUSH = 900 // velocity kick along the heading (fix 18: was 600)
   interface Wanderer {
     x: number
     y: number
