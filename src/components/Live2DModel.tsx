@@ -78,6 +78,24 @@ let lastHenshinForm: Form = 'human'
  */
 let param3Current = 0
 
+/**
+ * Fix pass 17 — debug mouth override (diagnostic only, no UI).
+ * `window.__nekomiForceMouth(v)` (set in init, below) holds the mouth
+ * at a fixed ParamMouthOpenY value (0..1) or releases it (null) so a
+ * live browser check can force the mouth open and screenshot it,
+ * separating "the parameter never reaches the visible model" from
+ * "the bridge/envelope never produces the value". The normal path
+ * reads the bridge when this is null; the override wins everywhere
+ * the mouth is written (beforeModelUpdate hook, bake timer, ticker
+ * fallback) so a forced value cannot be overwritten by a stale tick.
+ */
+let forcedMouth: number | null = null
+
+/** The mouth value the stage must write right now: override, else bridge. */
+function currentMouthValue(bridge: AvatarBridge): number {
+  return forcedMouth ?? bridge.getMouthOpen()
+}
+
 /** Guarded Param3 write to a model's core (Param absent → ignore). */
 function writeParam3(model: Live2DModelType | null, value: number): void {
   try {
@@ -239,6 +257,18 @@ declare global {
       bakeCount: number
       lastBakeMs: number
       /**
+       * Fix pass 17 — baked-vertex readback (debug only): the height
+       * (canvas px) of the mouth art ArtMesh13 (drawable 12) as last
+       * baked into vertices by a real model update — 61 px closed,
+       * 125 px at 0.7, 152 px at 1.0 (scripts/fix14-mouth-measure.mjs).
+       * Unlike mouthWritten (the parameter value right after the
+       * write, before the bake), this proves the value survived the
+       * bake into geometry the renderer draws. -1 = never measured.
+       * mouthForced is the active debug override (-1 = none).
+       */
+      mouthBboxH: number
+      mouthForced: number
+      /**
        * The init failure, when status is 'failed' — the exact error
        * message (fix pass 4: the old code swallowed it, so a failed
        * stage gave no clue what broke). The cloud-browser check reads
@@ -246,6 +276,8 @@ declare global {
        */
       error: string | null
     }
+    /** Fix pass 17 — debug mouth override, see forcedMouth above. */
+    __nekomiForceMouth?: (value: number | null) => void
   }
 }
 
@@ -586,6 +618,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
       // A fit must not wipe the bake telemetry either (fix pass 16).
       bakeCount: window.__nekomiDebug?.bakeCount ?? -1,
       lastBakeMs: window.__nekomiDebug?.lastBakeMs ?? 0,
+      // Fix pass 17: nor the baked-vertex readback / force state.
+      mouthBboxH: window.__nekomiDebug?.mouthBboxH ?? -1,
+      mouthForced: window.__nekomiDebug?.mouthForced ?? -1,
       // A successful fit means no error — never carry a stale
       // failure forward into the ready diagnostic (fix pass 5).
       error: null,
@@ -625,6 +660,13 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     const init = async () => {
       const container = containerRef.current
       if (!container) return
+      // Fix pass 17 — debug mouth override (see forcedMouth). Set
+      // here, before the warm path returns, so it exists on every
+      // mount. Diagnostic only: no UI calls it.
+      window.__nekomiForceMouth = (value: number | null) => {
+        forcedMouth = value === null ? null : Math.max(0, Math.min(1, value))
+        if (window.__nekomiDebug) window.__nekomiDebug.mouthForced = forcedMouth ?? -1
+      }
       // Fix pass 16: performance.now() of the last model update that
       // actually ran (a bake). Updated in writeMouth, which fires on
       // `beforeModelUpdate` inside the model's own update — i.e. only
@@ -888,6 +930,35 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         // cleanup is needed. If the hook is unavailable, the ticker
         // write below stays as the fallback.
         let mouthHooked = false
+        /**
+         * Fix pass 17 — baked-vertex readback (see __nekomiDebug).
+         * Reads ArtMesh13 (drawable 12) vertices as last baked by a
+         * real model update: 61 px closed, 125 px at 0.7, 152 px at
+         * 1.0. Called from the app-ticker tick (vertices of the last
+         * rendered bake) and from the bake timer right after a
+         * forced render — never inside writeMouth, which runs BEFORE
+         * the bake and would read the previous frame's geometry.
+         */
+        const recordBakedMouth = () => {
+          try {
+            const verts = (
+              model.internalModel as unknown as {
+                getDrawableVertices: (index: number) => number[]
+              }
+            ).getDrawableVertices(12)
+            let minY = Infinity
+            let maxY = -Infinity
+            for (let i = 1; i < verts.length; i += 2) {
+              if (verts[i] < minY) minY = verts[i]
+              if (verts[i] > maxY) maxY = verts[i]
+            }
+            if (window.__nekomiDebug && Number.isFinite(minY)) {
+              window.__nekomiDebug.mouthBboxH = Math.round(maxY - minY)
+            }
+          } catch {
+            // Read-back unsupported — ignore.
+          }
+        }
         const writeMouth = () => {
           // Fix pass 16: a model update really ran (this hook fires
           // inside internalModel.update, i.e. inside a bake) — record
@@ -895,7 +966,9 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // one. Updated before the write: even a failed write still
           // proves the bake happened.
           lastModelUpdateAt = performance.now()
-          const value = bridge.getMouthOpen()
+          // Fix pass 17: the debug override wins over the bridge
+          // (see forcedMouth) so a forced value is what gets baked.
+          const value = currentMouthValue(bridge)
           setParam('ParamMouthOpenY', value)
           if (window.__nekomiDebug) {
             let readback = -1
@@ -906,6 +979,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             }
             window.__nekomiDebug.mouthBridge = Math.round(value * 100) / 100
             window.__nekomiDebug.mouthWritten = Math.round(readback * 100) / 100
+            window.__nekomiDebug.mouthForced = forcedMouth ?? -1
           }
         }
         try {
@@ -941,7 +1015,11 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           // Fix pass 14: this ticker write is only the fallback — the
           // beforeModelUpdate hook above owns the mouth write when
           // available (same-frame bake; see writeMouth).
-          if (!mouthHooked) setParam('ParamMouthOpenY', bridge.getMouthOpen())
+          if (!mouthHooked) setParam('ParamMouthOpenY', currentMouthValue(bridge))
+          // Fix pass 17: vertices baked by the last render, read
+          // back so the probe can tell a baked mouth from a merely
+          // written parameter.
+          recordBakedMouth()
           if (window.__nekomiDebug) {
             let readback = -1
             try {
@@ -1015,7 +1093,11 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         let bakeCount = 0
         const bakeTimer = setInterval(() => {
           try {
-            if (!bridge.isSpeaking()) return
+            // Fix pass 17: a debug force (see forcedMouth) also
+            // drives the bake timer — a held-open mouth must present
+            // even with no speech run in flight, or the force test
+            // below would depend on the starved rAF loop alone.
+            if (!bridge.isSpeaking() && forcedMouth === null) return
             if (!canvas.isConnected) return
             // `app` is a mutable let captured by the effect cleanup —
             // narrow it into a const for this tick.
@@ -1029,7 +1111,7 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             // would starve the speech tick that produces the values
             // being rendered.
             if (now - lastForcedBakeAt < Math.max(BAKE_STALE_MS, lastForcedRenderMs)) return
-            setParam('ParamMouthOpenY', bridge.getMouthOpen())
+            setParam('ParamMouthOpenY', currentMouthValue(bridge))
             // Feed the delta the starved Automator never accumulated
             // (capped: a multi-second stall must not inject a
             // multi-second motion step), then render — _render bakes
@@ -1037,6 +1119,10 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             const renderStart = performance.now()
             model.update(Math.min(staleMs, BAKE_STALE_MS))
             renderApp.render()
+            // Fix pass 17: read the baked geometry back right after
+            // the forced render, so the probe sees what this frame
+            // actually drew — not just the parameter that went in.
+            recordBakedMouth()
             lastForcedRenderMs = performance.now() - renderStart
             lastForcedBakeAt = renderStart
             bakeCount += 1
@@ -1085,6 +1171,8 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
             mouthWritten: -1,
             bakeCount: -1,
             lastBakeMs: 0,
+            mouthBboxH: -1,
+            mouthForced: -1,
             error: message,
           }
           setStatus('failed')
