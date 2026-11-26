@@ -24,14 +24,35 @@ import './FluidBackground.css'
  * region over 8s) — its cycles are now ~2x faster with ~1.6x larger
  * travel and tighter gradients (see FluidBackground.css).
  *
- * Fix pass 17: this component is mounted ONCE at the app root
- * (src/App.tsx), fixed behind EVERY tab — it used to mount inside
- * the Home branch only, so VENIR and every other tab showed nothing
- * but the static gradient and the cloud pixel check measured exactly
- * zero change over 22s at 1920x1000 on VENIR. The desktop sim was
- * never dead; it was never mounted there. The canvas is
- * `pointer-events: none` and z-0 under main (z-10); the tab surfaces
- * are transparent gradients, so the field shows through on all tabs.
+ * Fix pass 18: the fix-17 cloud pixel check (03:24–03:33 CET) proved
+ * the sim is NOT the problem and NOT the solution either. Diagnosis
+ * (scripts/fix18-fluid-probe.mjs header + /tmp/fix18-diag.log):
+ * - In a real browser the WebGL sim DOES render (SwiftShader WebGL 2.0,
+ *   canvas mounts, fallback does not) — the CSS fallback is not what
+ *   the check sees, so tuning the fallback cannot fix it.
+ * - But the sim steps at ~0.5 fps at 1920x1000 in that browser, so
+ *   22 s of wall time is ~11 frames = ~0.18 s of sim time. The
+ *   wanderers (one emission per 54 frames) never fire and the opening
+ *   splats barely move: the field is effectively frozen, and the
+ *   15–36% pixel diff the check measured is the grain jitter, not
+ *   the fluid. No sim-frame-gated tuning can ever fix a 22 s wall
+ *   check at 0.5 fps — the drift has to run on WALL-CLOCK time.
+ * - Even at full speed the dye does not translate coherently: over
+ *   ~2 s of sim time the field decorrelates (corr(0,0) ≈ 0.00–0.10)
+ *   because dye blooms and fades in place; new splats, not a moving
+ *   pattern. So the fix is a slow compositor-driven PAN of the whole
+ *   field: the wrapper (canvas + underlay) translates ±6vw/±4vh on a
+ *   120 s linear alternate cycle — ~2 px/s at 1920 wide, ~42 px in
+ *   22 s, ~115 px a minute — calm, but the marbled pattern visibly
+ *   crosses the screen in every browser at any sim fps, with no input.
+ *   The canvas
+ *   and underlay are oversized to 114% (inset -7%) so the pan never
+ *   exposes an edge (6vw < 7% of width, 4vh < 7% of height, at any
+ *   aspect ratio). The sim itself is also nudged (fluid.ts) so the
+ *   dye flows more on GPU browsers instead of only blooming in place.
+ * - Reduced motion: the canvas never mounts, so there is nothing to
+ *   pan; the animation is also killed by the media query below as
+ *   belt-and-braces.
  *
  * Failure can never blank the page (the lesson of the Hero R3F canvas):
  * - prefers-reduced-motion → static gradient, no canvas at all. This
@@ -98,9 +119,9 @@ export default function FluidBackground() {
   if (failed) return <FluidFallback animated />
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-      <div className="fluid-fallback absolute inset-0" />
-      <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" />
+    <div className="fluid-drift pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+      <div className="fluid-fallback fluid-underlay absolute" />
+      <canvas ref={canvasRef} className="fluid-canvas absolute block" />
     </div>
   )
 }
