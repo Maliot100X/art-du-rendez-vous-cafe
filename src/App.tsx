@@ -323,13 +323,19 @@ function MenuTab({ onAdd, onOpenBook }: { onAdd: (line: OrderLine) => void; onOp
  * guide reads the category aloud and the "Lecture en cours…" panel
  * shows what she is reading, with a stop control.
  *
- * The guide reads the category the big book lands on: the initial
- * target (menu guide's "Feuilleter le livre") starts a reading at
- * once, and every later flip landing fires onBookCategory and
- * restarts it. A reading ends on a timer (estimateSeconds) — the old
- * end came from the VRM's onReadingEnd; the timer is its replacement,
- * nonce-guarded so a stale timer cannot clear a newer reading.
- * No walk: she reads from beside the book, in voice only.
+ * Fix pass 17: a reading starts ONLY from an explicit
+ * "Demander à la barmaid" press (askBartender below) — never from
+ * a book event. The old code started a fresh 12 s reading on EVERY
+ * flip landing (the onBookCategory subscription) and another one
+ * from the mount target (goToCategory), so turning the book after a
+ * reading had finished brought "Lecture en cours…" straight back
+ * with the new category — the cloud check's resurrection (Bières
+ * after Chaudes, Apéritifs after Vins). A flip landing now only
+ * consumes the book target; the book opening after a finished menu
+ * reading is silent, because that reading already happened (and
+ * was heard) on the Menu tab — the open is its payoff, not a
+ * second reading. No walk: she reads from beside the book, in
+ * voice only.
  */
 function BookTab({
   goToCategory,
@@ -346,9 +352,15 @@ function BookTab({
    */
   onTargetConsumed?: () => void
 }) {
-  const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() =>
-    goToCategory ? { categoryId: goToCategory.catId, nonce: goToCategory.nonce } : null,
-  )
+  /**
+   * Fix pass 17: BookTab mounts with NO reading. The old initialiser
+   * started one from goToCategory, so the book opening after a
+   * finished menu reading showed a second, phantom 12 s "reading"
+   * for that category even though nothing was being spoken any more
+   * (the real reading already finished on the Menu tab). A reading
+   * starts only from an explicit askBartender press below.
+   */
+  const [reading, setReading] = useState<{ categoryId: string; nonce: number; seconds?: number } | null>(() => null)
   /**
    * Fix pass 8: mirrors of `reading` for the async brain reply, and
    * the nonce of a reading the visitor explicitly stopped. A late
@@ -391,15 +403,21 @@ function BookTab({
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  // Follow the big book: every flip landing on a category restarts her
-  // reading on it (the scroll-open to the first category included).
+  // Follow the big book ONLY to consume the target: when the book
+  // lands on the category the goToCategory target asked for, the
+  // target is consumed (App clears bookTarget) so the landing
+  // carries the TRUE category, the book stays where it landed and
+  // the next Livre mount cannot replay a stale target.
+  // Fix pass 17: a flip landing must NOT start a reading. The old
+  // subscription restarted a fresh 12 s reading here on every
+  // landing — so a finished reading came straight back, with the
+  // new category, on the next page turn (cloud check: Chaudes ->
+  // Bières, Vins -> Apéritifs). Readings start only from an
+  // explicit askBartender press; the Agent's flip log (Agent.tsx)
+  // still hears every landing through its own subscription.
   // Fix pass 13: the target + callback live in refs so this
-  // subscription (registered once, on armReadingTimer) never churns —
-  // it always sees the current target without re-subscribing. When
-  // the book lands on the target's category, the target is consumed
-  // (App clears bookTarget): the landing carries the TRUE category,
-  // so from here on the book stays where it landed and the next Livre
-  // mount cannot replay a stale target.
+  // subscription (registered once) never churns — it always sees
+  // the current target without re-subscribing.
   const goToCategoryRef = useRef(goToCategory)
   goToCategoryRef.current = goToCategory
   const onTargetConsumedRef = useRef(onTargetConsumed)
@@ -407,23 +425,17 @@ function BookTab({
   useEffect(
     () =>
       onBookCategory((catId) => {
-        const nonce = Date.now()
-        setReading({ categoryId: catId, nonce })
-        armReadingTimer(nonce, 12)
         if (goToCategoryRef.current && catId === goToCategoryRef.current.catId) {
           onTargetConsumedRef.current?.()
         }
       }),
-    [armReadingTimer],
+    [],
   )
 
-  // The initial target (menu guide's "Feuilleter le livre") starts a
-  // reading at once — arm its timer on mount.
-  useEffect(() => {
-    if (reading) armReadingTimer(reading.nonce, reading.seconds ?? 12)
-    return () => clearReadingTimer()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // No reading is armed on mount (fix pass 17 — see the state
+  // initialiser above). Only clear an ask-started reading's timer
+  // if this tab unmounts mid-reading.
+  useEffect(() => () => clearReadingTimer(), [])
 
   // "Demander à la barmaid" (Livre tab): the book is already open on
   // the page, so the button reads this page aloud — the same brain

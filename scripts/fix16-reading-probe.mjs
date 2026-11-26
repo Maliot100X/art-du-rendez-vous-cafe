@@ -24,16 +24,18 @@
  * which succeeds only while that exact reading (nonce + category) is
  * still live and refuses finished / stopped / superseded outright.
  * BookTab's late reply now returns when the live reading is null
- * (the fix-8 natural-finish carve-out is removed). Flip-driven
- * readings are untouched.
+ * (the fix-8 natural-finish carve-out is removed). Fix pass 17
+ * later removed flip-driven readings entirely (a flip landing
+ * starts no reading — that was the page-turn resurrection).
  *
  * Dynamic checks (real logic, real timers, no pixels): the store is
  * transpiled with the repo's own tsc into a temp dir under ~/.cache
  * and imported into node (same pattern as fix14-reading-probe.mjs).
  * Static checks: the guard shape in all three reply handlers
  * (MenuGuide ask + askBartender, BookTab askBartender), terminal
- * completion in finishReading, flip-driven readings untouched, and
- * no diagnostic instrumentation left in the three changed files.
+ * completion in finishReading, no reading started on a flip landing
+ * (fix pass 17), and no diagnostic instrumentation left in the
+ * three changed files.
  *
  * Live checks (best effort — needs playwright-core + a headless
  * Chromium; set FIX16_URL, FIX16_PLAYWRIGHT to the playwright-core
@@ -295,7 +297,9 @@ if (askBlock !== null) {
 }
 
 // S3 — BookTab (App.tsx): a natural finish now blocks the late reply,
-// and flip-driven readings are untouched.
+// and (fix pass 17) flip landings start NO reading at all — the old
+// flip-driven reading is what resurrected "Lecture en cours…" on
+// every page turn after a finish.
 const bookAsk = sliceBetween(app, 'void askBrain(request).then(({ reply }) => {', '\n      })\n    },\n    [armReadingTimer],')
 check('S3a BookTab askBartender reply handler found', bookAsk !== null)
 if (bookAsk !== null) {
@@ -312,12 +316,16 @@ check(
   'S3d the old fix-8 natural-finish carve-out is gone',
   !app.includes('must NOT block the reply'),
 )
-const flipLanding = sliceBetween(app, 'onBookCategory((catId) => {', '}),\n    [armReadingTimer],')
+const flipLanding = sliceBetween(app, 'onBookCategory((catId) => {', '}),\n    [],')
 check('S3e flip-landing handler found', flipLanding !== null)
 if (flipLanding !== null) {
   check(
-    'S3f flip-driven readings untouched (landing still starts a 12 s reading)',
-    flipLanding.includes('setReading({ categoryId: catId, nonce })') && flipLanding.includes('armReadingTimer(nonce, 12)'),
+    'S3f fix-17: a flip landing starts NO reading (no setReading/armReadingTimer on landing)',
+    !flipLanding.includes('setReading(') && !flipLanding.includes('armReadingTimer('),
+  )
+  check(
+    'S3g fix-17: a flip landing still consumes the book target',
+    flipLanding.includes('onTargetConsumedRef.current?.()'),
   )
 }
 
