@@ -29,13 +29,15 @@
 //      - In SwiftShader the compositor produces frames rarely (the WebGL
 //        canvas costs seconds per frame), so the CSS animation clock —
 //        which tracks the last produced frame's timestamp — lags wall
-//        time, and screenshots can capture a stale surface. The probe
-//        therefore reads the wrapper's computed transform immediately
-//        AFTER each screenshot (the screenshot forces a frame), and
-//        retakes shot B if the two shots happen to land at nearly the
-//        same pan phase. The parent's cloud check (which does produce
-//        frames — it measured 15–36% pixel diff) is the arbiter for the
-//        real visual drift.
+//        time, and screenshots can capture a stale surface. The header
+//        used to claim "the screenshot forces a frame" — the merged-tree
+//        runs disproved that: screenshots came back identical 23 s apart
+//        (unmasked diff 0.002, corr 1.0) while the DOM transform had
+//        advanced ~750 px in the same interval. clipShot therefore runs
+//        a double-rAF settle (2 s race) BEFORE every screenshot to force
+//        a commit at wall-clock time. The parent's cloud check (which
+//        does produce frames — it measured 15–36% pixel diff) is the
+//        arbiter for the real visual drift.
 //
 // What it checks (exit 1 on any failure):
 //   STATIC:
@@ -306,6 +308,24 @@ if (wantLive) {
     }
 
     async function clipShot(page, label) {
+      // Force a fresh compositor frame BEFORE capturing: in headless
+      // SwiftShader the compositor can serve a stale surface — merged-
+      // tree runs measured screenshots identical 23 s apart (unmasked
+      // diff 0.002, corr 1.0) while the DOM transform had advanced
+      // ~750 px in the same interval. The DOM read forces a main-thread
+      // style recalc at wall time, but the compositor only advances
+      // when it produces frames; a screenshot of an idle page can
+      // return the last presented frame. A double-rAF forces a commit
+      // at wall-clock time (the 2 s race keeps a throttled renderer
+      // from stalling the probe); the screenshot then captures the
+      // fresh state. Best-effort: if the settle throws, the shot runs
+      // anyway.
+      try {
+        await page.evaluate(() => Promise.race([
+          new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+          new Promise((r) => setTimeout(r, 2000)),
+        ]))
+      } catch { /* settle is best-effort */ }
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           return await page.screenshot({ clip: CLIP, timeout: 300000 })
