@@ -310,7 +310,13 @@ if (debug0?.status !== 'ready') {
 // tall the mouth sits below the fold, so scroll the canvas to the
 // centre of the viewport first.
 await page.evaluate(() => {
-  document.querySelector('canvas')?.scrollIntoView({ block: 'center' })
+  // Fix 17 merge note: the fluid background canvas is now FIRST in the
+  // DOM (mounted once at app root), so a bare querySelector('canvas')
+  // finds the fixed full-viewport fluid canvas and scrollIntoView
+  // becomes a no-op — the Live2D stage canvas is the one whose rect
+  // is NOT the full viewport.
+  const live2d = [...document.querySelectorAll('canvas')].find(c => { const r = c.getBoundingClientRect(); return r.width < window.innerWidth || r.height < window.innerHeight })
+  live2d?.scrollIntoView({ block: 'center' })
 })
 await sleep(2000)
 
@@ -318,7 +324,12 @@ await sleep(2000)
 // ONE evaluate; scrollY read with it.
 const geo = await page.evaluate(() => {
   const d = window.__nekomiDebug
-  const canvas = document.querySelector('canvas')
+  // Same fix-17 note as the scrollIntoView above: select the Live2D
+  // stage canvas (rect smaller than the viewport), not the fluid
+  // canvas (fixed, full-viewport, first in the DOM since the global
+  // fluid mount). A bare querySelector('canvas') returns the fluid
+  // canvas and makes every crop wrong.
+  const canvas = [...document.querySelectorAll('canvas')].find(c => { const r = c.getBoundingClientRect(); return r.width < window.innerWidth || r.height < window.innerHeight })
   const r = canvas?.getBoundingClientRect()
   return {
     canvasRect: r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null,
