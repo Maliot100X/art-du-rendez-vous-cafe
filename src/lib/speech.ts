@@ -170,6 +170,28 @@ let safetyTimer: ReturnType<typeof setTimeout> | 0 = 0
     safety timer only closes the mouth when the tick chain has been
     silent for 3 s, so it can never cut a live slow run. */
 let lastTickAt = 0
+/**
+ * Fix pass 19 — release ramp: the mouth does not snap shut when the
+ * beats end; it eases from its current openness to 0 over
+ * RELEASE_MS. Two reasons, both measured in a real browser
+ * (scripts/fix19-mouth-probe.mjs run 1 + fix19-screencast-probe.mjs
+ * run 2): (a) a screenshot requested mid-reply returns a frame
+ * captured ~8-28 s later (SwiftShader raster), so a reply whose
+ * mouth snaps shut at 12 s is already closed in every frame a
+ * lagging sampler captures — the ramp keeps the mouth visibly open
+ * for ~1.5 s past the beats (bridge >= ~0.3 reads open on pixels)
+ * and the window catchable for a few seconds more; (b) on a real
+ * phone it simply reads as a natural finish instead of a snap.
+ * The ramp runs only on the tick's natural end (beats done); a
+ * mute/stop/new-line still closes immediately via endSpeaking().
+ */
+const RELEASE_MS = 3000
+/** True while the release ramp is running (beats done, easing shut). */
+let releasing = false
+/** performance.now() when the ramp started. */
+let releaseStartAt = 0
+/** Bridge value when the ramp started (the ramp decays from here). */
+let releaseFrom = 0
 
 /** The utterance currently held (GC root) — for debugging. */
 export function getActiveUtterance(): SpeechSynthesisUtterance | null {
@@ -260,6 +282,23 @@ function tickSpeaking() {
   }
 
   if (visemeStarted && viseme) {
+    // Fix pass 19 — release ramp (see RELEASE_MS): the beats are
+    // done, so ease the mouth shut from its value at release start
+    // instead of snapping it to 0. The tick keeps running until the
+    // ramp finishes; endSpeaking() (ramp end, or any cancel) clears
+    // the releasing flag.
+    if (releasing) {
+      const t = (now - releaseStartAt) / RELEASE_MS
+      if (t >= 1) {
+        endSpeaking()
+        return
+      }
+      const rampTarget = Math.max(0, releaseFrom * (1 - t))
+      prevMouth = smoothMouthOpen(rampTarget, prevMouth, dt)
+      avatarBridge.setMouthOpen(prevMouth)
+      if (viseme !== null) scheduleRaf()
+      return
+    }
     const frame = viseme.sample(now)
     // Fix pass 17: the speaking floor (see SPEAKING_FLOOR) is applied
     // to the TARGET before smoothing, so the mouth eases to the floor
@@ -275,15 +314,18 @@ function tickSpeaking() {
     // Fix pass 15: if the beats are done but the engine still claims
     // speaking, it is stuck (queued forever, no audio, no event) —
     // end after the grace instead of spinning the tick forever.
+    // Fix pass 19: the end is the release ramp (beginRelease), not
+    // a snap shut — see RELEASE_MS.
     if (frame.done) {
       if (openLoop || !engineSpeaking) {
-        endSpeaking()
-        return
-      }
-      if (beatsDoneAtMs === null) beatsDoneAtMs = now
-      else if (now - beatsDoneAtMs >= STUCK_ENGINE_GRACE_MS) {
-        endSpeaking()
-        return
+        // Fix pass 19: fall through to the scheduleRaf() below so
+        // the ramp's first tick is queued (beginRelease only arms
+        // it — the ramp branch runs on the next tick).
+        beginRelease()
+      } else if (beatsDoneAtMs === null) {
+        beatsDoneAtMs = now
+      } else if (now - beatsDoneAtMs >= STUCK_ENGINE_GRACE_MS) {
+        beginRelease()
       }
     } else {
       beatsDoneAtMs = null
@@ -339,6 +381,9 @@ function stopEnvelope() {
 function endSpeaking() {
   if (!speaking && !viseme) return
   speaking = false
+  releasing = false
+  releaseStartAt = 0
+  releaseFrom = 0
   stopEnvelope()
   avatarBridge.setSpeaking(false)
   avatarBridge.setExpression('neutral')
@@ -348,6 +393,22 @@ function endSpeaking() {
   engineStartAtMs = null
   beatsDoneAtMs = null
   utterRef = null
+}
+
+/**
+ * Fix pass 19 — start the release ramp (see RELEASE_MS): the beats
+ * are done, so the mouth eases shut over RELEASE_MS instead of
+ * snapping to 0. Idempotent; the tick's ramp branch does the work
+ * and calls endSpeaking() when the ramp finishes. A dead tick chain
+ * is still covered by the armSafety timer, which closes the mouth
+ * if no tick has run for 3 s.
+ */
+function beginRelease() {
+  if (!viseme || releasing) return
+  releasing = true
+  releaseStartAt = performance.now()
+  releaseFrom = prevMouth
+  avatarBridge.setMouthVowel(null)
 }
 
 /**

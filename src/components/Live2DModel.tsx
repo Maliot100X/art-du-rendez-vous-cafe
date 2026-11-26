@@ -1155,7 +1155,37 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
         const tick = () => {
           for (const key of Object.keys(target)) {
             const from = current[key] ?? 0
-            current[key] = from + (target[key] - from) * 0.15
+            let goal = target[key] ?? 0
+            // Fix pass 19 — THE MOUTH ROOT CAUSE (cloud pixel checks
+            // fix 13-18). The spoken reply sets expression 'happy'
+            // (speech.ts speak() + the reply's own expression), whose
+            // preset drives ParamMouthForm to 1.0 — a full smile. That
+            // smile pulls the lips into a thin closed smile that
+            // VISUALLY OVERRIDES ParamMouthOpenY: measured in a real
+            // browser (scripts/fix19-screencast-probe.mjs, run 2), one
+            // live reply held bridge 0.50 and baked mouth bboxH
+            // 111-118 for the whole 12.3 s, yet the rendered mouth
+            // pixels closed monotonically as the form eased in —
+            // lip-dip 161 -> 196, dark fraction 0.0215 -> 0.000 —
+            // while the geometry never moved. The force test (neutral
+            // expression, form 0.3) reads wide open at the same
+            // OpenY, so the parameter/bake/render chain was never the
+            // break: the smile was. On a 60 fps phone the 0.15/frame
+            // ease completes in ~0.5 s, so the mouth is a closed
+            // smile for essentially the whole reply — exactly the
+            // cloud check's "same thin closed smile" in all 32
+            // samples. While the bridge reports speaking, the form
+            // target is therefore capped at the neutral value (0.3,
+            // proven open at OpenY 0.5): the jaw opening shows, the
+            // smile lives in the eyes/brows while talking, and the
+            // full smile returns when idle (the stored target is
+            // untouched — only the goal written this frame is capped).
+            // Only the smile direction is capped (min): a frown or
+            // neutral form is left alone.
+            if (key === 'ParamMouthForm' && bridge.isSpeaking()) {
+              goal = Math.min(goal, EXPRESSION_PRESETS.neutral.ParamMouthForm)
+            }
+            current[key] = from + (goal - from) * 0.15
             setParam(key, current[key])
           }
           // Fix pass 14: this ticker write is only the fallback — the
