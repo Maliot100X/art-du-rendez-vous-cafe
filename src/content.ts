@@ -372,15 +372,31 @@ export const AGENT = {
   voiceCta: 'Parler à voix haute',
   voiceStop: 'Terminer l’appel',
   voiceOffline:
-    'La voix arrive avec la connexion Deepgram — pour l’instant indisponible, le chat texte ci-dessus répond déjà.',
+    'La voix Deepgram est disponible — parlez à voix haute, ou écrivez dans le chat texte ci-dessus.',
   voiceListening: 'Je vous écoute…',
   voiceDenied: 'Micro non autorisé — le chat texte reste disponible.',
   voiceMicMissing: 'Aucun microphone trouvé sur cet appareil — le chat texte reste disponible.',
+  // Fix pass 17: the connecting line names the real step (the client
+  // reports its stage), and mic failures are told apart — blocked
+  // for this site (re-enable it in the browser's site settings),
+  // prompt closed without an answer (just retry), prompt unanswered
+  // for 30 s, socket handshake wedged — instead of the old blanket
+  // "Micro non autorisé" for all of them.
+  voiceConnectingMic: 'Demande d’accès au microphone…',
+  voiceConnectingGrant: 'Obtention du jeton d’appel…',
+  voiceMicBlocked:
+    'Le microphone est bloqué pour ce site — autorisez-le dans les réglages du navigateur, puis réessayez. Le chat texte reste disponible.',
+  voiceMicDismissed:
+    'La demande d’accès au microphone a été fermée sans réponse — réessayez et autorisez le microphone quand le navigateur le demande. Le chat texte reste disponible.',
+  voiceMicTimeout:
+    'Aucune réponse à la demande d’accès au microphone — réessayez quand vous êtes prêt. Le chat texte reste disponible.',
   voiceConnecting: 'Connexion à l’agent vocal…',
   voiceSpeaking: 'Nekomi parle…',
   // Honest offline states for the Deepgram voice call (Phase 4). The
-  // stored Deepgram key is still rejected (401), so the voice call cannot
-  // connect until a working key is re-entered — the UI says so plainly.
+  // token comes from the same-origin grant endpoint (local grant
+  // server in preview, Vercel function on the deploy); a grant
+  // failure reports its real reason below. The plain 'no-token'
+  // survives only for the dev-only fallback (no key configured).
   voiceNoToken:
     'La voix n’est pas connectée : Deepgram n’a pas fourni de jeton d’appel. Le chat texte ci-dessus fonctionne normalement.',
   // Fix pass 16, group 4: the grant fetch reports the REAL failure
@@ -400,6 +416,8 @@ export const AGENT = {
     'Votre navigateur ne permet pas la capture audio — le chat texte reste disponible.',
   voiceSocketError:
     'La connexion vocale a été interrompue. Réessayez, ou utilisez le chat texte.',
+  voiceSocketTimeout:
+    'La connexion vocale n’a pas abouti à temps. Réessayez, ou utilisez le chat texte.',
   voiceSettingsError:
     'La configuration vocale a été refusée par le service. Le chat texte reste disponible.',
   orderTitle: 'Votre commande',
