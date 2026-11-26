@@ -435,10 +435,15 @@ if (wantLive) {
               img.meanAbsDiffAll >= PIXEL_MIN, `meanAbsDiffAll=${img.meanAbsDiffAll} (masked ${img.meanAbsDiff})`)
             check(`live ${label}: pattern is not identical (unmasked corr(0,0) < ${CORR_MAX})`,
               img.corr00All < CORR_MAX, `corr00All=${img.corr00All} (masked ${img.corr00})`)
-            const bestMag = Math.hypot(img.bestShiftAllScreenPx.dx, img.bestShiftAllScreenPx.dy)
-            check(`live ${label}: image best-shift resolves the drift (>= 5px, corr(best) > corr(0,0) + 0.02)`,
-              bestMag >= 5 && img.bestCorrAll > img.corr00All + 0.02,
-              `bestShiftAll=${bestMag.toFixed(1)}px corr(best)All=${img.bestCorrAll} vs corr(0,0)All=${img.corr00All}`)
+            // Best-shift is REPORTED, not gated: it assumes one rigid
+            // translation aligns the whole pattern, but the four blobs
+            // move independently (manual run: amber (-256,+200), teal
+            // (-164,+295), ember (+194,-184), moss (-12,+4) over 23 s),
+            // so no single shift aligns them and (0,0) can stay best
+            // even while the pattern visibly drifts — the gates above
+            // (transform advance + pixels change + not identical)
+            // already prove that. The worker's one passing best-shift
+            // (-120 px) was phase luck, not a reliable gate.
           } else {
             // WebGL legs: the image numbers are EVIDENCE, not gates.
             // The dye field is dim and smooth and it churns as it
