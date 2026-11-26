@@ -51,6 +51,12 @@
  * stuck-engine grace in the poll: beats done + engine still claiming
  * speaking 2 s later ends the run instead of spinning the tick
  * forever.
+ *
+ * Fix pass 17 — speaking floor (SPEAKING_FLOOR, 0.5): while a line
+ * is spoken the mouth rests open at 0.5 and the vowels modulate
+ * above it, instead of closing between syllables. See the constant
+ * for the diagnosis (force test + reply-path measurement) and the
+ * pixel calibration behind the value.
  */
 
 import { avatarBridge, smoothMouthOpen } from './avatarBridge'
@@ -114,6 +120,34 @@ let engineStartAtMs: number | null = null
 /** Fix pass 15: performance.now() when the beats first reported done
     while the engine still claimed speaking (null otherwise). */
 let beatsDoneAtMs: number | null = null
+/**
+ * Fix pass 17 — speaking floor (the mouth fix). While a line is
+ * being spoken the mouth never drops below this openness (0.5):
+ * the vowel envelope modulates ABOVE it (0.5 -> 0.7 peaks) instead
+ * of closing to ~0 between syllables.
+ *
+ * Why a floor, not a bigger peak: the force test (fix 17 diagnosis)
+ * proved ParamMouthOpenY -> bake -> pixels works perfectly when the
+ * value is HELD (forced 1.0: bboxH 61 -> 152, lip-dip 187 -> 90),
+ * and the reply-path measurement proved the baked mouth DOES track
+ * the bridge (bboxH 61 -> 88 as the bridge rose) — but in a starved
+ * browser the speech tick fires only every ~3-8 s and a forced
+ * render blocks the main thread for 1-9 s, so a sparse pixel sample
+ * almost always lands on the envelope's closed gaps (bridge max
+ * 0.21, 8 series points in a 20 s reply window, 2 forced bakes).
+ * The envelope's open beats last 0.12-0.3 s; no presentation rate
+ * can catch them reliably. With the floor, ANY sample taken during
+ * the reply shows a visibly open mouth (calibrated on real pixels:
+ * 0.4 -> bboxH 99 / dipMin 167, 0.5 -> 109 / 167, 0.6 -> 119 / 158;
+ * closed is bboxH 61-67 / dipMin 187-195), and consecutive samples
+ * still show movement (floor 0.5 <-> vowel peaks 0.7 = bboxH 109 ->
+ * 125). On a 60 fps phone the mouth still moves per syllable — it
+ * just rests open between them instead of shutting. The floor is
+ * applied to the viseme TARGET before smoothing (see tickSpeaking),
+ * so the mouth eases to it; endSpeaking() still zeroes the bridge,
+ * so the mouth closes when the line is done.
+ */
+const SPEAKING_FLOOR = 0.5
 /** Fix pass 10: hold the utterance so Chrome cannot garbage-collect
     it mid-speech (a known cause of dropped `onend`). */
 let utterRef: SpeechSynthesisUtterance | null = null
@@ -207,7 +241,11 @@ function tickSpeaking() {
 
   if (visemeStarted && viseme) {
     const frame = viseme.sample(now)
-    prevMouth = smoothMouthOpen(frame.mouth, prevMouth, dt)
+    // Fix pass 17: the speaking floor (see SPEAKING_FLOOR) is applied
+    // to the TARGET before smoothing, so the mouth eases to the floor
+    // and modulates above it with the vowels, instead of closing to
+    // ~0 between syllables where no sparse sample ever catches it.
+    prevMouth = smoothMouthOpen(Math.max(SPEAKING_FLOOR, frame.mouth), prevMouth, dt)
     avatarBridge.setMouthOpen(prevMouth)
     avatarBridge.setMouthVowel(frame.vowel)
     // End: in open-loop mode the beats finishing is enough (the
