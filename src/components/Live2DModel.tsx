@@ -755,6 +755,19 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           antialias: true,
           resolution: Math.min(window.devicePixelRatio || 1, pixelRatioCap()),
           autoDensity: true,
+          // Fix pass 18 — preserveDrawingBuffer: true so the rendered
+          // mouth can be read back as REAL pixels (drawImage from
+          // this canvas into a 2D canvas, then getImageData on the
+          // mouth ROI). With the default false the buffer is cleared
+          // after every present and the readback is transparent black
+          // (verified in the fix-17 readback test and the fix-18
+          // timing experiment) — so no probe could sample the mouth
+          // faster than a screenshot round-trip (25–63 s under
+          // SwiftShader, far longer than the ~12 s spoken reply).
+          // The retained buffer is one small avatar-sized buffer; the
+          // cost on a real phone is negligible, and nothing drawn
+          // changes — only the buffer survives the present.
+          preserveDrawingBuffer: true,
         })
         appRef.current = app
 

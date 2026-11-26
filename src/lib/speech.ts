@@ -57,6 +57,18 @@
  * above it, instead of closing between syllables. See the constant
  * for the diagnosis (force test + reply-path measurement) and the
  * pixel calibration behind the value.
+ *
+ * Fix pass 18 — synchronous open + dead-tick safety: the floor only
+ * helps if the mouth is actually AT the floor during the reply, and
+ * the fix-17 diagnosis showed the first tick can arrive ~10 s late
+ * in a starved browser (the 50 ms interval fires at ~0.3 Hz there),
+ * so the mouth stayed shut for the first half of the reply even
+ * though the viseme clock itself is wall-time based. speak() now
+ * opens the mouth synchronously (bridge = floor, speaking = true)
+ * the moment it is called — the tick only modulates above the floor
+ * and closes at the end, it no longer gates the open. A safety timer
+ * closes the mouth if the whole tick chain dies (it only fires when
+ * no tick has run for 3 s, so it can never cut a live slow run).
  */
 
 import { avatarBridge, smoothMouthOpen } from './avatarBridge'
@@ -151,6 +163,13 @@ const SPEAKING_FLOOR = 0.5
 /** Fix pass 10: hold the utterance so Chrome cannot garbage-collect
     it mid-speech (a known cause of dropped `onend`). */
 let utterRef: SpeechSynthesisUtterance | null = null
+/** Fix pass 18: the dead-tick safety timer (setTimeout id, 0 = none)
+    — see armSafety(). Cleared in stopEnvelope(). */
+let safetyTimer: ReturnType<typeof setTimeout> | 0 = 0
+/** Fix pass 18: performance.now() of the last tickSpeaking run — the
+    safety timer only closes the mouth when the tick chain has been
+    silent for 3 s, so it can never cut a live slow run. */
+let lastTickAt = 0
 
 /** The utterance currently held (GC root) — for debugging. */
 export function getActiveUtterance(): SpeechSynthesisUtterance | null {
@@ -205,6 +224,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
  */
 function tickSpeaking() {
   const now = performance.now()
+  lastTickAt = now
   const dt = Math.min(Math.max((now - lastT) / 1000, 0), 0.1)
   lastT = now
   const synth = window.speechSynthesis
@@ -299,6 +319,12 @@ function scheduleRaf() {
 function stopEnvelope() {
   cancelAnimationFrame(raf)
   rafPending = false
+  // Fix pass 18: stop the dead-tick safety timer with the run — a
+  // leaked timer would close a LATER run from a stale arm.
+  if (safetyTimer) {
+    clearTimeout(safetyTimer)
+    safetyTimer = 0
+  }
   // Fix pass 16: stop the interval driver with the rAF driver — a
   // leaked interval would keep sampling a dead viseme forever.
   if (tickInterval) {
@@ -322,6 +348,30 @@ function endSpeaking() {
   engineStartAtMs = null
   beatsDoneAtMs = null
   utterRef = null
+}
+
+/**
+ * Fix pass 18 — dead-tick safety: arms a one-shot check `delayMs`
+ * from now (first arm: predicted beat duration + 3 s, so it can
+ * never fire before the line should be done). The check closes the
+ * mouth ONLY when the tick chain has been silent for >= 3 s
+ * (lastTickAt, updated by every tickSpeaking run): with the
+ * synchronous open in speak(), a tick chain that never runs would
+ * otherwise leave the mouth hanging at the floor forever. A live
+ * tick — even on a slow engine whose real audio overruns the
+ * predicted beats — re-arms instead of closing, so this can never
+ * cut a real run short. Cleared in stopEnvelope() when the run ends.
+ */
+function armSafety(delayMs: number) {
+  if (safetyTimer) clearTimeout(safetyTimer)
+  safetyTimer = setTimeout(() => {
+    if (!viseme) return
+    if (performance.now() - lastTickAt >= 3000) {
+      endSpeaking()
+      return
+    }
+    armSafety(3000)
+  }, delayMs)
 }
 
 /** Keep spoken lines short — long chat text is read in full on screen. */
@@ -372,7 +422,11 @@ export function speak(text: string): void {
       openLoop = false
       speaking = true
       lastT = performance.now()
-      prevMouth = 0
+      // Fix pass 18: the smoothing state starts AT the floor (the
+      // synchronous open in speak() already put the bridge there) —
+      // resetting it to 0 here would drag the bridge down to ~0.1 on
+      // the next tick and flicker the mouth shut for a frame.
+      prevMouth = SPEAKING_FLOOR
       avatarBridge.setExpression('happy')
       avatarBridge.setSpeaking(true)
     } else if (viseme && visemeStarted && openLoop) {
@@ -438,9 +492,35 @@ export function speak(text: string): void {
   // just samples more often. The interval is cleared in
   // stopEnvelope() (via endSpeaking), so it never outlives the run.
   lastT = performance.now()
-  prevMouth = 0
+  // Fix pass 18 — SYNCHRONOUS OPEN (the mouth fix). The bridge goes
+  // to the speaking floor HERE, the moment speak() is called, instead
+  // of waiting for the first tick to start the viseme clock: in a
+  // starved browser that first tick can arrive ~10 s late (the 50 ms
+  // interval fires at ~0.3 Hz there), so the mouth stayed shut for
+  // the first half of the reply even though the clock itself is
+  // wall-time based. The tick now only modulates above the floor and
+  // closes at the end. The smoothing state starts at the floor too,
+  // so the first tick cannot drag the bridge back down (see the
+  // onstart handler above). The bake timer's speaking gate
+  // (Live2DModel) also sees speaking=true at once, so the first
+  // forced render of the open mouth happens immediately, not after
+  // the first tick. endSpeaking() (via the tick, or the armSafety
+  // dead-tick timer below) still zeroes the bridge, so the mouth
+  // closes when the line is done.
+  prevMouth = SPEAKING_FLOOR
+  speaking = true
+  avatarBridge.setExpression('happy')
+  avatarBridge.setSpeaking(true)
+  avatarBridge.setMouthOpen(SPEAKING_FLOOR)
   scheduleRaf()
   tickInterval = setInterval(tickSpeaking, TICK_INTERVAL_MS)
+  // Fix pass 18: if the whole tick chain dies (rAF + interval both
+  // starved past the run), armSafety closes the mouth instead of
+  // leaving it hanging at the floor — first check at the predicted
+  // beat duration + 3 s, so it can never fire before the line
+  // should be done (see armSafety()).
+  lastTickAt = performance.now()
+  armSafety((viseme?.totalSeconds ?? 0) * 1000 + 3000)
 }
 
 export function stopSpeaking(): void {
