@@ -404,45 +404,54 @@ if (wantLive) {
         }
         const t0 = parseTransform(s0.transform)
         const shotA = await clipShot(page, `${label}/A`)
-        // The screenshot forces a compositor frame, so the transform
-        // read right after it is fresh (in SwiftShader the animation
-        // clock tracks produced frames, not wall time between them).
+        // The transform read right after the shot is fresh: the settle
+        // in clipShot forced a commit at wall-clock time before the
+        // capture (in SwiftShader the animation clock tracks produced
+        // frames, not wall time between them).
         const sA = await readSignal()
         const tA = parseTransform(sA.transform)
         const wallA = Date.now()
-        // >= 22 s wall, no input. Then retake shot B until the pan has
-        // actually advanced between the two shots: the animation is
-        // periodic (120 s alternate), so two shots ~one period apart
-        // could land at nearly the same phase by luck.
-        let shotB = null
-        let sB = null
-        let wallB = 0
-        for (let attempt = 1; attempt <= 4; attempt++) {
-          if (attempt === 1) {
-            const wait = 22000 - (Date.now() - wallA)
-            if (wait > 0) await page.waitForTimeout(wait)
-          } else {
-            await page.waitForTimeout(30000)
-          }
-          shotB = await clipShot(page, `${label}/B#${attempt}`)
-          sB = await readSignal()
-          wallB = Date.now()
-          const tB = parseTransform(sB.transform)
-          const adv = Math.hypot(tB.x - tA.x, tB.y - tA.y)
-          console.log(`  ${label}: shot B attempt ${attempt}: transform advance ${adv.toFixed(1)}px, elapsed ${((wallB - wallA) / 1000).toFixed(0)}s wall`)
-          if (adv >= TRANSFORM_MIN || attempt === 4) break
-          console.log(`  ${label}: advance < ${TRANSFORM_MIN}px — phase coincidence, retaking shot B`)
-        }
-        const tB = parseTransform(sB.transform)
-        const advance = Math.hypot(tB.x - tA.x, tB.y - tA.y)
-        const elapsedS = (wallB - wallA) / 1000
         const minAdvance = disableWebgl ? 20 : TRANSFORM_MIN
-        check(`live ${label}: pattern drifts positionally (transform advance >= ${minAdvance}px over >= 22s, no input)`,
-          advance >= minAdvance && elapsedS >= 22,
-          `Δtransform=(${((tB.x - tA.x)).toFixed(1)}, ${(tB.y - tA.y).toFixed(1)})px = ${advance.toFixed(1)}px over ${elapsedS.toFixed(0)}s wall, frames ${sA.frames}→${sB.frames}`)
+        // >= 22 s wall, no input. Then retake shot B until the pan has
+        // actually advanced AND (fallback leg only) the composited
+        // pixels show the drift: the blob animations are periodic and
+        // the 400x300 clip only catches the bright core part of the
+        // time, so one pair of shots can land on a quiet phase by luck
+        // (measured unmasked diffs 0.002–2.1 for the same drifting
+        // field). Retaking 30 s later samples a different phase.
+        // WebGL legs break on the transform advance alone (their image
+        // numbers are evidence, not gates).
         const { page: ap, analyse } = await makeAnalyser(browser)
+        let img = null
         try {
-          const img = await analyse(shotA, shotB)
+          let shotB = null
+          let sB = null
+          let wallB = 0
+          for (let attempt = 1; attempt <= 4; attempt++) {
+            if (attempt === 1) {
+              const wait = 22000 - (Date.now() - wallA)
+              if (wait > 0) await page.waitForTimeout(wait)
+            } else {
+              await page.waitForTimeout(30000)
+            }
+            shotB = await clipShot(page, `${label}/B#${attempt}`)
+            sB = await readSignal()
+            wallB = Date.now()
+            const tB = parseTransform(sB.transform)
+            const adv = Math.hypot(tB.x - tA.x, tB.y - tA.y)
+            img = await analyse(shotA, shotB)
+            console.log(`  ${label}: shot B attempt ${attempt}: transform advance ${adv.toFixed(1)}px, elapsed ${((wallB - wallA) / 1000).toFixed(0)}s wall, unmasked meanAbsDiff=${img.meanAbsDiffAll} corr(0,0)=${img.corr00All}`)
+            const advOk = adv >= minAdvance
+            const imgOk = !disableWebgl || (img.meanAbsDiffAll >= PIXEL_MIN && img.corr00All < CORR_MAX)
+            if ((advOk && imgOk) || attempt === 4) break
+            console.log(`  ${label}: advance ${adv.toFixed(1)}px / image diff ${img.meanAbsDiffAll} — phase coincidence, retaking shot B`)
+          }
+          const tB = parseTransform(sB.transform)
+          const advance = Math.hypot(tB.x - tA.x, tB.y - tA.y)
+          const elapsedS = (wallB - wallA) / 1000
+          check(`live ${label}: pattern drifts positionally (transform advance >= ${minAdvance}px over >= 22s, no input)`,
+            advance >= minAdvance && elapsedS >= 22,
+            `Δtransform=(${((tB.x - tA.x)).toFixed(1)}, ${(tB.y - tA.y).toFixed(1)})px = ${advance.toFixed(1)}px over ${elapsedS.toFixed(0)}s wall, frames ${sA.frames}→${sB.frames}`)
           console.log(`  ${label}: image — meanAbsDiff=${img.meanAbsDiff}/255 pct>10=${img.pctOver10}% centroidShift=(${img.centroidShiftScreenPx.dx}, ${img.centroidShiftScreenPx.dy})px corr(0,0)=${img.corr00} bestShift=(${img.bestShiftScreenPx.dx}, ${img.bestShiftScreenPx.dy})px corr=${img.bestCorr} | unmasked meanAbsDiff=${img.meanAbsDiffAll} corr(0,0)=${img.corr00All} bestShift=(${img.bestShiftAllScreenPx.dx}, ${img.bestShiftAllScreenPx.dy})px corr=${img.bestCorrAll}`)
           if (disableWebgl) {
             // The fallback blobs are bright, so the image numbers that
