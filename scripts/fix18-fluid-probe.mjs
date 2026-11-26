@@ -74,11 +74,13 @@
 //     meanAbsDiff 0.721 / corr 0.978 on VENIR and corr 0.902 on Home
 //     while the pattern never translated (Δtransform 0.0 px). Gating
 //     on them would pass broken builds and fail fixed ones.
-//     The fallback leg gates on its blob transform instead (>= 20 px)
-//     plus the image numbers (meanAbsDiff, corr, best-shift): the
-//     blobs are bright and sharp-edged, so the image correlation
-//     resolves the drift there (measured best shift -120 px, corr
-//     0.868 vs 0.833 at zero).
+//     The fallback leg gates on its blob transform (>= 20 px) plus
+//     the UNMASKED image numbers (meanAbsDiff, corr, best-shift): the
+//     blobs are bright, so the dark-masked numbers exclude the very
+//     pixels that move and can read static while the blobs visibly
+//     drift (masked 0.008 / corr 1.0 vs unmasked 9.4 on the same pair
+//     — coordinator's merged-tree run). The masked numbers are still
+//     reported; the gates use the unmasked ones.
 //   If no browser is available the live checks print LIVE SKIP and the
 //   run still passes on the static checks (exit 0). A live leg that
 //   FAILS (not skips) fails the run. Expect the live run to take
@@ -254,13 +256,50 @@ if (wantLive) {
           n++
           if (d > 10) over10++
         }
+        // Unmasked equivalents — the dark mask (v<90 in both shots)
+        // excludes bright blob cores AND the moving edges (a pixel
+        // dark in A but bright in B is masked out), so the masked
+        // numbers can read static while the blobs visibly drift:
+        // merged-tree run measured masked meanAbsDiff 0.008 / corr
+        // 1.0 while the unmasked diff was 9.4 and the blobs had moved
+        // ~300 px. The fallback leg gates on the unmasked numbers.
+        const meanAll = (g) => { let s = 0; for (let i = 0; i < g.length; i++) s += g[i]; return s / g.length }
+        const maAll = meanAll(ga); const mbAll = meanAll(gb)
+        const corrAll = (dx, dy) => {
+          let num = 0; let da = 0; let db = 0
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const bx = x + dx; const by = y + dy
+            if (bx < 0 || bx >= W || by < 0 || by >= H) continue
+            const i = y * W + x; const j = by * W + bx
+            const va = ga[i] - maAll; const vb = gb[j] - mbAll
+            num += va * vb; da += va * va; db += vb * vb
+          }
+          return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0
+        }
+        const c00All = corrAll(0, 0)
+        let bestAll = { dx: 0, dy: 0, c: c00All }
+        for (let dy = -24; dy <= 24; dy++) for (let dx = -24; dx <= 24; dx++) {
+          const c = corrAll(dx, dy)
+          if (c > bestAll.c) bestAll = { dx, dy, c }
+        }
+        let sumAll = 0; let over10All = 0
+        for (let i = 0; i < ga.length; i++) {
+          const d = Math.abs(ga[i] - gb[i])
+          sumAll += d
+          if (d > 10) over10All++
+        }
         return {
           meanAbsDiff: +(sum / n).toFixed(3),
           pctOver10: +(100 * over10 / n).toFixed(2),
+          meanAbsDiffAll: +(sumAll / ga.length).toFixed(3),
+          pctOver10All: +(100 * over10All / ga.length).toFixed(2),
           centroidShiftScreenPx: { dx: +((cb.x - ca.x) * DS).toFixed(1), dy: +((cb.y - ca.y) * DS).toFixed(1) },
           corr00: +c00.toFixed(4),
           bestShiftScreenPx: { dx: best.dx * DS, dy: best.dy * DS },
           bestCorr: +best.c.toFixed(4),
+          corr00All: +c00All.toFixed(4),
+          bestShiftAllScreenPx: { dx: bestAll.dx * DS, dy: bestAll.dy * DS },
+          bestCorrAll: +bestAll.c.toFixed(4),
         }
       }, { a: a.toString('base64'), b: b.toString('base64'), DS })
       return { page, analyse }
@@ -384,18 +423,22 @@ if (wantLive) {
         const { page: ap, analyse } = await makeAnalyser(browser)
         try {
           const img = await analyse(shotA, shotB)
-          console.log(`  ${label}: image — meanAbsDiff=${img.meanAbsDiff}/255 pct>10=${img.pctOver10}% centroidShift=(${img.centroidShiftScreenPx.dx}, ${img.centroidShiftScreenPx.dy})px corr(0,0)=${img.corr00} bestShift=(${img.bestShiftScreenPx.dx}, ${img.bestShiftScreenPx.dy})px corr=${img.bestCorr}`)
+          console.log(`  ${label}: image — meanAbsDiff=${img.meanAbsDiff}/255 pct>10=${img.pctOver10}% centroidShift=(${img.centroidShiftScreenPx.dx}, ${img.centroidShiftScreenPx.dy})px corr(0,0)=${img.corr00} bestShift=(${img.bestShiftScreenPx.dx}, ${img.bestShiftScreenPx.dy})px corr=${img.bestCorr} | unmasked meanAbsDiff=${img.meanAbsDiffAll} corr(0,0)=${img.corr00All} bestShift=(${img.bestShiftAllScreenPx.dx}, ${img.bestShiftAllScreenPx.dy})px corr=${img.bestCorrAll}`)
           if (disableWebgl) {
-            // The fallback blobs are bright and sharp-edged, so the
-            // image numbers resolve the drift there and are gated.
-            check(`live ${label}: composited pixels change (meanAbsDiff >= ${PIXEL_MIN}/255)`,
-              img.meanAbsDiff >= PIXEL_MIN, `meanAbsDiff=${img.meanAbsDiff}`)
-            check(`live ${label}: pattern is not identical (corr(0,0) < ${CORR_MAX})`,
-              img.corr00 < CORR_MAX, `corr(0,0)=${img.corr00}`)
-            const bestMag = Math.hypot(img.bestShiftScreenPx.dx, img.bestShiftScreenPx.dy)
+            // The fallback blobs are bright, so the image numbers that
+            // resolve the drift are the UNMASKED ones: the dark mask
+            // (v<90 in both shots) excludes bright blob cores and the
+            // moving edges, and can read static while the blobs visibly
+            // drift (masked 0.008 / corr 1.0 vs unmasked 9.4 on the
+            // same pair). Masked numbers are still logged above.
+            check(`live ${label}: composited pixels change (unmasked meanAbsDiff >= ${PIXEL_MIN}/255)`,
+              img.meanAbsDiffAll >= PIXEL_MIN, `meanAbsDiffAll=${img.meanAbsDiffAll} (masked ${img.meanAbsDiff})`)
+            check(`live ${label}: pattern is not identical (unmasked corr(0,0) < ${CORR_MAX})`,
+              img.corr00All < CORR_MAX, `corr00All=${img.corr00All} (masked ${img.corr00})`)
+            const bestMag = Math.hypot(img.bestShiftAllScreenPx.dx, img.bestShiftAllScreenPx.dy)
             check(`live ${label}: image best-shift resolves the drift (>= 5px, corr(best) > corr(0,0) + 0.02)`,
-              bestMag >= 5 && img.bestCorr > img.corr00 + 0.02,
-              `bestShift=${bestMag.toFixed(1)}px corr(best)=${img.bestCorr} vs corr(0,0)=${img.corr00}`)
+              bestMag >= 5 && img.bestCorrAll > img.corr00All + 0.02,
+              `bestShiftAll=${bestMag.toFixed(1)}px corr(best)All=${img.bestCorrAll} vs corr(0,0)All=${img.corr00All}`)
           } else {
             // WebGL legs: the image numbers are EVIDENCE, not gates.
             // The dye field is dim and smooth and it churns as it
