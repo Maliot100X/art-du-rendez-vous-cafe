@@ -79,6 +79,69 @@ let lastHenshinForm: Form = 'human'
 let param3Current = 0
 
 /**
+ * Fix pass 18 — model fade: dip-to-dark morph + fade-in on (re)mount.
+ *
+ * ROOT CAUSE (measured in a real browser, 1280x1000, CDP screencast):
+ * the white flash is the MODEL, not a missing page background. The
+ * heading region never goes white (mean 25–39, 0–0.2% near-white on
+ * every sampled frame, all legs) and every DOM background in the
+ * section is dark — but the STAGE goes up to 17–37% near-white
+ * (>235 on all channels) during a Henshin morph, and on a tab
+ * switch back to AGENT the stage jumps dark → white-faced model in
+ * a single frame (stage mean 19 → 92, white 0% → 5.7%). Two
+ * mechanisms, both in the model's own presentation:
+ *   (a) The morph crossfades the two forms through Param3 0.3–0.7
+ *       with both faces semi-transparent at once (fix 15 measured
+ *       the band on the real .moc3). The furry face is WHITE fur:
+ *       at Param3 ~0.5 the double-exposed white face renders as a
+ *       big white blob filling the stage — the "white flash" the
+ *       cloud check saw right after a Henshin toggle. The fix-15
+ *       faster ease (0.25) only shortens the blob to ~3 frames; a
+ *       rapid screenshot still catches one.
+ *   (b) On a warm remount the stage canvas is cleared (see the
+ *       resize guard in fit() below) and the first render draws the
+ *       model at full brightness in one frame — a dark → white-face
+ *       pop when the form is furry.
+ * The fix fades the model itself, through the Cubism renderer's own
+ * global model color (setModelColor — the sanctioned whole-model
+ * fade; the Pixi Container alpha does NOT reach the Cubism shader,
+ * Live2DModel._render draws with the internal renderer directly):
+ *   - MORPH DIP: while Param3 is mid-morph the model alpha dips
+ *     toward MORPH_DIP_FLOOR at Param3 0.5, so the morph dissolves
+ *     THROUGH THE DARK stage background instead of through a white
+ *     double-exposure. The dip spans the whole 0–1 range (not just
+ *     fix 15's 0.3–0.7 band — the probe measured the white peaks
+ *     at Param3 0.68–0.87, outside that band); at the settled ends
+ *     (Param3 0 or 1) the alpha is 1 and the readable form shows
+ *     in full.
+ *   - FADE-IN: the model starts at alpha 0 on every mount/remount
+ *     and eases to 1 (~300 ms at 60 fps), so it never pops in white.
+ * Both are driven from the `afterMotionUpdate` hook — inside the
+ * model's own update, so the alpha and the parameter land in the
+ * same frame (the fix-14 rationale). modelFadeAlpha lives at module
+ * level with the cached stage, like param3Current, so a remount
+ * restarts the fade on the shared stage.
+ */
+let modelFadeAlpha = 0
+/**
+ * The double-exposure band. Fix 15 measured 0.3–0.7 on the real
+ * .moc3, but the fix-18 probe + diags show the WHITE peaks at
+ * Param3 0.68–0.87 — just OUTSIDE that band, where the old dip had
+ * already recovered to 1 while the crossfade was still visibly
+ * double-exposed (probe morph legs: 37% / 28% near-white; three
+ * diag runs: 11.5% / 11.3% / 15.8%, all at Param3 0.68–0.76).
+ * The visible crossfade spans the whole 0–1 range, so the dip
+ * spans it too: triangular, 1.0 at the settled ends, dipping to
+ * MORPH_DIP_FLOOR at 0.5. The morph then dissolves through the
+ * dark stage background for its whole duration instead of only
+ * mid-morph.
+ */
+const MORPH_BAND_LO = 0
+const MORPH_BAND_HI = 1
+/** Model alpha at the middle of the band (Param3 0.5). */
+const MORPH_DIP_FLOOR = 0.2
+
+/**
  * Fix pass 17 — debug mouth override (diagnostic only, no UI).
  * `window.__nekomiForceMouth(v)` (set in init, below) holds the mouth
  * at a fixed ParamMouthOpenY value (0..1) or releases it (null) so a
@@ -107,6 +170,43 @@ function writeParam3(model: Live2DModelType | null, value: number): void {
     core?.setParameterValueById('Param3', value)
   } catch {
     // Param absent on this rig — ignore.
+  }
+}
+
+/**
+ * Fix pass 18 — the morph dip factor: 1 outside the double-exposure
+ * band, dipping linearly to MORPH_DIP_FLOOR at Param3 0.5 (both forms
+ * half-transparent there). A pure function of the parameter, so it
+ * can never drift from the form it describes.
+ */
+function morphDipAlpha(param3: number): number {
+  if (param3 <= MORPH_BAND_LO || param3 >= MORPH_BAND_HI) return 1
+  const half = (MORPH_BAND_HI - MORPH_BAND_LO) / 2 // 0.5: the band is the whole morph
+  const t = 1 - Math.abs(param3 - 0.5) / half // 0 at the band edges, 1 at 0.5
+  return 1 - (1 - MORPH_DIP_FLOOR) * t
+}
+
+/**
+ * Fix pass 18 — write the model's global alpha through the Cubism
+ * renderer's own model color (CubismRenderer_WebGL.setModelColor).
+ * The renderer multiplies every drawable's alpha by it (drawMesh:
+ * modelColorRGBA.A *= opacity, with premultiplied RGB scaled too),
+ * so the whole model fades toward the dark stage background behind
+ * it. NOTE: this is the ONLY whole-model fade that works here — the
+ * Pixi Container alpha is ignored, because Live2DModel._render draws
+ * with the internal Cubism renderer directly and never applies
+ * worldAlpha. Guarded: a missing renderer must never break the stage.
+ */
+function setModelAlpha(model: Live2DModelType | null, alpha: number): void {
+  try {
+    const renderer = (
+      model?.internalModel as unknown as {
+        renderer?: { setModelColor: (r: number, g: number, b: number, a: number) => void }
+      }
+    )?.renderer
+    renderer?.setModelColor(1, 1, 1, Math.max(0, Math.min(1, alpha)))
+  } catch {
+    // Renderer unavailable — ignore.
   }
 }
 /**
@@ -571,7 +671,18 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     const w = container.clientWidth
     const h = container.clientHeight
     if (w === 0 || h === 0) return
-    app.renderer.resize(w, h)
+    // Fix pass 18: resize the renderer ONLY when the size actually
+    // changed. Setting the canvas width/height clears the drawing
+    // buffer even to the same value, so the old unconditional resize
+    // blanked the stage on every Henshin re-fit (250/600/1000 ms)
+    // and every warm remount until the next frame rendered — a dark
+    // gap the fade-in then had to cover. With the guard the last
+    // presented frame survives a same-size re-fit; the model
+    // scale/position below is still re-applied every time.
+    const res = app.renderer.resolution
+    if (Math.round(w * res) !== app.renderer.width || Math.round(h * res) !== app.renderer.height) {
+      app.renderer.resize(w, h)
+    }
     // Frame the FACE band (see FACE_TOP/FACE_BOTTOM above), not the
     // top of the bounds: getBounds() is the whole canvas rect, so
     // the window is placed by measured canvas fractions. A
@@ -660,6 +771,12 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
     const init = async () => {
       const container = containerRef.current
       if (!container) return
+      // Fix pass 18: every mount (cold or warm remount) starts the
+      // model faded out — the `afterMotionUpdate` hook below eases
+      // it back to 1, so the model fades in from the dark stage
+      // background instead of popping in at full brightness (the
+      // tab-switch white flash when the form is furry).
+      modelFadeAlpha = 0
       // Fix pass 17 — debug mouth override (see forcedMouth). Set
       // here, before the warm path returns, so it exists on every
       // mount. Diagnostic only: no UI calls it.
@@ -860,6 +977,22 @@ export default function Live2DModel({ bridge = avatarBridge }: { bridge?: Avatar
           param3Current += (target - param3Current) * 0.25
           if (Math.abs(target - param3Current) < 0.02) param3Current = target
           writeParam3(model, param3Current)
+          // Fix pass 18: the 0.25 ease only SHORTENS the white blob
+          // (3 frames at 60 fps) — a rapid screenshot still catches
+          // one, and the cloud check did. So the morph now dips
+          // through the dark stage background instead: across the
+          // whole morph the model alpha dips toward MORPH_DIP_FLOOR
+          // at 0.5 (morphDipAlpha — full 0–1 range, not just fix 15's
+          // 0.3–0.7 band: the probe measured the white peaks at
+          // Param3 0.68–0.87, outside that band), and the mount
+          // fade-in (modelFadeAlpha, reset to 0 on every mount above)
+          // eases back to 1. The combined alpha is written to the
+          // Cubism renderer's model color in the same frame the
+          // parameter lands, so no presented frame ever shows the
+          // double-exposed white face at full brightness.
+          modelFadeAlpha += (1 - modelFadeAlpha) * 0.15
+          if (modelFadeAlpha > 0.995) modelFadeAlpha = 1
+          setModelAlpha(model, morphDipAlpha(param3Current) * modelFadeAlpha)
         }
         const internalModelEmitter = model.internalModel as unknown as {
           on: (event: 'afterMotionUpdate', fn: () => void) => void
