@@ -28,6 +28,21 @@
  * Still slow and calm — about one drift cycle every 13 seconds — but
  * the motion now registers on real pixels, not just in the keyframes.
  *
+ * Fix 17 — the fix-15 fallback still read as nearly static on real
+ * pixels at desktop width: measured on VENIR at 1920x1000 over 20s+
+ * wall, mean change 0.295/255 top-left and 0.106/255 bottom-right
+ * (the old pre-fix-15 fallback measured 0.33 in its region — the
+ * speed-up did not move the number). Two causes: the blobs were
+ * still too soft and too dim, and NO blob ever visited the
+ * bottom-right corner (amber top-left, teal top-right, ember
+ * bottom-centre-left, moss bottom-left). Now: sharper edges
+ * (blur 45px → 28px), smaller blobs (less flat interior, more edge
+ * per area), tighter gradients (transparent at 40%), higher peak
+ * alphas, ~25% faster cycles — and the ember blob moves to the
+ * bottom-RIGHT so every corner has a blob. Still the same café
+ * palette and calm drift, just with edges steep enough that a
+ * sweep changes real pixels by more than a few levels.
+ *
  * Reduced motion never reaches this fallback (the component returns
  * the static gradient instead), but the animation is also killed by
  * the media query below as belt-and-braces. */
@@ -41,45 +56,45 @@
   position: absolute;
   display: block;
   border-radius: 9999px;
-  filter: blur(45px);
+  filter: blur(28px);
   will-change: transform, opacity;
   pointer-events: none;
 }
 
 .fluid-blob--amber {
-  width: 42vmax;
-  height: 34vmax;
+  width: 32vmax;
+  height: 26vmax;
   left: -10%;
   top: -8%;
-  background: radial-gradient(circle, rgba(232, 163, 61, 0.65), transparent 50%);
-  animation: fluid-drift-a 12s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(232, 163, 61, 0.8), transparent 40%);
+  animation: fluid-drift-a 9s ease-in-out infinite alternate;
 }
 
 .fluid-blob--teal {
-  width: 38vmax;
-  height: 30vmax;
+  width: 28vmax;
+  height: 24vmax;
   right: -12%;
   top: 12%;
-  background: radial-gradient(circle, rgba(46, 125, 107, 0.6), transparent 50%);
-  animation: fluid-drift-b 14s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(46, 125, 107, 0.75), transparent 40%);
+  animation: fluid-drift-b 10s ease-in-out infinite alternate;
 }
 
 .fluid-blob--ember {
-  width: 44vmax;
-  height: 34vmax;
-  left: 22%;
-  bottom: -14%;
-  background: radial-gradient(circle, rgba(217, 93, 57, 0.55), transparent 50%);
-  animation: fluid-drift-c 13s ease-in-out infinite alternate;
+  width: 32vmax;
+  height: 26vmax;
+  right: -8%;
+  bottom: -12%;
+  background: radial-gradient(circle, rgba(217, 93, 57, 0.7), transparent 40%);
+  animation: fluid-drift-c 9s ease-in-out infinite alternate;
 }
 
 .fluid-blob--moss {
-  width: 34vmax;
-  height: 28vmax;
+  width: 26vmax;
+  height: 22vmax;
   left: -6%;
   bottom: 18%;
-  background: radial-gradient(circle, rgba(63, 125, 78, 0.55), transparent 50%);
-  animation: fluid-drift-d 16s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(63, 125, 78, 0.7), transparent 40%);
+  animation: fluid-drift-d 12s ease-in-out infinite alternate;
 }
 
 @keyframes fluid-drift-a {
@@ -118,11 +133,11 @@
     opacity: 0.7;
   }
   50% {
-    transform: translate3d(-24vw, -18vh, 0) scale(1.18);
+    transform: translate3d(-26vw, -18vh, 0) scale(1.18);
     opacity: 1;
   }
   100% {
-    transform: translate3d(20vw, -26vh, 0) scale(0.94);
+    transform: translate3d(10vw, -24vh, 0) scale(0.94);
     opacity: 0.7;
   }
 }

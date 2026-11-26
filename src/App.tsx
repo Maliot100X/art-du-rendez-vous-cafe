@@ -78,11 +78,23 @@ function PanelError({ label, detail, onRetry }: { label: string; detail?: string
  * hash opens that tab; back/forward moves between tabs.
  *
  * Mount-on-activate: only the active tab's panel is mounted, so only
- * one WebGL context is alive at a time (the book, the fluid, the
- * Live2D and the hero dust never run together). Heavy scenes are
- * React.lazy chunks that load only when their tab opens.
- * The fluid background lives on the Home tab only; every other tab
- * gets the static CSS gradient (cheap, same palette).
+ * one heavy scene is alive at a time (the book, the Live2D and the
+ * hero dust never run together). Heavy scenes are React.lazy chunks
+ * that load only when their tab opens.
+ * The fluid background is the ONE exception: it is a cheap global
+ * sim (SIM 128 / DYE 1024 desktop, much less on mobile) mounted once
+ * at the app root, fixed behind every tab. Fix 17 — it used to live
+ * on the Home tab only and every other tab got just the static CSS
+ * gradient, so on VENIR (and every non-home tab) the background was
+ * pixel-identical forever: the cloud check at 1920x1000 sampled
+ * VENIR for 22s and measured exactly zero change, top-left and
+ * bottom-right. The desktop sim itself was fine; it simply was not
+ * mounted there. Now the same living field shows through the
+ * transparent tab surfaces on all seven tabs (the static gradient
+ * stays underneath as the warm-up base). The sim pauses while the
+ * document is hidden and yields to reduced motion (static gradient,
+ * no canvas); a WebGL failure still swaps in the animated CSS
+ * fallback, never a flat gradient.
  *
  * The Atmosphere pinned scroll cinema (420svh) keeps working inside
  * the Ambiance tab: the panel is plain flow (no overflow-hidden
@@ -597,6 +609,17 @@ export default function App() {
           behaviour, now guaranteed on every device). */}
       <div className="grain" aria-hidden="true" style={{ animation: 'none' }} />
       <FluidFallbackDiv />
+      {/* Fix 17: the living fluid background, global on every tab (see
+          the tab-shell comment above). It used to mount inside the Home
+          branch only, so VENIR and every other tab showed a static
+          gradient. The boundary keeps a WebGL failure from blanking
+          the page; on failure the component swaps to its own animated
+          CSS fallback. */}
+      <Suspense fallback={null}>
+        <ErrorBoundary fallback={<FluidFallbackDiv />}>
+          <FluidBackground />
+        </ErrorBoundary>
+      </Suspense>
       <Nav />
       {/* pt clears the fixed nav pill; the tab bar sticks under it.
           The nav grows by the safe-area inset on notched phones, so the
@@ -605,13 +628,6 @@ export default function App() {
         <TabBar active={activeTab} onSelect={setTab} />
         {activeTab === 'home' && (
           <TabSurface tab="home">
-            {/* Fluid sim behind the hero (z-0); main sits above it.
-                The boundary keeps a WebGL failure from blanking the page. */}
-            <Suspense fallback={null}>
-              <ErrorBoundary fallback={<FluidFallbackDiv />}>
-                <FluidBackground />
-              </ErrorBoundary>
-            </Suspense>
             <Hero />
           </TabSurface>
         )}
