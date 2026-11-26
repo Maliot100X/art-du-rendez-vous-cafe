@@ -24,9 +24,52 @@ import './FluidBackground.css'
  * region over 8s) — its cycles are now ~2x faster with ~1.6x larger
  * travel and tighter gradients (see FluidBackground.css).
  *
- * Fix pass 18: the fix-17 cloud pixel check (03:24–03:33 CET) proved
- * the sim is NOT the problem and NOT the solution either. Diagnosis
- * (scripts/fix18-fluid-probe.mjs header + /tmp/fix18-diag.log):
+ * Fix pass 19 — the fix-18 cloud check (06:34–06:42 CET) split:
+ * VENIR now drifts (PASS) but ACCUEIL is effectively static in 22 s
+ * (mean change 0.72–2.51, 0–2.1% of pixels changed, golden dots in
+ * identical positions). Diagnosis, from the code (not a guess):
+ * - NOT a mount problem: the background mounts ONCE at the app root
+ *   (App.tsx) and is identical on every tab, and fix 18's own VM
+ *   probe measured the pan advancing on Home too (65.7 px / 32 s).
+ * - The pan was too slow for the field it moves: 120 s cycle is
+ *   ~2 px/s, ~42 px in 22 s, and the field is 6 big soft dim splats
+ *   (SPLAT_RADIUS 0.35, dye ×0.16) over smooth underlay gradients —
+ *   a 42 px shift of a field that varies over 200–400 px scales
+ *   changes most pixels by only a few levels. Fix 18's own probe
+ *   documented that meanAbsDiff/corr cannot separate pre-fix from
+ *   post-fix on this field (pre-fix control 0.721 / corr 0.978).
+ * - Home hides most of the field: the hero's intro panel (bg-ink/85
+ *   + blur), the full-bleed opaque photo frame and the giant title
+ *   cover most of the first viewport, so the fluid shows only in thin
+ *   gutters/gaps — while VENIR is text-only and mostly bare fluid.
+ *   Same pan, same field, different visible area: that is the split.
+ * - The "golden dots in identical positions" are the HeroDust motes,
+ *   a separate Home-only component: its whole cloud only rotates
+ *   sin(t*0.05)*0.08 rad and bobs sin(t*0.12)*0.25 — individual motes
+ *   never translate, so in 22 s they are effectively static. That is
+ *   a HeroDust item, not a fluid item; this pass does not touch it
+ *   (flagged in the fix-19 report for the coordinator).
+ * Fix 19 (this pass, FluidBackground only):
+ * - Pan 120 s → 30 s, travel ±6vw/±4vh → ±8vw/±5vh (oversize
+ *   114% → 118%, inset -9%): ~10 px/s, ~220 px in 22 s — still a
+ *   slow drift, but 5x the displacement rate, so a shift now spans
+ *   the field's own spatial scale instead of sampling next-door
+ *   pixels.
+ * - Dye ×0.16 → ×0.30 (fluid.ts generateColor): ~90% brighter glow,
+ *   still dark (max ~83/59/22 over near-black) so text stays legible,
+ *   but the panning pattern now has real contrast to move.
+ * - Sixteen drifting ember motes inside the panning wrapper (CSS,
+ *   compositor-driven, wall-clock, 16–26 s cycles, 150–260 px travel):
+ *   small bright amber/ember/teal dots that sweep the gutters and
+ *   gaps on Home and the open areas on VENIR, each crossing a pixel
+ *   changes it by tens of levels. They ride the pan AND their own
+ *   motion, so they cannot be phase-locked to it.
+ * Reduced motion: the component returns the static gradient and the
+ * mote/drift animations are killed by the media query as well.
+ *
+ * Fix pass 18 (superseded by the above — kept for history): the fix-17
+ * cloud pixel check proved the sim is NOT the problem and NOT the
+ * solution either. Diagnosis (scripts/fix18-fluid-probe.mjs header):
  * - In a real browser the WebGL sim DOES render (SwiftShader WebGL 2.0,
  *   canvas mounts, fallback does not) — the CSS fallback is not what
  *   the check sees, so tuning the fallback cannot fix it.
@@ -72,6 +115,48 @@ import './FluidBackground.css'
  * Touch drags still stir the fluid: input is window-level Pointer
  * Events, and the canvas never takes events.
  */
+/**
+ * Fix 19 — drifting ember motes. Sixteen small bright dots in the café
+ * palette, spread over the whole viewport (corners included), each on
+ * its own compositor-driven cycle (16–26 s, 150–260 px travel). They
+ * live INSIDE the panning wrapper, so they ride the pan AND their own
+ * motion. A mote crossing a pixel changes it by tens of levels, which
+ * is what makes the drift read on real pixels in the thin gutters and
+ * gaps where Home actually shows the background. Soft radial glow,
+ * slow and sparse — embers, not UI.
+ */
+const MOTES: ReadonlyArray<{
+  left: string
+  top: string
+  size: number
+  color: string
+  dx: number
+  dy: number
+  dur: string
+  delay: string
+}> = [
+  { left: '6%', top: '12%', size: 11, color: '232,163,61', dx: 220, dy: 90, dur: '18s', delay: '0s' },
+  { left: '18%', top: '68%', size: 13, color: '217,93,57', dx: -190, dy: -120, dur: '22s', delay: '-6s' },
+  { left: '28%', top: '22%', size: 9, color: '242,193,78', dx: 160, dy: 140, dur: '16s', delay: '-3s' },
+  { left: '38%', top: '78%', size: 12, color: '46,125,107', dx: -240, dy: 80, dur: '24s', delay: '-11s' },
+  { left: '48%', top: '10%', size: 10, color: '232,163,61', dx: 200, dy: -70, dur: '20s', delay: '-8s' },
+  { left: '58%', top: '62%', size: 14, color: '217,93,57', dx: -170, dy: 130, dur: '26s', delay: '-14s' },
+  { left: '68%', top: '28%', size: 9, color: '242,193,78', dx: 230, dy: -110, dur: '17s', delay: '-5s' },
+  { left: '78%', top: '72%', size: 12, color: '232,163,61', dx: -210, dy: -90, dur: '23s', delay: '-9s' },
+  { left: '88%', top: '18%', size: 11, color: '46,125,107', dx: 180, dy: 120, dur: '19s', delay: '-2s' },
+  { left: '12%', top: '42%', size: 8, color: '242,193,78', dx: -150, dy: 160, dur: '21s', delay: '-7s' },
+  { left: '92%', top: '48%', size: 13, color: '217,93,57', dx: -260, dy: 60, dur: '25s', delay: '-12s' },
+  { left: '45%', top: '45%', size: 10, color: '232,163,61', dx: 190, dy: -140, dur: '18s', delay: '-4s' },
+  // Fix 19b — the first probe run showed the bottom-right corner reading
+  // weak on both tabs (Home BR 0.59–0.76, VENIR BR ~0.05): no mote
+  // visited it and its dye is dim. Four more motes cover the bottom
+  // band and the right edge, so every corner region has a mover.
+  { left: '88%', top: '82%', size: 13, color: '217,93,57', dx: -240, dy: -100, dur: '20s', delay: '-10s' },
+  { left: '68%', top: '88%', size: 11, color: '242,193,78', dx: 200, dy: -120, dur: '22s', delay: '-15s' },
+  { left: '30%', top: '88%', size: 12, color: '46,125,107', dx: -180, dy: -140, dur: '24s', delay: '-6s' },
+  { left: '95%', top: '65%', size: 10, color: '232,163,61', dx: -220, dy: 90, dur: '19s', delay: '-13s' },
+]
+
 export function FluidFallback({ animated = false }: { animated?: boolean }) {
   if (!animated) {
     return <div className="fluid-fallback pointer-events-none fixed inset-0 z-0" aria-hidden="true" />
@@ -122,6 +207,25 @@ export default function FluidBackground() {
     <div className="fluid-drift pointer-events-none fixed inset-0 z-0" aria-hidden="true">
       <div className="fluid-fallback fluid-underlay absolute" />
       <canvas ref={canvasRef} className="fluid-canvas absolute block" />
+      <div className="fluid-motes absolute inset-0" aria-hidden="true">
+        {MOTES.map((m, i) => (
+          <span
+            key={i}
+            className="fluid-mote"
+            style={{
+              left: m.left,
+              top: m.top,
+              width: m.size,
+              height: m.size,
+              background: `radial-gradient(circle, rgba(${m.color},0.9), rgba(${m.color},0.35) 45%, transparent 70%)`,
+              ['--dx' as string]: `${m.dx}px`,
+              ['--dy' as string]: `${m.dy}px`,
+              animationDuration: m.dur,
+              animationDelay: m.delay,
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }
